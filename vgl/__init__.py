@@ -2,8 +2,10 @@ from vgl.core import Graph as Graph
 from vgl.core import GraphBatch as GraphBatch
 from vgl.core import GraphSchema as GraphSchema
 from vgl.core import GraphView as GraphView
+from vgl.core import LinkPredictionBatch as LinkPredictionBatch
 from vgl.core import TemporalEventBatch as TemporalEventBatch
 from vgl.data import FullGraphSampler as FullGraphSampler
+from vgl.data import LinkPredictionRecord as LinkPredictionRecord
 from vgl.data import ListDataset as ListDataset
 from vgl.data import Loader as Loader
 from vgl.data import NodeSeedSubgraphSampler as NodeSeedSubgraphSampler
@@ -14,6 +16,7 @@ from vgl.nn import global_max_pool as global_max_pool
 from vgl.nn import global_mean_pool as global_mean_pool
 from vgl.nn import global_sum_pool as global_sum_pool
 from vgl.train import GraphClassificationTask as GraphClassificationTask
+from vgl.train import LinkPredictionTask as LinkPredictionTask
 from vgl.train import Metric as Metric
 from vgl.train import NodeClassificationTask as NodeClassificationTask
 from vgl.train import Task as Task
@@ -26,11 +29,13 @@ __all__ = [
     "GraphBatch",
     "GraphSchema",
     "GraphView",
+    "LinkPredictionBatch",
     "TemporalEventBatch",
     "ListDataset",
     "Loader",
     "FullGraphSampler",
     "NodeSeedSubgraphSampler",
+    "LinkPredictionRecord",
     "SampleRecord",
     "TemporalEventRecord",
     "MessagePassing",
@@ -42,6 +47,7 @@ __all__ = [
     "Trainer",
     "NodeClassificationTask",
     "GraphClassificationTask",
+    "LinkPredictionTask",
     "TemporalEventPredictionTask",
     "__version__",
 ]

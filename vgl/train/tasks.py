@@ -54,6 +54,24 @@ class GraphClassificationTask(Task):
         return F.cross_entropy(logits, target)
 
 
+class LinkPredictionTask(Task):
+    def __init__(self, target="label", loss="binary_cross_entropy", metrics=None):
+        if loss != "binary_cross_entropy":
+            raise ValueError(f"Unsupported loss: {loss}")
+        self.target = target
+        self.loss_name = loss
+        self.metrics = metrics or []
+
+    def loss(self, batch, logits, stage):
+        del stage
+        if logits.ndim == 2 and logits.size(-1) == 1:
+            logits = logits.squeeze(-1)
+        if logits.ndim != 1 or logits.size(0) != batch.labels.size(0):
+            raise ValueError("LinkPredictionTask expects one logit per candidate edge")
+        targets = batch.labels.to(dtype=logits.dtype)
+        return F.binary_cross_entropy_with_logits(logits, targets)
+
+
 class TemporalEventPredictionTask(Task):
     def __init__(self, target="label", loss="cross_entropy", metrics=None):
         if loss != "cross_entropy":

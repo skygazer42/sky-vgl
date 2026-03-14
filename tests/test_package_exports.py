@@ -3,6 +3,9 @@ from vgl import (
     GraphBatch,
     GraphSchema,
     GraphView,
+    LinkPredictionBatch,
+    LinkPredictionRecord,
+    LinkPredictionTask,
     ListDataset,
     Loader,
     FullGraphSampler,
@@ -27,6 +30,7 @@ from vgl import (
 def test_package_exposes_broad_vgl_root_surface():
     assert Graph.__name__ == "Graph"
     assert GraphBatch.__name__ == "GraphBatch"
+    assert LinkPredictionBatch.__name__ == "LinkPredictionBatch"
     assert TemporalEventBatch.__name__ == "TemporalEventBatch"
     assert GraphSchema.__name__ == "GraphSchema"
     assert GraphView.__name__ == "GraphView"
@@ -34,6 +38,7 @@ def test_package_exposes_broad_vgl_root_surface():
     assert Loader.__name__ == "Loader"
     assert FullGraphSampler.__name__ == "FullGraphSampler"
     assert NodeSeedSubgraphSampler.__name__ == "NodeSeedSubgraphSampler"
+    assert LinkPredictionRecord.__name__ == "LinkPredictionRecord"
     assert SampleRecord.__name__ == "SampleRecord"
     assert TemporalEventRecord.__name__ == "TemporalEventRecord"
     assert MessagePassing.__name__ == "MessagePassing"
@@ -42,6 +47,7 @@ def test_package_exposes_broad_vgl_root_surface():
     assert Trainer.__name__ == "Trainer"
     assert NodeClassificationTask.__name__ == "NodeClassificationTask"
     assert GraphClassificationTask.__name__ == "GraphClassificationTask"
+    assert LinkPredictionTask.__name__ == "LinkPredictionTask"
     assert TemporalEventPredictionTask.__name__ == "TemporalEventPredictionTask"
     assert callable(global_mean_pool)
     assert callable(global_sum_pool)
