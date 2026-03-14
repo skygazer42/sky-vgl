@@ -52,3 +52,16 @@ class GraphClassificationTask(Task):
         del stage
         target = self._targets(batch)
         return F.cross_entropy(logits, target)
+
+
+class TemporalEventPredictionTask(Task):
+    def __init__(self, target="label", loss="cross_entropy", metrics=None):
+        if loss != "cross_entropy":
+            raise ValueError(f"Unsupported loss: {loss}")
+        self.target = target
+        self.loss_name = loss
+        self.metrics = metrics or []
+
+    def loss(self, batch, logits, stage):
+        del stage
+        return F.cross_entropy(logits, batch.labels)
