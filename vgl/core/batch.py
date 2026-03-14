@@ -6,6 +6,7 @@ import torch
 from vgl.core.graph import Graph
 
 if TYPE_CHECKING:
+    from vgl.data.sample import LinkPredictionRecord
     from vgl.data.sample import SampleRecord
     from vgl.data.sample import TemporalEventRecord
 
@@ -53,6 +54,51 @@ class GraphBatch:
     @property
     def num_graphs(self) -> int:
         return len(self.graphs)
+
+
+@dataclass(slots=True)
+class LinkPredictionBatch:
+    graph: Graph
+    src_index: torch.Tensor
+    dst_index: torch.Tensor
+    labels: torch.Tensor
+    metadata: list[dict] | None = None
+
+    @classmethod
+    def from_records(
+        cls,
+        records: list["LinkPredictionRecord"],
+    ) -> "LinkPredictionBatch":
+        if not records:
+            raise ValueError("LinkPredictionBatch requires at least one record")
+        graph = records[0].graph
+        if any(record.graph is not graph for record in records):
+            raise ValueError(
+                "LinkPredictionBatch currently supports samples from a single source graph only"
+            )
+
+        src_index = torch.tensor([record.src_index for record in records], dtype=torch.long)
+        dst_index = torch.tensor([record.dst_index for record in records], dtype=torch.long)
+        labels = torch.tensor([float(record.label) for record in records], dtype=torch.float32)
+        num_nodes = graph.x.size(0)
+
+        if (
+            (src_index < 0).any()
+            or (src_index >= num_nodes).any()
+            or (dst_index < 0).any()
+            or (dst_index >= num_nodes).any()
+        ):
+            raise ValueError("LinkPredictionBatch indices must fall within the source graph node range")
+        if not torch.all((labels == 0) | (labels == 1)):
+            raise ValueError("LinkPredictionBatch labels must be binary 0/1")
+
+        return cls(
+            graph=graph,
+            src_index=src_index,
+            dst_index=dst_index,
+            labels=labels,
+            metadata=[record.metadata for record in records],
+        )
 
 
 @dataclass(slots=True)

@@ -12,6 +12,16 @@ class SampleRecord:
 
 
 @dataclass(slots=True)
+class LinkPredictionRecord:
+    graph: Any
+    src_index: int
+    dst_index: int
+    label: int
+    metadata: dict[str, Any] = field(default_factory=dict)
+    sample_id: str | None = None
+
+
+@dataclass(slots=True)
 class TemporalEventRecord:
     graph: Any
     src_index: int
