@@ -40,4 +40,5 @@ def test_trainer_runs_single_epoch():
     history = trainer.fit(graph)
 
     assert history["epochs"] == 1
+    assert len(history["train"]) == 1
 
