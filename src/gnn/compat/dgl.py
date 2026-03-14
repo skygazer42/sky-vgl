@@ -12,7 +12,7 @@ def from_dgl(dgl_graph):
 
 
 def to_dgl(graph):
-    import dgl
+    import dgl  # type: ignore[import-not-found]
 
     row, col = graph.edge_index
     dgl_graph = dgl.graph((row, col), num_nodes=graph.x.size(0))

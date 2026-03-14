@@ -1,4 +1,6 @@
-from gnn.core.batch import GraphBatch
-from gnn.core.graph import Graph
-from gnn.core.schema import GraphSchema
-from gnn.core.view import GraphView
+from gnn.core.batch import GraphBatch as GraphBatch
+from gnn.core.graph import Graph as Graph
+from gnn.core.schema import GraphSchema as GraphSchema
+from gnn.core.view import GraphView as GraphView
+
+__all__ = ["Graph", "GraphBatch", "GraphSchema", "GraphView"]

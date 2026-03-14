@@ -11,7 +11,7 @@ def from_pyg(data):
 
 
 def to_pyg(graph):
-    from torch_geometric.data import Data
+    from torch_geometric.data import Data  # type: ignore[import-not-found]
 
     kwargs = {
         "x": graph.x,
