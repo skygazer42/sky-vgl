@@ -7,6 +7,7 @@ from gnn.core.graph import Graph
 
 if TYPE_CHECKING:
     from gnn.data.sample import SampleRecord
+    from gnn.data.sample import TemporalEventRecord
 
 
 @dataclass(slots=True)
@@ -52,3 +53,40 @@ class GraphBatch:
     @property
     def num_graphs(self) -> int:
         return len(self.graphs)
+
+
+@dataclass(slots=True)
+class TemporalEventBatch:
+    graph: Graph
+    src_index: torch.Tensor
+    dst_index: torch.Tensor
+    timestamp: torch.Tensor
+    labels: torch.Tensor
+    event_features: torch.Tensor | None = None
+    metadata: list[dict] | None = None
+
+    @classmethod
+    def from_records(
+        cls,
+        records: list["TemporalEventRecord"],
+    ) -> "TemporalEventBatch":
+        if not records:
+            raise ValueError("TemporalEventBatch requires at least one record")
+        graph = records[0].graph
+        if graph.schema.time_attr is None:
+            raise ValueError("TemporalEventBatch requires a temporal graph with schema.time_attr")
+        if any(record.graph is not graph for record in records):
+            raise ValueError(
+                "TemporalEventBatch currently supports samples from a single source graph only"
+            )
+        return cls(
+            graph=graph,
+            src_index=torch.tensor([record.src_index for record in records]),
+            dst_index=torch.tensor([record.dst_index for record in records]),
+            timestamp=torch.tensor([record.timestamp for record in records]),
+            labels=torch.tensor([record.label for record in records]),
+            metadata=[record.metadata for record in records],
+        )
+
+    def history_graph(self, index: int):
+        return self.graph.snapshot(self.timestamp[index].item())
