@@ -62,6 +62,28 @@ class Graph:
     def temporal(cls, *, nodes, edges, time_attr):
         return cls.hetero(nodes=nodes, edges=edges, time_attr=time_attr)
 
+    @classmethod
+    def from_pyg(cls, data):
+        from gnn.compat.pyg import from_pyg
+
+        return from_pyg(data)
+
+    @classmethod
+    def from_dgl(cls, graph):
+        from gnn.compat.dgl import from_dgl
+
+        return from_dgl(graph)
+
+    def to_pyg(self):
+        from gnn.compat.pyg import to_pyg
+
+        return to_pyg(self)
+
+    def to_dgl(self):
+        from gnn.compat.dgl import to_dgl
+
+        return to_dgl(self)
+
     def snapshot(self, t):
         if self.schema.time_attr is None:
             raise ValueError("snapshot requires a temporal graph")
