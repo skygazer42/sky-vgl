@@ -12,10 +12,30 @@ The smallest workflow is:
 For a homogeneous graph:
 
 ```python
-graph = Graph.homo(edge_index=edge_index, x=x, y=y, train_mask=train_mask)
-task = NodeClassificationTask(target="y", split=("train_mask", "val_mask", "test_mask"))
-trainer = Trainer(model=model, task=task, optimizer=torch.optim.Adam, lr=1e-3, max_epochs=10)
-trainer.fit(graph)
+graph = Graph.homo(
+    edge_index=edge_index,
+    x=x,
+    y=y,
+    train_mask=train_mask,
+    val_mask=val_mask,
+    test_mask=test_mask,
+)
+task = NodeClassificationTask(
+    target="y",
+    split=("train_mask", "val_mask", "test_mask"),
+    metrics=["accuracy"],
+)
+trainer = Trainer(
+    model=model,
+    task=task,
+    optimizer=torch.optim.Adam,
+    lr=1e-3,
+    max_epochs=10,
+    monitor="val_accuracy",
+    save_best_path="artifacts/best.pt",
+)
+history = trainer.fit(graph, val_data=graph)
+test_result = trainer.test(graph)
 ```
 
 For graph classification over many small graphs:

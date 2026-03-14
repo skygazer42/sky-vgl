@@ -79,7 +79,21 @@ The package currently exposes:
 
 ## Trainer and Task
 
-`Task` defines the supervision contract. `Trainer` runs the optimization loop without taking ownership of the core graph abstraction.
+`Task` defines the supervision contract. It owns:
+
+- `loss(...)`
+- `targets(...)`
+- `predictions_for_metrics(...)`
+
+`Metric` owns streaming aggregation such as `reset()`, `update(...)`, and `compute()`.
+
+`Trainer` runs the optimization loop without taking ownership of the core graph abstraction. It owns:
+
+- `fit(train, val=None)`
+- `evaluate(data, stage="val")`
+- `test(data)`
+- monitor-based best-model selection
+- optional best-checkpoint saving
 
 The current training layer supports:
 
