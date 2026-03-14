@@ -1,3 +1,4 @@
+import torch
 import torch.nn.functional as F
 
 from gnn.train.task import Task
@@ -25,3 +26,29 @@ class NodeClassificationTask(Task):
         mask = node_data[f"{stage}_mask"]
         target = node_data[self.target]
         return F.cross_entropy(logits[mask], target[mask])
+
+
+class GraphClassificationTask(Task):
+    def __init__(self, target, label_source="graph", loss="cross_entropy", metrics=None):
+        self.target = target
+        self.label_source = label_source
+        self.loss_name = loss
+        self.metrics = metrics or []
+
+    def _targets(self, batch):
+        if self.label_source == "graph":
+            return batch.labels
+        if self.label_source == "metadata":
+            return batch.labels if getattr(batch, "labels", None) is not None else torch.tensor(
+                [item[self.target] for item in batch.metadata]
+            )
+        if self.label_source == "auto":
+            if getattr(batch, "labels", None) is not None:
+                return batch.labels
+            return torch.tensor([item[self.target] for item in batch.metadata])
+        raise ValueError(f"Unsupported label_source: {self.label_source}")
+
+    def loss(self, batch, logits, stage):
+        del stage
+        target = self._targets(batch)
+        return F.cross_entropy(logits, target)
