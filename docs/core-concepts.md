@@ -33,6 +33,22 @@ For graph classification it also carries:
 
 This is what makes many-small-graph and sampled-subgraph inputs converge on the same batch contract.
 
+## LinkPredictionRecord and LinkPredictionBatch
+
+`LinkPredictionRecord` is the explicit candidate-edge unit for link prediction training. Each record carries:
+
+- a homogeneous context `graph`
+- `src_index`
+- `dst_index`
+- `label`
+
+`LinkPredictionBatch` collates these records into one model input while keeping link supervision explicit through:
+
+- `graph`
+- `src_index`
+- `dst_index`
+- `labels`
+
 ## TemporalEventRecord and TemporalEventBatch
 
 `TemporalEventRecord` is the explicit candidate-event unit for temporal training. Each record carries:
@@ -70,4 +86,5 @@ The current training layer supports:
 - node classification
 - graph classification with labels from graph objects
 - graph classification with labels from sample metadata
+- link prediction from explicit candidate-edge samples
 - temporal event prediction from explicit candidate-event samples

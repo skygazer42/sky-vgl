@@ -55,6 +55,24 @@ task = GraphClassificationTask(target="label", label_source="metadata")
 trainer.fit(loader)
 ```
 
+For homogeneous link prediction from explicit candidate edges:
+
+```python
+graph = Graph.homo(edge_index=edge_index, x=x)
+samples = [
+    LinkPredictionRecord(graph=graph, src_index=0, dst_index=1, label=1),
+    LinkPredictionRecord(graph=graph, src_index=2, dst_index=0, label=0),
+]
+loader = Loader(
+    dataset=ListDataset(samples),
+    sampler=FullGraphSampler(),
+    batch_size=2,
+)
+task = LinkPredictionTask(target="label")
+trainer = Trainer(model=model, task=task, optimizer=torch.optim.Adam, lr=1e-3, max_epochs=10)
+trainer.fit(loader)
+```
+
 For temporal event prediction from explicit candidate-event samples:
 
 ```python

@@ -9,9 +9,10 @@ Unified graph learning framework with a stable core abstraction for homogeneous,
 - Schema validation, graph views, and graph batching
 - Minimal data pipeline with dataset, sampler, and loader contracts
 - `MessagePassing` plus `GCNConv`, `SAGEConv`, and `GATConv`
-- Minimal training loop with `NodeClassificationTask`, `GraphClassificationTask`, `TemporalEventPredictionTask`, and `Trainer`
+- Minimal training loop with `NodeClassificationTask`, `GraphClassificationTask`, `LinkPredictionTask`, `TemporalEventPredictionTask`, and `Trainer`
 - Graph-level readout with `global_mean_pool`, `global_sum_pool`, and `global_max_pool`
 - Graph classification from many-small-graph datasets and sampled subgraph records
+- Link prediction from explicit candidate-edge samples
 - Temporal event prediction from explicit candidate-event samples
 - Compatibility adapters for PyG-style and DGL-style objects
 
@@ -19,6 +20,7 @@ Unified graph learning framework with a stable core abstraction for homogeneous,
 
 - `python examples/homo/node_classification.py`
 - `python examples/homo/graph_classification.py`
+- `python examples/homo/link_prediction.py`
 - `python examples/hetero/node_classification.py`
 - `python examples/hetero/graph_classification.py`
 - `python examples/temporal/event_prediction.py`
