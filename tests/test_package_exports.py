@@ -1,4 +1,5 @@
 from vgl import (
+    Accuracy,
     Graph,
     GraphBatch,
     GraphSchema,
@@ -28,6 +29,7 @@ from vgl import (
 
 
 def test_package_exposes_broad_vgl_root_surface():
+    assert Accuracy.__name__ == "Accuracy"
     assert Graph.__name__ == "Graph"
     assert GraphBatch.__name__ == "GraphBatch"
     assert LinkPredictionBatch.__name__ == "LinkPredictionBatch"

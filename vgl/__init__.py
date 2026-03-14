@@ -17,6 +17,7 @@ from vgl.nn import global_mean_pool as global_mean_pool
 from vgl.nn import global_sum_pool as global_sum_pool
 from vgl.train import GraphClassificationTask as GraphClassificationTask
 from vgl.train import LinkPredictionTask as LinkPredictionTask
+from vgl.train import Accuracy as Accuracy
 from vgl.train import Metric as Metric
 from vgl.train import NodeClassificationTask as NodeClassificationTask
 from vgl.train import Task as Task
@@ -42,6 +43,7 @@ __all__ = [
     "global_mean_pool",
     "global_sum_pool",
     "global_max_pool",
+    "Accuracy",
     "Task",
     "Metric",
     "Trainer",
