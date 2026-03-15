@@ -38,7 +38,7 @@ history = trainer.fit(graph, val_data=graph)
 test_result = trainer.test(graph)
 ```
 
-For alternative homogeneous backbones, the same training path can swap in `GINConv`, `GATv2Conv`, or `APPNPConv` inside the model definition.
+For alternative homogeneous backbones, the same training path can swap in `GINConv`, `GATv2Conv`, `APPNPConv`, `TAGConv`, `SGConv`, or `ChebConv` inside the model definition.
 
 For graph classification over many small graphs:
 

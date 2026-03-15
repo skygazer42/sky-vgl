@@ -8,7 +8,7 @@ Unified graph learning framework with a stable core abstraction for homogeneous,
 - Homogeneous, heterogeneous, and temporal graph constructors
 - Schema validation, graph views, and graph batching
 - Minimal data pipeline with dataset, sampler, and loader contracts
-- `MessagePassing` plus `GCNConv`, `SAGEConv`, `GATConv`, `GINConv`, `GATv2Conv`, and `APPNPConv`
+- `MessagePassing` plus `GCNConv`, `SAGEConv`, `GATConv`, `GINConv`, `GATv2Conv`, `APPNPConv`, `TAGConv`, `SGConv`, and `ChebConv`
 - Minimal training loop with `NodeClassificationTask`, `GraphClassificationTask`, `LinkPredictionTask`, `TemporalEventPredictionTask`, `Accuracy`, and `Trainer`
 - Graph-level readout with `global_mean_pool`, `global_sum_pool`, and `global_max_pool`
 - Graph classification from many-small-graph datasets and sampled subgraph records

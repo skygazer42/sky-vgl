@@ -6,7 +6,17 @@ from torch import nn
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
-from vgl import APPNPConv, GATv2Conv, GINConv, Graph, NodeClassificationTask, Trainer
+from vgl import (
+    APPNPConv,
+    ChebConv,
+    GATv2Conv,
+    GINConv,
+    Graph,
+    NodeClassificationTask,
+    SGConv,
+    TAGConv,
+    Trainer,
+)
 
 
 def build_demo_graph():
@@ -52,6 +62,9 @@ def main():
         run_one("gin", GINConv(in_channels=4, out_channels=4), 4),
         run_one("gatv2", GATv2Conv(in_channels=4, out_channels=4, heads=2, concat=False), 4),
         run_one("appnp", APPNPConv(in_channels=4, out_channels=4, steps=2, alpha=0.1), 4),
+        run_one("tag", TAGConv(in_channels=4, out_channels=4, k=2), 4),
+        run_one("sg", SGConv(in_channels=4, out_channels=4, k=2), 4),
+        run_one("cheb", ChebConv(in_channels=4, out_channels=4, k=3), 4),
     ]
     print(results)
     return results
