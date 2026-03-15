@@ -1,7 +1,17 @@
 import torch
 from torch import nn
 
-from vgl import APPNPConv, GATv2Conv, GINConv, Graph, NodeClassificationTask, Trainer
+from vgl import (
+    APPNPConv,
+    ChebConv,
+    GATv2Conv,
+    GINConv,
+    Graph,
+    NodeClassificationTask,
+    SGConv,
+    TAGConv,
+    Trainer,
+)
 
 
 def _graph():
@@ -37,6 +47,9 @@ def test_new_homo_convs_plug_into_training_loop():
         GINConv(in_channels=4, out_channels=4),
         GATv2Conv(in_channels=4, out_channels=4, heads=2, concat=False),
         APPNPConv(in_channels=4, out_channels=4, steps=2, alpha=0.1),
+        TAGConv(in_channels=4, out_channels=4, k=2),
+        SGConv(in_channels=4, out_channels=4, k=2),
+        ChebConv(in_channels=4, out_channels=4, k=3),
     ]
 
     for conv in convs:

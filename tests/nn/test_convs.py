@@ -2,11 +2,14 @@ import pytest
 import torch
 
 from vgl import Graph
+from vgl.nn.conv.cheb import ChebConv
 from vgl.nn.conv.appnp import APPNPConv
 from vgl.nn.conv.gcn import GCNConv
 from vgl.nn.conv.gatv2 import GATv2Conv
 from vgl.nn.conv.gin import GINConv
+from vgl.nn.conv.sg import SGConv
 from vgl.nn.conv.sage import SAGEConv
+from vgl.nn.conv.tag import TAGConv
 
 
 def _homo_graph():
@@ -85,12 +88,49 @@ def test_appnp_conv_accepts_graph_input():
     assert out.shape == (3, 3)
 
 
+def test_tag_conv_accepts_graph_input():
+    conv = TAGConv(in_channels=4, out_channels=3, k=2)
+
+    out = conv(_homo_graph())
+
+    assert out.shape == (3, 3)
+
+
+def test_tag_conv_accepts_x_and_edge_index():
+    x = torch.randn(3, 4)
+    edge_index = torch.tensor([[0, 1, 2], [1, 2, 0]])
+    conv = TAGConv(in_channels=4, out_channels=3, k=2)
+
+    out = conv(x, edge_index)
+
+    assert out.shape == (3, 3)
+
+
+def test_sg_conv_accepts_graph_input():
+    conv = SGConv(in_channels=4, out_channels=3, k=2)
+
+    out = conv(_homo_graph())
+
+    assert out.shape == (3, 3)
+
+
+def test_cheb_conv_accepts_graph_input():
+    conv = ChebConv(in_channels=4, out_channels=3, k=3)
+
+    out = conv(_homo_graph())
+
+    assert out.shape == (3, 3)
+
+
 @pytest.mark.parametrize(
     ("conv_cls", "kwargs"),
     [
         (GINConv, {"in_channels": 4, "out_channels": 3}),
         (GATv2Conv, {"in_channels": 4, "out_channels": 3}),
         (APPNPConv, {"in_channels": 4, "out_channels": 3}),
+        (TAGConv, {"in_channels": 4, "out_channels": 3}),
+        (SGConv, {"in_channels": 4, "out_channels": 3}),
+        (ChebConv, {"in_channels": 4, "out_channels": 3}),
     ],
 )
 def test_new_homo_convs_reject_hetero_graph_input(conv_cls, kwargs):

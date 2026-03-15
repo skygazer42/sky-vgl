@@ -1,6 +1,7 @@
 from vgl import (
     Accuracy,
     APPNPConv,
+    ChebConv,
     GATv2Conv,
     Graph,
     GraphBatch,
@@ -19,6 +20,8 @@ from vgl import (
     MessagePassing,
     Task,
     Metric,
+    SGConv,
+    TAGConv,
     Trainer,
     NodeClassificationTask,
     GraphClassificationTask,
@@ -34,6 +37,7 @@ from vgl import (
 def test_package_exposes_broad_vgl_root_surface():
     assert Accuracy.__name__ == "Accuracy"
     assert APPNPConv.__name__ == "APPNPConv"
+    assert ChebConv.__name__ == "ChebConv"
     assert GATv2Conv.__name__ == "GATv2Conv"
     assert Graph.__name__ == "Graph"
     assert GraphBatch.__name__ == "GraphBatch"
@@ -50,6 +54,8 @@ def test_package_exposes_broad_vgl_root_surface():
     assert SampleRecord.__name__ == "SampleRecord"
     assert TemporalEventRecord.__name__ == "TemporalEventRecord"
     assert MessagePassing.__name__ == "MessagePassing"
+    assert SGConv.__name__ == "SGConv"
+    assert TAGConv.__name__ == "TAGConv"
     assert Task.__name__ == "Task"
     assert Metric.__name__ == "Metric"
     assert Trainer.__name__ == "Trainer"
