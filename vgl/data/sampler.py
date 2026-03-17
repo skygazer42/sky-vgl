@@ -1,19 +1,5 @@
-from vgl.data.sample import SampleRecord
+from vgl.dataloading.sampler import FullGraphSampler as FullGraphSampler
+from vgl.dataloading.sampler import NodeSeedSubgraphSampler as NodeSeedSubgraphSampler
+from vgl.dataloading.sampler import Sampler as Sampler
 
-
-class FullGraphSampler:
-    def sample(self, graph):
-        return graph
-
-
-class NodeSeedSubgraphSampler:
-    def sample(self, item):
-        graph, metadata = item
-        return SampleRecord(
-            graph=graph,
-            metadata=dict(metadata),
-            sample_id=metadata.get("sample_id"),
-            source_graph_id=metadata.get("source_graph_id"),
-            subgraph_seed=metadata.get("seed"),
-        )
-
+__all__ = ["Sampler", "FullGraphSampler", "NodeSeedSubgraphSampler"]

@@ -6,15 +6,10 @@ from torch import nn
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
-from vgl import (
-    FullGraphSampler,
-    Graph,
-    LinkPredictionRecord,
-    LinkPredictionTask,
-    ListDataset,
-    Loader,
-    Trainer,
-)
+from vgl.dataloading import DataLoader, FullGraphSampler, LinkPredictionRecord, ListDataset
+from vgl.engine import Trainer
+from vgl.graph import Graph
+from vgl.tasks import LinkPredictionTask
 
 
 class TinyLinkPredictor(nn.Module):
@@ -39,7 +34,7 @@ def build_demo_loader():
         LinkPredictionRecord(graph=graph, src_index=0, dst_index=1, label=1),
         LinkPredictionRecord(graph=graph, src_index=2, dst_index=0, label=0),
     ]
-    return Loader(
+    return DataLoader(
         dataset=ListDataset(samples),
         sampler=FullGraphSampler(),
         batch_size=2,

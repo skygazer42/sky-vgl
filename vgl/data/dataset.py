@@ -1,9 +1,3 @@
-class ListDataset:
-    def __init__(self, graphs):
-        self.graphs = list(graphs)
+from vgl.dataloading.dataset import ListDataset as ListDataset
 
-    def __len__(self):
-        return len(self.graphs)
-
-    def __getitem__(self, index):
-        return self.graphs[index]
+__all__ = ["ListDataset"]

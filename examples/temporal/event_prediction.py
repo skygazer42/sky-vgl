@@ -6,28 +6,31 @@ from torch import nn
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
-from vgl import Graph
-from vgl.data.dataset import ListDataset
-from vgl.data.loader import Loader
-from vgl.data.sample import TemporalEventRecord
-from vgl.data.sampler import FullGraphSampler
-from vgl.train.tasks import TemporalEventPredictionTask
-from vgl.train.trainer import Trainer
+from vgl.dataloading import DataLoader, FullGraphSampler, ListDataset, TemporalEventRecord
+from vgl.engine import Trainer
+from vgl.graph import Graph
+from vgl.nn import TGATEncoder, TimeEncoder
+from vgl.tasks import TemporalEventPredictionTask
 
 
 class TinyTemporalEventModel(nn.Module):
     def __init__(self):
         super().__init__()
-        self.linear = nn.Linear(9, 2)
+        self.encoder = TGATEncoder(channels=4, num_layers=2, time_channels=4, heads=2, dropout=0.0)
+        self.time_encoder = TimeEncoder(out_channels=4)
+        self.linear = nn.Linear(12, 2)
 
     def forward(self, batch):
-        src_x = batch.graph.x[batch.src_index]
-        dst_x = batch.graph.x[batch.dst_index]
-        history_counts = torch.tensor(
-            [batch.history_graph(i).edge_index.size(1) for i in range(batch.labels.size(0))],
-            dtype=src_x.dtype,
-        ).unsqueeze(-1)
-        return self.linear(torch.cat([src_x, dst_x, history_counts], dim=-1))
+        features = []
+        for index in range(batch.labels.size(0)):
+            history = batch.history_graph(index)
+            query_time = batch.timestamp[index].to(dtype=history.x.dtype)
+            node_repr = self.encoder(history, query_time=query_time)
+            src_x = node_repr[batch.src_index[index]]
+            dst_x = node_repr[batch.dst_index[index]]
+            time_x = self.time_encoder(query_time.unsqueeze(0)).squeeze(0)
+            features.append(torch.cat([src_x, dst_x, time_x], dim=-1))
+        return self.linear(torch.stack(features, dim=0))
 
 
 def build_demo_graph():
@@ -49,7 +52,7 @@ def build_demo_loader():
         TemporalEventRecord(graph=graph, src_index=0, dst_index=1, timestamp=3, label=1),
         TemporalEventRecord(graph=graph, src_index=2, dst_index=0, timestamp=5, label=0),
     ]
-    return Loader(
+    return DataLoader(
         dataset=ListDataset(samples),
         sampler=FullGraphSampler(),
         batch_size=2,
@@ -71,4 +74,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-

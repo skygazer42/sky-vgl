@@ -8,18 +8,25 @@ from vgl.nn.conv.clustergcn import ClusterGCNConv
 from vgl.nn.conv.appnp import APPNPConv
 from vgl.nn.conv.arma import ARMAConv
 from vgl.nn.conv.antisymmetric import AntiSymmetricConv
+from vgl.nn.conv.cg import CGConv
+from vgl.nn.conv.dna import DNAConv
 from vgl.nn.conv.fagcn import FAGCNConv
+from vgl.nn.conv.fa import FAConv
 from vgl.nn.conv.edgeconv import EdgeConv
 from vgl.nn.conv.film import FiLMConv
 from vgl.nn.conv.feast import FeaStConv
 from vgl.nn.conv.generalconv import GeneralConv
 from vgl.nn.conv.gcn import GCNConv
 from vgl.nn.conv.gatv2 import GATv2Conv
+from vgl.nn.conv.gatedgcn import GatedGCNConv
 from vgl.nn.conv.gatedgraph import GatedGraphConv
 from vgl.nn.conv.gen import GENConv
+from vgl.nn.conv.gine import GINEConv
 from vgl.nn.conv.gin import GINConv
 from vgl.nn.conv.gprgnn import GPRGNNConv
 from vgl.nn.conv.gcn2 import GCN2Conv
+from vgl.nn.conv.gmm import GMMConv
+from vgl.nn.conv.han import HANConv
 from vgl.nn.conv.lightgcn import LightGCNConv
 from vgl.nn.conv.mixhop import MixHopConv
 from vgl.nn.conv.mfconv import MFConv
@@ -28,32 +35,56 @@ from vgl.nn.conv.dagnn import DAGNNConv
 from vgl.nn.conv.egconv import EGConv
 from vgl.nn.conv.graphconv import GraphConv
 from vgl.nn.conv.h2gcn import H2GCNConv
+from vgl.nn.conv.heat import HEATConv
+from vgl.nn.conv.hgt import HGTConv
 from vgl.nn.conv.leconv import LEConv
 from vgl.nn.conv.lg import LGConv
 from vgl.nn.conv.resgated import ResGatedGraphConv
 from vgl.nn.conv.pna import PNAConv
+from vgl.nn.conv.pdn import PDNConv
+from vgl.nn.conv.pointnet import PointNetConv
+from vgl.nn.conv.pointtransformer import PointTransformerConv
 from vgl.nn.conv.sg import SGConv
 from vgl.nn.conv.sage import SAGEConv
 from vgl.nn.conv.simple import SimpleConv
+from vgl.nn.conv.spline import SplineConv
 from vgl.nn.conv.ssg import SSGConv
 from vgl.nn.conv.supergat import SuperGATConv
 from vgl.nn.conv.tag import TAGConv
 from vgl.nn.conv.transformer import TransformerConv
+from vgl.nn.conv.twirls import TWIRLSConv
 from vgl.nn.conv.wlconv import WLConvContinuous
 from vgl.nn.conv.dirgnn import DirGNNConv
+from vgl.nn.conv.nnconv import ECConv, NNConv
+from vgl.nn.conv.rgcn import RGCNConv
+from vgl.nn.conv.rgat import RGATConv
 
 
 def _homo_graph():
     return Graph.homo(
         edge_index=torch.tensor([[0, 1, 2], [1, 2, 0]]),
         x=torch.randn(3, 4),
+        pos=torch.randn(3, 2),
+        edge_data={
+            "edge_attr": torch.randn(3, 2),
+            "pseudo": torch.rand(3, 2),
+        },
     )
 
 
 def _hetero_graph():
     return Graph.hetero(
         nodes={"paper": {"x": torch.randn(2, 4)}, "author": {"x": torch.randn(2, 4)}},
-        edges={("author", "writes", "paper"): {"edge_index": torch.tensor([[0, 1], [1, 0]])}},
+        edges={
+            ("author", "writes", "paper"): {
+                "edge_index": torch.tensor([[0, 1], [1, 0]]),
+                "edge_attr": torch.randn(2, 2),
+            },
+            ("paper", "written_by", "author"): {
+                "edge_index": torch.tensor([[1, 0], [0, 1]]),
+                "edge_attr": torch.randn(2, 2),
+            },
+        },
     )
 
 
@@ -68,6 +99,91 @@ def test_gcn_conv_accepts_graph_input():
     out = conv(graph)
 
     assert out.shape == (2, 3)
+
+
+def test_rgcn_conv_accepts_hetero_graph_input():
+    graph = _hetero_graph()
+    conv = RGCNConv(
+        in_channels=4,
+        out_channels=3,
+        node_types=graph.schema.node_types,
+        relation_types=graph.schema.edge_types,
+    )
+
+    out = conv(graph)
+
+    assert set(out) == {"author", "paper"}
+    assert out["author"].shape == (2, 3)
+    assert out["paper"].shape == (2, 3)
+
+
+def test_hgt_conv_accepts_hetero_graph_input():
+    graph = _hetero_graph()
+    conv = HGTConv(
+        in_channels=4,
+        out_channels=3,
+        node_types=graph.schema.node_types,
+        relation_types=graph.schema.edge_types,
+        heads=2,
+    )
+
+    out = conv(graph)
+
+    assert set(out) == {"author", "paper"}
+    assert out["author"].shape == (2, 3)
+    assert out["paper"].shape == (2, 3)
+
+
+def test_heat_conv_accepts_hetero_graph_input():
+    graph = _hetero_graph()
+    conv = HEATConv(
+        in_channels=4,
+        out_channels=3,
+        node_types=graph.schema.node_types,
+        relation_types=graph.schema.edge_types,
+        edge_channels=2,
+        heads=2,
+    )
+
+    out = conv(graph)
+
+    assert set(out) == {"author", "paper"}
+    assert out["author"].shape == (2, 3)
+    assert out["paper"].shape == (2, 3)
+
+
+def test_rgat_conv_accepts_hetero_graph_input():
+    graph = _hetero_graph()
+    conv = RGATConv(
+        in_channels=4,
+        out_channels=3,
+        node_types=graph.schema.node_types,
+        relation_types=graph.schema.edge_types,
+        edge_channels=2,
+        heads=2,
+    )
+
+    out = conv(graph)
+
+    assert set(out) == {"author", "paper"}
+    assert out["author"].shape == (2, 3)
+    assert out["paper"].shape == (2, 3)
+
+
+def test_han_conv_accepts_hetero_graph_input():
+    graph = _hetero_graph()
+    conv = HANConv(
+        in_channels=4,
+        out_channels=3,
+        node_types=graph.schema.node_types,
+        relation_types=graph.schema.edge_types,
+    )
+
+    out = conv(graph)
+
+    assert set(out) == {"author", "paper"}
+    assert out["author"].shape == (2, 3)
+    assert out["paper"].shape == (2, 3)
 
 
 def test_sage_conv_accepts_x_and_edge_index():
@@ -94,6 +210,134 @@ def test_gin_conv_accepts_x_and_edge_index():
     conv = GINConv(in_channels=4, out_channels=3)
 
     out = conv(x, edge_index)
+
+    assert out.shape == (3, 3)
+
+
+def test_cgconv_accepts_graph_input_with_edge_features():
+    conv = CGConv(channels=4, edge_channels=2, aggr="mean")
+
+    out = conv(_homo_graph())
+
+    assert out.shape == (3, 4)
+
+
+def test_dnaconv_accepts_graph_input_with_history_tensor():
+    graph = _homo_graph()
+    history = torch.stack([graph.x, graph.x + 1.0, graph.x - 1.0], dim=1)
+    conv = DNAConv(channels=4, heads=2, dropout=0.0)
+
+    out = conv(graph, history=history)
+
+    assert out.shape == (3, 4)
+
+
+def test_dnaconv_accepts_history_tensor_and_edge_index():
+    graph = _homo_graph()
+    history = torch.stack([graph.x, graph.x * 0.5], dim=1)
+    conv = DNAConv(channels=4, heads=2, dropout=0.0)
+
+    out = conv(history, graph.edge_index)
+
+    assert out.shape == (3, 4)
+
+
+def test_nnconv_accepts_graph_input_with_edge_features():
+    conv = NNConv(in_channels=4, out_channels=3, edge_channels=2)
+
+    out = conv(_homo_graph())
+
+    assert out.shape == (3, 3)
+
+
+def test_ecconv_is_nnconv_compatible():
+    conv = ECConv(in_channels=4, out_channels=3, edge_channels=2)
+
+    out = conv(_homo_graph())
+
+    assert out.shape == (3, 3)
+
+
+def test_gine_conv_accepts_graph_input_with_edge_features():
+    conv = GINEConv(in_channels=4, out_channels=3, edge_channels=2)
+
+    out = conv(_homo_graph())
+
+    assert out.shape == (3, 3)
+
+
+def test_gmm_conv_accepts_graph_input_with_pseudo_coordinates():
+    conv = GMMConv(in_channels=4, out_channels=3, dim=2, kernel_size=3)
+
+    out = conv(_homo_graph())
+
+    assert out.shape == (3, 3)
+
+
+def test_spline_conv_accepts_graph_input_with_pseudo_coordinates():
+    conv = SplineConv(in_channels=4, out_channels=3, dim=2, kernel_size=3)
+
+    out = conv(_homo_graph())
+
+    assert out.shape == (3, 3)
+
+
+def test_faconv_accepts_graph_input_with_reference_features():
+    graph = _homo_graph()
+    conv = FAConv(channels=4, eps=0.1)
+
+    out = conv(graph, x0=graph.x)
+
+    assert out.shape == (3, 4)
+
+
+def test_gatedgcn_conv_accepts_graph_input_with_edge_features():
+    conv = GatedGCNConv(in_channels=4, out_channels=3, edge_channels=2)
+
+    out = conv(_homo_graph())
+
+    assert out.shape == (3, 3)
+
+
+def test_pdn_conv_accepts_x_edge_index_and_edge_features():
+    graph = _homo_graph()
+    conv = PDNConv(in_channels=4, out_channels=3, edge_channels=2, add_self_loops=False)
+
+    out = conv(graph.x, graph.edge_index, edge_attr=graph.edata["edge_attr"])
+
+    assert out.shape == (3, 3)
+
+
+def test_pointnet_conv_accepts_graph_input_with_pos():
+    conv = PointNetConv(in_channels=4, out_channels=3, pos_channels=2)
+
+    out = conv(_homo_graph())
+
+    assert out.shape == (3, 3)
+
+
+def test_point_transformer_conv_accepts_x_edge_index_and_pos():
+    graph = _homo_graph()
+    conv = PointTransformerConv(in_channels=4, out_channels=3, pos_channels=2)
+
+    out = conv(graph.x, graph.edge_index, pos=graph.pos)
+
+    assert out.shape == (3, 3)
+
+
+def test_twirls_conv_accepts_graph_input():
+    conv = TWIRLSConv(in_channels=4, out_channels=3, steps=3, alpha=0.2)
+
+    out = conv(_homo_graph())
+
+    assert out.shape == (3, 3)
+
+
+def test_twirls_conv_accepts_x_and_edge_index():
+    graph = _homo_graph()
+    conv = TWIRLSConv(in_channels=4, out_channels=3, steps=2, alpha=0.2)
+
+    out = conv(graph.x, graph.edge_index)
 
     assert out.shape == (3, 3)
 
@@ -910,4 +1154,3 @@ def test_new_homo_convs_reject_hetero_graph_input(conv_cls, kwargs):
 
     with pytest.raises(ValueError, match="homogeneous"):
         conv(_hetero_graph())
-

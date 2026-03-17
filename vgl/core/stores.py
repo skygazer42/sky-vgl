@@ -1,27 +1,4 @@
-from dataclasses import dataclass, field
+from vgl.graph.stores import EdgeStore as EdgeStore
+from vgl.graph.stores import NodeStore as NodeStore
 
-import torch
-
-
-@dataclass(slots=True)
-class NodeStore:
-    type_name: str
-    data: dict[str, torch.Tensor] = field(default_factory=dict)
-
-    def __getattr__(self, name: str) -> torch.Tensor:
-        try:
-            return self.data[name]
-        except KeyError as exc:
-            raise AttributeError(name) from exc
-
-
-@dataclass(slots=True)
-class EdgeStore:
-    type_name: tuple[str, str, str]
-    data: dict[str, torch.Tensor] = field(default_factory=dict)
-
-    def __getattr__(self, name: str) -> torch.Tensor:
-        try:
-            return self.data[name]
-        except KeyError as exc:
-            raise AttributeError(name) from exc
+__all__ = ["NodeStore", "EdgeStore"]

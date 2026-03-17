@@ -1,11 +1,39 @@
 # Migration Guide
 
+## Package Layout Migration
+
+The preferred import layout is now domain-based:
+
+- `vgl.graph` for `Graph`, `GraphBatch`, `GraphView`, and `GraphSchema`
+- `vgl.dataloading` for `DataLoader`, datasets, samplers, and sample records
+- `vgl.tasks` for task definitions
+- `vgl.engine` for `Trainer`, callbacks, checkpoints, and `TrainingHistory`
+- `vgl.metrics` for metric implementations and `build_metric`
+- `vgl.transforms` for graph transforms
+
+The older `vgl.core`, `vgl.data`, and `vgl.train` modules still work as compatibility layers, but new code should avoid them.
+
+Common import rewrites:
+
+- `from vgl.data.loader import Loader` -> `from vgl.dataloading import DataLoader`
+- `from vgl.data import Sampler` -> `from vgl.dataloading import Sampler`
+- `from vgl.data.dataset import ListDataset` -> `from vgl.dataloading import ListDataset`
+- `from vgl.data.sample import SampleRecord` -> `from vgl.dataloading import SampleRecord`
+- `from vgl.train.tasks import NodeClassificationTask` -> `from vgl.tasks import NodeClassificationTask`
+- `from vgl.train.trainer import Trainer` -> `from vgl.engine import Trainer`
+- `from vgl.train.evaluator import Evaluator` -> `from vgl.engine import Evaluator`
+- `from vgl.train.metrics import build_metric` -> `from vgl.metrics import build_metric`
+- `from vgl.train.checkpoints import save_checkpoint` -> `from vgl.engine import save_checkpoint`
+- `from vgl.train.history import TrainingHistory` -> `from vgl.engine import TrainingHistory`
+- `from vgl.core.graph import Graph` -> `from vgl.graph import Graph`
+- `from vgl.core import SchemaError` -> `from vgl.graph import SchemaError`
+
 ## From PyG
 
 - `Data(x=..., edge_index=..., y=...)` maps to `Graph.homo(edge_index=..., x=..., y=...)`
 - `Graph.from_pyg(data)` imports PyG-style graph data
 - `graph.to_pyg()` exports back to a PyG-style `Data` object
-- many-graph graph classification maps cleanly to `ListDataset + Loader + GraphClassificationTask`
+- many-graph graph classification maps cleanly to `ListDataset + DataLoader + GraphClassificationTask`
 
 ## From DGL
 

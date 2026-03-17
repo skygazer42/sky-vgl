@@ -1,3 +1,3 @@
-class IdentityTransform:
-    def __call__(self, graph):
-        return graph
+from vgl.transforms import IdentityTransform as IdentityTransform
+
+__all__ = ["IdentityTransform"]

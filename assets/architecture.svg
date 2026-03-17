@@ -1,0 +1,92 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 800 380">
+  <defs>
+    <linearGradient id="archGrad1" x1="0%" y1="0%" x2="100%" y2="0%">
+      <stop offset="0%" style="stop-color:#6366f1;stop-opacity:1"/>
+      <stop offset="100%" style="stop-color:#8b5cf6;stop-opacity:1"/>
+    </linearGradient>
+    <linearGradient id="archGrad2" x1="0%" y1="0%" x2="100%" y2="0%">
+      <stop offset="0%" style="stop-color:#3b82f6;stop-opacity:1"/>
+      <stop offset="100%" style="stop-color:#6366f1;stop-opacity:1"/>
+    </linearGradient>
+    <linearGradient id="archGrad3" x1="0%" y1="0%" x2="100%" y2="0%">
+      <stop offset="0%" style="stop-color:#10b981;stop-opacity:1"/>
+      <stop offset="100%" style="stop-color:#3b82f6;stop-opacity:1"/>
+    </linearGradient>
+    <linearGradient id="archGrad4" x1="0%" y1="0%" x2="100%" y2="0%">
+      <stop offset="0%" style="stop-color:#f59e0b;stop-opacity:1"/>
+      <stop offset="100%" style="stop-color:#10b981;stop-opacity:1"/>
+    </linearGradient>
+    <filter id="layerShadow">
+      <feDropShadow dx="0" dy="2" stdDeviation="4" flood-color="#000" flood-opacity="0.08"/>
+    </filter>
+  </defs>
+
+  <!-- Background -->
+  <rect width="800" height="380" rx="16" fill="#fafafa"/>
+
+  <!-- Title -->
+  <text x="400" y="35" font-family="'Inter','Segoe UI',sans-serif" font-size="16" font-weight="700" fill="#1e293b" text-anchor="middle" letter-spacing="0.5">ARCHITECTURE OVERVIEW</text>
+
+  <!-- Layer 1: Engine (top) -->
+  <g filter="url(#layerShadow)">
+    <rect x="40" y="55" width="720" height="65" rx="12" fill="url(#archGrad1)" opacity="0.95"/>
+    <text x="70" y="82" font-family="'Inter',sans-serif" font-size="14" font-weight="700" fill="white">vgl.engine</text>
+    <text x="70" y="103" font-family="'Inter',sans-serif" font-size="11" fill="rgba(255,255,255,0.85)">Trainer · Callbacks · EarlyStopping · Checkpoints · TrainingHistory · Evaluator</text>
+
+    <!-- Sub-boxes -->
+    <rect x="500" y="67" width="100" height="38" rx="6" fill="rgba(255,255,255,0.15)" stroke="rgba(255,255,255,0.3)" stroke-width="1"/>
+    <text x="550" y="90" font-family="'Inter',sans-serif" font-size="11" font-weight="600" fill="white" text-anchor="middle">Trainer</text>
+
+    <rect x="612" y="67" width="130" height="38" rx="6" fill="rgba(255,255,255,0.15)" stroke="rgba(255,255,255,0.3)" stroke-width="1"/>
+    <text x="677" y="90" font-family="'Inter',sans-serif" font-size="11" font-weight="600" fill="white" text-anchor="middle">TrainingHistory</text>
+  </g>
+
+  <!-- Arrow -->
+  <line x1="400" y1="120" x2="400" y2="140" stroke="#94a3b8" stroke-width="1.5" stroke-dasharray="4 3"/>
+  <polygon points="395,138 400,146 405,138" fill="#94a3b8"/>
+
+  <!-- Layer 2: Tasks + Metrics -->
+  <g filter="url(#layerShadow)">
+    <rect x="40" y="148" width="350" height="65" rx="12" fill="url(#archGrad2)" opacity="0.95"/>
+    <text x="70" y="175" font-family="'Inter',sans-serif" font-size="14" font-weight="700" fill="white">vgl.tasks</text>
+    <text x="70" y="196" font-family="'Inter',sans-serif" font-size="11" fill="rgba(255,255,255,0.85)">NodeClassification · GraphClassification</text>
+    <text x="70" y="208" font-family="'Inter',sans-serif" font-size="10" fill="rgba(255,255,255,0.7)">LinkPrediction · TemporalEventPrediction</text>
+
+    <rect x="410" y="148" width="350" height="65" rx="12" fill="url(#archGrad2)" opacity="0.85"/>
+    <text x="440" y="175" font-family="'Inter',sans-serif" font-size="14" font-weight="700" fill="white">vgl.metrics</text>
+    <text x="440" y="196" font-family="'Inter',sans-serif" font-size="11" fill="rgba(255,255,255,0.85)">Accuracy · Metric base · build_metric</text>
+  </g>
+
+  <!-- Arrow -->
+  <line x1="400" y1="213" x2="400" y2="233" stroke="#94a3b8" stroke-width="1.5" stroke-dasharray="4 3"/>
+  <polygon points="395,231 400,239 405,231" fill="#94a3b8"/>
+
+  <!-- Layer 3: NN + Graph -->
+  <g filter="url(#layerShadow)">
+    <rect x="40" y="241" width="350" height="65" rx="12" fill="url(#archGrad3)" opacity="0.95"/>
+    <text x="70" y="268" font-family="'Inter',sans-serif" font-size="14" font-weight="700" fill="white">vgl.nn</text>
+    <text x="70" y="289" font-family="'Inter',sans-serif" font-size="11" fill="rgba(255,255,255,0.85)">MessagePassing · 35+ Conv layers</text>
+    <text x="70" y="301" font-family="'Inter',sans-serif" font-size="10" fill="rgba(255,255,255,0.7)">HeteroConv · Readout · GroupRevRes</text>
+
+    <rect x="410" y="241" width="350" height="65" rx="12" fill="url(#archGrad3)" opacity="0.85"/>
+    <text x="440" y="268" font-family="'Inter',sans-serif" font-size="14" font-weight="700" fill="white">vgl.graph</text>
+    <text x="440" y="289" font-family="'Inter',sans-serif" font-size="11" fill="rgba(255,255,255,0.85)">Graph · GraphBatch · GraphSchema</text>
+    <text x="440" y="301" font-family="'Inter',sans-serif" font-size="10" fill="rgba(255,255,255,0.7)">GraphView · LinkPredictionBatch</text>
+  </g>
+
+  <!-- Arrow -->
+  <line x1="400" y1="306" x2="400" y2="326" stroke="#94a3b8" stroke-width="1.5" stroke-dasharray="4 3"/>
+  <polygon points="395,324 400,332 405,324" fill="#94a3b8"/>
+
+  <!-- Layer 4: DataLoading + Transforms + Compat -->
+  <g filter="url(#layerShadow)">
+    <rect x="40" y="334" width="235" height="38" rx="10" fill="url(#archGrad4)" opacity="0.95"/>
+    <text x="157" y="358" font-family="'Inter',sans-serif" font-size="12" font-weight="700" fill="white" text-anchor="middle">vgl.dataloading</text>
+
+    <rect x="290" y="334" width="230" height="38" rx="10" fill="url(#archGrad4)" opacity="0.85"/>
+    <text x="405" y="358" font-family="'Inter',sans-serif" font-size="12" font-weight="700" fill="white" text-anchor="middle">vgl.transforms</text>
+
+    <rect x="535" y="334" width="225" height="38" rx="10" fill="url(#archGrad4)" opacity="0.75"/>
+    <text x="647" y="358" font-family="'Inter',sans-serif" font-size="12" font-weight="700" fill="white" text-anchor="middle">vgl.compat (PyG / DGL)</text>
+  </g>
+</svg>

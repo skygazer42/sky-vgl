@@ -9,6 +9,16 @@ def coerce_homo_inputs(graph_or_x, edge_index, layer_name):
     return graph_or_x, edge_index
 
 
+def resolve_node_feature(graph_or_x, use_graph_data, value, key, layer_name):
+    if value is not None:
+        return value
+    if use_graph_data:
+        if key in graph_or_x.ndata:
+            return graph_or_x.ndata[key]
+        raise ValueError(f"{layer_name} requires {key} in graph.ndata or as an explicit argument")
+    raise ValueError(f"{layer_name} requires {key} when called with x and edge_index")
+
+
 def mean_propagate(x, edge_index):
     row, col = edge_index
     out = torch.zeros_like(x)

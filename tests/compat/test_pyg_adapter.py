@@ -24,6 +24,7 @@ def test_graph_round_trips_to_pyg_data(monkeypatch):
     data = FakeData(
         x=torch.randn(2, 4),
         edge_index=torch.tensor([[0, 1], [1, 0]]),
+        edge_attr=torch.randn(2, 3),
         y=torch.tensor([0, 1]),
     )
 
@@ -31,6 +32,6 @@ def test_graph_round_trips_to_pyg_data(monkeypatch):
     restored = graph.to_pyg()
 
     assert torch.equal(restored.edge_index, data.edge_index)
+    assert torch.equal(restored.edge_attr, data.edge_attr)
     assert torch.equal(restored.x, data.x)
     assert torch.equal(restored.y, data.y)
-

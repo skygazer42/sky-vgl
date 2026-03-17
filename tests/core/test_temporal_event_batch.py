@@ -31,3 +31,37 @@ def test_temporal_event_batch_tracks_fields_and_history_views():
     assert torch.equal(batch.labels, torch.tensor([1, 0]))
     assert torch.equal(history.edges[edge_type].timestamp, torch.tensor([1, 3]))
 
+
+def test_temporal_event_batch_stacks_event_features():
+    graph = Graph.temporal(
+        nodes={"node": {"x": torch.randn(3, 4)}},
+        edges={
+            ("node", "interacts", "node"): {
+                "edge_index": torch.tensor([[0, 1], [1, 2]]),
+                "timestamp": torch.tensor([1, 4]),
+            }
+        },
+        time_attr="timestamp",
+    )
+    records = [
+        TemporalEventRecord(
+            graph=graph,
+            src_index=0,
+            dst_index=1,
+            timestamp=1,
+            label=1,
+            event_features=torch.tensor([1.0, 0.0]),
+        ),
+        TemporalEventRecord(
+            graph=graph,
+            src_index=1,
+            dst_index=2,
+            timestamp=4,
+            label=0,
+            event_features=torch.tensor([0.0, 1.0]),
+        ),
+    ]
+
+    batch = TemporalEventBatch.from_records(records)
+
+    assert torch.equal(batch.event_features, torch.tensor([[1.0, 0.0], [0.0, 1.0]]))

@@ -9,6 +9,7 @@ def test_snapshot_filters_temporal_edges_without_copying_features():
         edges={
             ("user", "interacts", "user"): {
                 "edge_index": torch.tensor([[0, 1], [1, 0]]),
+                "edge_attr": torch.tensor([[1.0], [3.0]]),
                 "timestamp": torch.tensor([1, 3]),
             }
         },
@@ -19,6 +20,7 @@ def test_snapshot_filters_temporal_edges_without_copying_features():
 
     assert snapshot.schema.time_attr == "timestamp"
     assert snapshot.edges[("user", "interacts", "user")].edge_index.shape[1] == 1
+    assert torch.equal(snapshot.edges[("user", "interacts", "user")].edge_attr, torch.tensor([[1.0]]))
     assert snapshot.nodes["user"].x.data_ptr() == graph.nodes["user"].x.data_ptr()
 
 
@@ -28,6 +30,7 @@ def test_window_filters_edges_inside_time_range():
         edges={
             ("user", "interacts", "user"): {
                 "edge_index": torch.tensor([[0, 1, 1], [1, 0, 1]]),
+                "edge_weight": torch.tensor([1.0, 2.0, 3.0]),
                 "timestamp": torch.tensor([1, 3, 5]),
             }
         },
@@ -41,4 +44,7 @@ def test_window_filters_edges_inside_time_range():
         window.edges[("user", "interacts", "user")].timestamp,
         torch.tensor([3]),
     )
-
+    assert torch.equal(
+        window.edges[("user", "interacts", "user")].edge_weight,
+        torch.tensor([2.0]),
+    )

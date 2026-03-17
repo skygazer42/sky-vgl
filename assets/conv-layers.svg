@@ -1,0 +1,57 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 800 220">
+  <defs>
+    <linearGradient id="clGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" style="stop-color:#6366f1"/>
+      <stop offset="100%" style="stop-color:#8b5cf6"/>
+    </linearGradient>
+    <filter id="clShadow">
+      <feDropShadow dx="0" dy="1" stdDeviation="2" flood-color="#000" flood-opacity="0.06"/>
+    </filter>
+  </defs>
+
+  <rect width="800" height="220" rx="12" fill="#fafafa"/>
+
+  <text x="400" y="28" font-family="'Inter',sans-serif" font-size="14" font-weight="700" fill="#1e293b" text-anchor="middle">35+ Graph Convolution Layers</text>
+  <text x="400" y="46" font-family="'Inter',sans-serif" font-size="10" fill="#94a3b8" text-anchor="middle">All built on the unified MessagePassing interface</text>
+
+  <!-- Row 1 -->
+  <g font-family="'Inter',sans-serif" font-size="10" font-weight="600" text-anchor="middle">
+    <!-- Spectral -->
+    <g filter="url(#clShadow)"><rect x="15" y="62" width="88" height="30" rx="8" fill="#6366f1"/><text x="59" y="82" fill="white">GCNConv</text></g>
+    <g filter="url(#clShadow)"><rect x="111" y="62" width="88" height="30" rx="8" fill="#6366f1"/><text x="155" y="82" fill="white">ChebConv</text></g>
+    <g filter="url(#clShadow)"><rect x="207" y="62" width="88" height="30" rx="8" fill="#6366f1"/><text x="251" y="82" fill="white">SGConv</text></g>
+    <g filter="url(#clShadow)"><rect x="303" y="62" width="88" height="30" rx="8" fill="#6366f1"/><text x="347" y="82" fill="white">TAGConv</text></g>
+    <g filter="url(#clShadow)"><rect x="399" y="62" width="88" height="30" rx="8" fill="#6366f1"/><text x="443" y="82" fill="white">ARMAConv</text></g>
+    <g filter="url(#clShadow)"><rect x="495" y="62" width="95" height="30" rx="8" fill="#6366f1"/><text x="542" y="82" fill="white">APPNPConv</text></g>
+    <g filter="url(#clShadow)"><rect x="598" y="62" width="95" height="30" rx="8" fill="#6366f1"/><text x="645" y="82" fill="white">BernConv</text></g>
+    <g filter="url(#clShadow)"><rect x="701" y="62" width="85" height="30" rx="8" fill="#6366f1"/><text x="743" y="82" fill="white">SSGConv</text></g>
+
+    <!-- Attention -->
+    <g filter="url(#clShadow)"><rect x="15" y="100" width="88" height="30" rx="8" fill="#3b82f6"/><text x="59" y="120" fill="white">GATConv</text></g>
+    <g filter="url(#clShadow)"><rect x="111" y="100" width="95" height="30" rx="8" fill="#3b82f6"/><text x="158" y="120" fill="white">GATv2Conv</text></g>
+    <g filter="url(#clShadow)"><rect x="214" y="100" width="110" height="30" rx="8" fill="#3b82f6"/><text x="269" y="120" fill="white">TransformerConv</text></g>
+    <g filter="url(#clShadow)"><rect x="332" y="100" width="100" height="30" rx="8" fill="#3b82f6"/><text x="382" y="120" fill="white">SuperGATConv</text></g>
+    <g filter="url(#clShadow)"><rect x="440" y="100" width="92" height="30" rx="8" fill="#3b82f6"/><text x="486" y="120" fill="white">AGNNConv</text></g>
+    <g filter="url(#clShadow)"><rect x="540" y="100" width="95" height="30" rx="8" fill="#3b82f6"/><text x="587" y="120" fill="white">FAGCNConv</text></g>
+    <g filter="url(#clShadow)"><rect x="643" y="100" width="88" height="30" rx="8" fill="#3b82f6"/><text x="687" y="120" fill="white">FeaStConv</text></g>
+
+    <!-- Aggregation -->
+    <g filter="url(#clShadow)"><rect x="15" y="138" width="92" height="30" rx="8" fill="#10b981"/><text x="61" y="158" fill="white">SAGEConv</text></g>
+    <g filter="url(#clShadow)"><rect x="115" y="138" width="82" height="30" rx="8" fill="#10b981"/><text x="156" y="158" fill="white">GINConv</text></g>
+    <g filter="url(#clShadow)"><rect x="205" y="138" width="82" height="30" rx="8" fill="#10b981"/><text x="246" y="158" fill="white">PNAConv</text></g>
+    <g filter="url(#clShadow)"><rect x="295" y="138" width="95" height="30" rx="8" fill="#10b981"/><text x="342" y="158" fill="white">MixHopConv</text></g>
+    <g filter="url(#clShadow)"><rect x="398" y="138" width="95" height="30" rx="8" fill="#10b981"/><text x="445" y="158" fill="white">GraphConv</text></g>
+    <g filter="url(#clShadow)"><rect x="501" y="138" width="88" height="30" rx="8" fill="#10b981"/><text x="545" y="158" fill="white">EdgeConv</text></g>
+    <g filter="url(#clShadow)"><rect x="597" y="138" width="100" height="30" rx="8" fill="#10b981"/><text x="647" y="158" fill="white">GENConv</text></g>
+    <g filter="url(#clShadow)"><rect x="705" y="138" width="82" height="30" rx="8" fill="#10b981"/><text x="746" y="158" fill="white">FiLMConv</text></g>
+
+    <!-- Deep / Special -->
+    <g filter="url(#clShadow)"><rect x="15" y="176" width="95" height="30" rx="8" fill="#f59e0b"/><text x="62" y="196" fill="white">GCN2Conv</text></g>
+    <g filter="url(#clShadow)"><rect x="118" y="176" width="100" height="30" rx="8" fill="#f59e0b"/><text x="168" y="196" fill="white">DAGNNConv</text></g>
+    <g filter="url(#clShadow)"><rect x="226" y="176" width="110" height="30" rx="8" fill="#f59e0b"/><text x="281" y="196" fill="white">GPRGNNConv</text></g>
+    <g filter="url(#clShadow)"><rect x="344" y="176" width="100" height="30" rx="8" fill="#f59e0b"/><text x="394" y="196" fill="white">H2GCNConv</text></g>
+    <g filter="url(#clShadow)"><rect x="452" y="176" width="95" height="30" rx="8" fill="#f59e0b"/><text x="499" y="196" fill="white">DirGNNConv</text></g>
+    <g filter="url(#clShadow)"><rect x="555" y="176" width="118" height="30" rx="8" fill="#f59e0b"/><text x="614" y="196" fill="white">AntiSymmetricConv</text></g>
+    <g filter="url(#clShadow)"><rect x="681" y="176" width="105" height="30" rx="8" fill="#f59e0b"/><text x="733" y="196" fill="white">+ more...</text></g>
+  </g>
+</svg>

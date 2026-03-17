@@ -1,7 +1,14 @@
 import pytest
 import torch
 
+from vgl.metrics import build_metric as domain_build_metric
 from vgl.train.metrics import Accuracy, build_metric
+
+
+def test_legacy_train_package_reexports_build_metric():
+    from vgl.train import build_metric as legacy_build_metric
+
+    assert legacy_build_metric is domain_build_metric
 
 
 def test_accuracy_handles_multiclass_logits():

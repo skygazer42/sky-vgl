@@ -1,9 +1,3 @@
-class Evaluator:
-    def __init__(self, metrics=None):
-        self.metrics = metrics or []
+from vgl.engine.evaluator import Evaluator as Evaluator
 
-    def evaluate(self, predictions, targets):
-        return {
-            metric.__class__.__name__: metric(predictions, targets)
-            for metric in self.metrics
-        }
+__all__ = ["Evaluator"]

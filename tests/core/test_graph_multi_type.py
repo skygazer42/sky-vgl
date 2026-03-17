@@ -39,3 +39,20 @@ def test_temporal_graph_keeps_time_metadata():
         torch.tensor([1, 2]),
     )
 
+
+def test_temporal_single_relation_graph_exposes_default_edge_index_and_edata():
+    edge_index = torch.tensor([[0, 1], [1, 0]])
+    timestamp = torch.tensor([1, 2])
+    graph = Graph.temporal(
+        nodes={"node": {"x": torch.randn(2, 4)}},
+        edges={
+            ("node", "interacts", "node"): {
+                "edge_index": edge_index,
+                "timestamp": timestamp,
+            }
+        },
+        time_attr="timestamp",
+    )
+
+    assert torch.equal(graph.edge_index, edge_index)
+    assert torch.equal(graph.edata["timestamp"], timestamp)

@@ -4,6 +4,8 @@
 
 `Graph` is the canonical graph object in this package. Homogeneous graphs are a special case of the same abstraction used for heterogeneous and temporal graphs.
 
+Homogeneous graphs can carry edge-level tensors through `Graph.homo(edge_data={...})`. These tensors are exposed through `graph.edata` and are what edge-aware operators consume.
+
 ## GraphView
 
 `GraphView` is a lightweight projection over an existing graph, used for operations such as `snapshot()` and `window()`.
@@ -22,9 +24,24 @@ For graph classification it also carries:
 
 `MessagePassing` is the low-level neural primitive for graph convolutions. `GCNConv`, `SAGEConv`, and `GATConv` build on top of it.
 
-Built-in convolution layers live under `vgl.nn.conv`. The current homogeneous operator set includes `GCNConv`, `SAGEConv`, `GATConv`, `GINConv`, `GATv2Conv`, `APPNPConv`, `TAGConv`, `SGConv`, `ChebConv`, `AGNNConv`, `LightGCNConv`, `LGConv`, `FAGCNConv`, `ARMAConv`, `GPRGNNConv`, `MixHopConv`, `BernConv`, `SSGConv`, `DAGNNConv`, `GCN2Conv`, `GraphConv`, `H2GCNConv`, `EGConv`, `LEConv`, `ResGatedGraphConv`, `GatedGraphConv`, `ClusterGCNConv`, `GENConv`, `FiLMConv`, `SimpleConv`, `EdgeConv`, `FeaStConv`, `MFConv`, `PNAConv`, `GeneralConv`, `AntiSymmetricConv`, `TransformerConv`, `WLConvContinuous`, `SuperGATConv`, and `DirGNNConv`.
+Built-in homogeneous convolution layers live under `vgl.nn.conv`. The current set includes `GCNConv`, `SAGEConv`, `GATConv`, `GINConv`, `GATv2Conv`, `APPNPConv`, `TAGConv`, `SGConv`, `ChebConv`, `AGNNConv`, `LightGCNConv`, `LGConv`, `FAGCNConv`, `ARMAConv`, `GPRGNNConv`, `MixHopConv`, `BernConv`, `SSGConv`, `DAGNNConv`, `GCN2Conv`, `GraphConv`, `H2GCNConv`, `EGConv`, `LEConv`, `ResGatedGraphConv`, `GatedGraphConv`, `ClusterGCNConv`, `GENConv`, `FiLMConv`, `SimpleConv`, `EdgeConv`, `FeaStConv`, `MFConv`, `PNAConv`, `GeneralConv`, `AntiSymmetricConv`, `TransformerConv`, `WLConvContinuous`, `SuperGATConv`, and `DirGNNConv`.
+
+For heterogeneous graphs, the package also exposes relation-aware operators such as `RGCNConv`, `HGTConv`, and `HANConv`.
+
+For homogeneous graphs with edge features, the package also exposes edge-aware operators such as `NNConv`, `ECConv`, `GINEConv`, and `GMMConv`.
 
 `GroupRevRes` lives under `vgl.nn` and wraps equal-width homogeneous operators into a grouped reversible residual block.
+
+## Graph Transformer Encoders
+
+Beyond message-passing layers, `vgl.nn` also exposes graph transformer encoder blocks:
+
+- `GraphTransformerEncoderLayer` and `GraphTransformerEncoder`
+- `GraphormerEncoderLayer` and `GraphormerEncoder`
+- `GPSLayer`
+- `NAGphormerEncoder`
+
+These modules keep the same lightweight graph contract and can be dropped into node-level models without changing the training pipeline.
 
 ## SampleRecord
 
@@ -94,10 +111,25 @@ The package currently exposes:
 `Trainer` runs the optimization loop without taking ownership of the core graph abstraction. It owns:
 
 - `fit(train, val=None)`
+- `TrainingHistory` as the structured return type from `fit(...)`
 - `evaluate(data, stage="val")`
 - `test(data)`
+- `load_checkpoint(path, map_location=None, weights_only=True)`
+- `restore_checkpoint(model, path, map_location=None, strict=True, weights_only=True)`
+- optional `callbacks=[...]` with `on_fit_start`, `on_epoch_end`, and `on_fit_end` hooks
+- `StopTraining` for callback-driven early stopping
+- built-in `EarlyStopping` and `HistoryLogger` callbacks
 - monitor-based best-model selection
 - optional best-checkpoint saving
+
+The `vgl.engine` package also exposes module-level checkpoint helpers and format constants:
+
+- `save_checkpoint(...)`
+- `load_checkpoint(...)`
+- `restore_checkpoint(...)`
+- `TrainingHistory`
+- `CHECKPOINT_FORMAT`
+- `CHECKPOINT_FORMAT_VERSION`
 
 The current training layer supports:
 

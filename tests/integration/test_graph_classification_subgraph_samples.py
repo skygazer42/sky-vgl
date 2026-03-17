@@ -1,13 +1,11 @@
 import torch
 from torch import nn
 
-from vgl import Graph
-from vgl.data.dataset import ListDataset
-from vgl.data.loader import Loader
-from vgl.data.sampler import NodeSeedSubgraphSampler
+from vgl.dataloading import DataLoader, ListDataset, NodeSeedSubgraphSampler
+from vgl.engine import Trainer
+from vgl.graph import Graph
 from vgl.nn.readout import global_mean_pool
-from vgl.train.tasks import GraphClassificationTask
-from vgl.train.trainer import Trainer
+from vgl.tasks import GraphClassificationTask
 
 
 class TinyGraphClassifier(nn.Module):
@@ -35,7 +33,7 @@ def test_subgraph_sample_graph_classification_runs():
             (source_graph, {"seed": 2, "label": 0, "sample_id": "s2", "source_graph_id": "root"}),
         ]
     )
-    loader = Loader(
+    loader = DataLoader(
         dataset=dataset,
         sampler=NodeSeedSubgraphSampler(),
         batch_size=2,
@@ -53,4 +51,3 @@ def test_subgraph_sample_graph_classification_runs():
     result = trainer.fit(loader)
 
     assert result["epochs"] == 1
-

@@ -1,33 +1,5 @@
-from dataclasses import dataclass, field
-from typing import Any
+from vgl.dataloading.records import LinkPredictionRecord as LinkPredictionRecord
+from vgl.dataloading.records import SampleRecord as SampleRecord
+from vgl.dataloading.records import TemporalEventRecord as TemporalEventRecord
 
-
-@dataclass(slots=True)
-class SampleRecord:
-    graph: Any
-    metadata: dict[str, Any] = field(default_factory=dict)
-    sample_id: str | None = None
-    source_graph_id: str | None = None
-    subgraph_seed: Any | None = None
-
-
-@dataclass(slots=True)
-class LinkPredictionRecord:
-    graph: Any
-    src_index: int
-    dst_index: int
-    label: int
-    metadata: dict[str, Any] = field(default_factory=dict)
-    sample_id: str | None = None
-
-
-@dataclass(slots=True)
-class TemporalEventRecord:
-    graph: Any
-    src_index: int
-    dst_index: int
-    timestamp: int
-    label: int
-    event_features: Any | None = None
-    metadata: dict[str, Any] = field(default_factory=dict)
-    sample_id: str | None = None
+__all__ = ["SampleRecord", "LinkPredictionRecord", "TemporalEventRecord"]

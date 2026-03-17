@@ -1,6 +1,4 @@
-class GNNError(Exception):
-    pass
+from vgl.graph.errors import GNNError as GNNError
+from vgl.graph.errors import SchemaError as SchemaError
 
-
-class SchemaError(GNNError, ValueError):
-    pass
+__all__ = ["GNNError", "SchemaError"]

@@ -1,8 +1,8 @@
 import torch
 
 from examples.homo.link_prediction import TinyLinkPredictor, build_demo_loader
-from vgl.train.tasks import LinkPredictionTask
-from vgl.train.trainer import Trainer
+from vgl.engine import Trainer
+from vgl.tasks import LinkPredictionTask
 
 
 def test_end_to_end_link_prediction_runs():

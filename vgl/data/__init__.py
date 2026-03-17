@@ -1,18 +1,21 @@
-from vgl.data.dataset import ListDataset as ListDataset
-from vgl.data.loader import Loader as Loader
-from vgl.data.sampler import FullGraphSampler as FullGraphSampler
-from vgl.data.sampler import NodeSeedSubgraphSampler as NodeSeedSubgraphSampler
-from vgl.data.sample import LinkPredictionRecord as LinkPredictionRecord
-from vgl.data.sample import SampleRecord as SampleRecord
-from vgl.data.sample import TemporalEventRecord as TemporalEventRecord
+from vgl.dataloading import DataLoader as DataLoader
+from vgl.dataloading import FullGraphSampler as FullGraphSampler
+from vgl.dataloading import LinkPredictionRecord as LinkPredictionRecord
+from vgl.dataloading import ListDataset as ListDataset
+from vgl.dataloading import Loader as Loader
+from vgl.dataloading import NodeSeedSubgraphSampler as NodeSeedSubgraphSampler
+from vgl.dataloading import SampleRecord as SampleRecord
+from vgl.dataloading import Sampler as Sampler
+from vgl.dataloading import TemporalEventRecord as TemporalEventRecord
 
 __all__ = [
+    "DataLoader",
     "ListDataset",
     "Loader",
+    "Sampler",
     "FullGraphSampler",
     "NodeSeedSubgraphSampler",
     "LinkPredictionRecord",
     "SampleRecord",
     "TemporalEventRecord",
 ]
-

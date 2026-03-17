@@ -1,8 +1,8 @@
 import torch
 
 from examples.temporal.event_prediction import TinyTemporalEventModel, build_demo_loader
-from vgl.train.tasks import TemporalEventPredictionTask
-from vgl.train.trainer import Trainer
+from vgl.engine import Trainer
+from vgl.tasks import TemporalEventPredictionTask
 
 
 def test_end_to_end_temporal_event_prediction_runs():
@@ -18,4 +18,3 @@ def test_end_to_end_temporal_event_prediction_runs():
     result = trainer.fit(loader)
 
     assert result["epochs"] == 1
-
