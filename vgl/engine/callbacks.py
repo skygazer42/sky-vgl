@@ -150,6 +150,21 @@ class AdaptiveGradientClipping(Callback):
             grad.copy_(torch.where(trigger, clipped_grad, grad))
 
 
+class GradientValueClipping(Callback):
+    def __init__(self, clip_value):
+        if clip_value <= 0.0:
+            raise ValueError("clip_value must be > 0")
+        self.clip_value = float(clip_value)
+
+    def on_before_optimizer_step(self, trainer, step):
+        del step
+        for parameter in trainer.model.parameters():
+            grad = parameter.grad
+            if grad is None or grad.is_sparse:
+                continue
+            grad.clamp_(min=-self.clip_value, max=self.clip_value)
+
+
 class GradientCentralization(Callback):
     def __init__(self, conv_only=False):
         if not isinstance(conv_only, bool):
@@ -165,6 +180,67 @@ class GradientCentralization(Callback):
                 continue
             dims = tuple(range(1, grad.ndim))
             grad.sub_(grad.mean(dim=dims, keepdim=True))
+
+
+class GradientNoiseInjection(Callback):
+    def __init__(self, std, decay_exponent=0.0, seed=0):
+        if std <= 0.0:
+            raise ValueError("std must be > 0")
+        if decay_exponent < 0.0:
+            raise ValueError("decay_exponent must be >= 0")
+        self.std = float(std)
+        self.decay_exponent = float(decay_exponent)
+        self.seed = int(seed)
+        self.step_count = 0
+        self._generator = None
+
+    def _ensure_generator(self):
+        if self._generator is None:
+            self._generator = torch.Generator(device="cpu")
+            self._generator.manual_seed(self.seed)
+        return self._generator
+
+    def _std_for_step(self, step):
+        step = int(step)
+        return self.std / (float(step) ** self.decay_exponent)
+
+    def on_fit_start(self, trainer, history):
+        del trainer, history
+        self.step_count = 0
+        self._generator = torch.Generator(device="cpu")
+        self._generator.manual_seed(self.seed)
+
+    def state_dict(self):
+        generator_state = None
+        if self._generator is not None:
+            generator_state = self._generator.get_state()
+        return {
+            "step_count": self.step_count,
+            "generator_state": generator_state,
+        }
+
+    def load_state_dict(self, state):
+        self.step_count = int(state.get("step_count", 0))
+        generator_state = state.get("generator_state")
+        if generator_state is None:
+            return
+        self._ensure_generator().set_state(generator_state)
+
+    def on_before_optimizer_step(self, trainer, step):
+        current_std = self._std_for_step(step)
+        generator = self._ensure_generator()
+        for parameter in trainer.model.parameters():
+            grad = parameter.grad
+            if grad is None or grad.is_sparse:
+                continue
+            noise = torch.randn(
+                grad.shape,
+                generator=generator,
+                device="cpu",
+                dtype=torch.float32,
+            ).to(device=grad.device, dtype=grad.dtype)
+            grad.add_(noise, alpha=current_std)
+        self.step_count = int(step)
 
 
 class DeferredReweighting(Callback):
@@ -245,6 +321,871 @@ class DeferredReweighting(Callback):
             self._task.class_weight = None
         else:
             self._task.class_weight = self.original_class_weight.detach().clone()
+
+
+class LabelSmoothingScheduler(Callback):
+    def __init__(self, start_value, end_value, *, start_epoch=1, end_epoch=1):
+        if start_value < 0.0 or start_value >= 1.0:
+            raise ValueError("start_value must be in [0, 1)")
+        if end_value < 0.0 or end_value >= 1.0:
+            raise ValueError("end_value must be in [0, 1)")
+        if start_epoch < 1:
+            raise ValueError("start_epoch must be >= 1")
+        if end_epoch < start_epoch:
+            raise ValueError("end_epoch must be >= start_epoch")
+        self.start_value = float(start_value)
+        self.end_value = float(end_value)
+        self.start_epoch = int(start_epoch)
+        self.end_epoch = int(end_epoch)
+        self.original_label_smoothing = None
+        self.current_value = float(start_value)
+        self._task = None
+
+    def _resolve_task(self, task):
+        while hasattr(task, "base_task"):
+            task = task.base_task
+        return task
+
+    def _validate_task(self, task):
+        if not hasattr(task, "label_smoothing"):
+            raise ValueError("LabelSmoothingScheduler requires task.label_smoothing")
+
+    def _value_for_epoch(self, epoch):
+        epoch = int(epoch)
+        if epoch < self.start_epoch:
+            return self.start_value
+        if self.end_epoch == self.start_epoch:
+            return self.end_value
+        if epoch >= self.end_epoch:
+            return self.end_value
+        progress = (epoch - self.start_epoch) / (self.end_epoch - self.start_epoch)
+        return self.start_value + progress * (self.end_value - self.start_value)
+
+    def _apply_label_smoothing(self):
+        if self._task is not None:
+            self._task.label_smoothing = float(self.current_value)
+
+    def on_fit_start(self, trainer, history):
+        self._task = self._resolve_task(trainer.task)
+        self._validate_task(self._task)
+        self.original_label_smoothing = float(self._task.label_smoothing)
+        next_epoch = int(history["completed_epochs"]) + 1
+        self.current_value = self._value_for_epoch(next_epoch)
+        self._apply_label_smoothing()
+
+    def state_dict(self):
+        return {
+            "current_value": self.current_value,
+        }
+
+    def load_state_dict(self, state):
+        self.current_value = float(state.get("current_value", self.current_value))
+        self._apply_label_smoothing()
+
+    def on_epoch_end(self, trainer, epoch, train_summary, val_summary, history):
+        del trainer, train_summary, val_summary
+        if epoch >= history["epochs"]:
+            return
+        self.current_value = self._value_for_epoch(epoch + 1)
+        self._apply_label_smoothing()
+
+    def on_fit_end(self, trainer, history):
+        del trainer, history
+        if self._task is not None and self.original_label_smoothing is not None:
+            self._task.label_smoothing = float(self.original_label_smoothing)
+
+
+class FocalGammaScheduler(Callback):
+    def __init__(self, start_value, end_value, *, start_epoch=1, end_epoch=1):
+        if start_value < 0.0:
+            raise ValueError("start_value must be >= 0")
+        if end_value < 0.0:
+            raise ValueError("end_value must be >= 0")
+        if start_epoch < 1:
+            raise ValueError("start_epoch must be >= 1")
+        if end_epoch < start_epoch:
+            raise ValueError("end_epoch must be >= start_epoch")
+        self.start_value = float(start_value)
+        self.end_value = float(end_value)
+        self.start_epoch = int(start_epoch)
+        self.end_epoch = int(end_epoch)
+        self.original_focal_gamma = None
+        self.current_value = float(start_value)
+        self._task = None
+
+    def _resolve_task(self, task):
+        while hasattr(task, "base_task"):
+            task = task.base_task
+        return task
+
+    def _validate_task(self, task):
+        if not hasattr(task, "focal_gamma"):
+            raise ValueError("FocalGammaScheduler requires task.focal_gamma")
+
+    def _value_for_epoch(self, epoch):
+        epoch = int(epoch)
+        if epoch < self.start_epoch:
+            return self.start_value
+        if self.end_epoch == self.start_epoch:
+            return self.end_value
+        if epoch >= self.end_epoch:
+            return self.end_value
+        progress = (epoch - self.start_epoch) / (self.end_epoch - self.start_epoch)
+        return self.start_value + progress * (self.end_value - self.start_value)
+
+    def _apply_focal_gamma(self):
+        if self._task is not None:
+            self._task.focal_gamma = float(self.current_value)
+
+    def on_fit_start(self, trainer, history):
+        self._task = self._resolve_task(trainer.task)
+        self._validate_task(self._task)
+        self.original_focal_gamma = float(self._task.focal_gamma)
+        next_epoch = int(history["completed_epochs"]) + 1
+        self.current_value = self._value_for_epoch(next_epoch)
+        self._apply_focal_gamma()
+
+    def state_dict(self):
+        return {
+            "current_value": self.current_value,
+        }
+
+    def load_state_dict(self, state):
+        self.current_value = float(state.get("current_value", self.current_value))
+        self._apply_focal_gamma()
+
+    def on_epoch_end(self, trainer, epoch, train_summary, val_summary, history):
+        del trainer, train_summary, val_summary
+        if epoch >= history["epochs"]:
+            return
+        self.current_value = self._value_for_epoch(epoch + 1)
+        self._apply_focal_gamma()
+
+    def on_fit_end(self, trainer, history):
+        del trainer, history
+        if self._task is not None and self.original_focal_gamma is not None:
+            self._task.focal_gamma = float(self.original_focal_gamma)
+
+
+class LogitAdjustTauScheduler(Callback):
+    def __init__(self, start_value, end_value, *, start_epoch=1, end_epoch=1):
+        if start_value < 0.0:
+            raise ValueError("start_value must be >= 0")
+        if end_value < 0.0:
+            raise ValueError("end_value must be >= 0")
+        if start_epoch < 1:
+            raise ValueError("start_epoch must be >= 1")
+        if end_epoch < start_epoch:
+            raise ValueError("end_epoch must be >= start_epoch")
+        self.start_value = float(start_value)
+        self.end_value = float(end_value)
+        self.start_epoch = int(start_epoch)
+        self.end_epoch = int(end_epoch)
+        self.original_logit_adjust_tau = None
+        self.current_value = float(start_value)
+        self._task = None
+
+    def _resolve_task(self, task):
+        while hasattr(task, "base_task"):
+            task = task.base_task
+        return task
+
+    def _validate_task(self, task):
+        if not hasattr(task, "logit_adjust_tau"):
+            raise ValueError("LogitAdjustTauScheduler requires task.logit_adjust_tau")
+
+    def _value_for_epoch(self, epoch):
+        epoch = int(epoch)
+        if epoch < self.start_epoch:
+            return self.start_value
+        if self.end_epoch == self.start_epoch:
+            return self.end_value
+        if epoch >= self.end_epoch:
+            return self.end_value
+        progress = (epoch - self.start_epoch) / (self.end_epoch - self.start_epoch)
+        return self.start_value + progress * (self.end_value - self.start_value)
+
+    def _apply_logit_adjust_tau(self):
+        if self._task is not None:
+            self._task.logit_adjust_tau = float(self.current_value)
+
+    def on_fit_start(self, trainer, history):
+        self._task = self._resolve_task(trainer.task)
+        self._validate_task(self._task)
+        self.original_logit_adjust_tau = float(self._task.logit_adjust_tau)
+        next_epoch = int(history["completed_epochs"]) + 1
+        self.current_value = self._value_for_epoch(next_epoch)
+        self._apply_logit_adjust_tau()
+
+    def state_dict(self):
+        return {
+            "current_value": self.current_value,
+        }
+
+    def load_state_dict(self, state):
+        self.current_value = float(state.get("current_value", self.current_value))
+        self._apply_logit_adjust_tau()
+
+    def on_epoch_end(self, trainer, epoch, train_summary, val_summary, history):
+        del trainer, train_summary, val_summary
+        if epoch >= history["epochs"]:
+            return
+        self.current_value = self._value_for_epoch(epoch + 1)
+        self._apply_logit_adjust_tau()
+
+    def on_fit_end(self, trainer, history):
+        del trainer, history
+        if self._task is not None and self.original_logit_adjust_tau is not None:
+            self._task.logit_adjust_tau = float(self.original_logit_adjust_tau)
+
+
+class LdamMarginScheduler(Callback):
+    def __init__(self, start_value, end_value, *, start_epoch=1, end_epoch=1):
+        if start_value <= 0.0:
+            raise ValueError("start_value must be > 0")
+        if end_value <= 0.0:
+            raise ValueError("end_value must be > 0")
+        if start_epoch < 1:
+            raise ValueError("start_epoch must be >= 1")
+        if end_epoch < start_epoch:
+            raise ValueError("end_epoch must be >= start_epoch")
+        self.start_value = float(start_value)
+        self.end_value = float(end_value)
+        self.start_epoch = int(start_epoch)
+        self.end_epoch = int(end_epoch)
+        self.original_ldam_max_margin = None
+        self.current_value = float(start_value)
+        self._task = None
+
+    def _resolve_task(self, task):
+        while hasattr(task, "base_task"):
+            task = task.base_task
+        return task
+
+    def _validate_task(self, task):
+        if not hasattr(task, "ldam_max_margin"):
+            raise ValueError("LdamMarginScheduler requires task.ldam_max_margin")
+
+    def _value_for_epoch(self, epoch):
+        epoch = int(epoch)
+        if epoch < self.start_epoch:
+            return self.start_value
+        if self.end_epoch == self.start_epoch:
+            return self.end_value
+        if epoch >= self.end_epoch:
+            return self.end_value
+        progress = (epoch - self.start_epoch) / (self.end_epoch - self.start_epoch)
+        return self.start_value + progress * (self.end_value - self.start_value)
+
+    def _apply_ldam_max_margin(self):
+        if self._task is not None:
+            self._task.ldam_max_margin = float(self.current_value)
+
+    def on_fit_start(self, trainer, history):
+        self._task = self._resolve_task(trainer.task)
+        self._validate_task(self._task)
+        self.original_ldam_max_margin = float(self._task.ldam_max_margin)
+        next_epoch = int(history["completed_epochs"]) + 1
+        self.current_value = self._value_for_epoch(next_epoch)
+        self._apply_ldam_max_margin()
+
+    def state_dict(self):
+        return {
+            "current_value": self.current_value,
+        }
+
+    def load_state_dict(self, state):
+        self.current_value = float(state.get("current_value", self.current_value))
+        self._apply_ldam_max_margin()
+
+    def on_epoch_end(self, trainer, epoch, train_summary, val_summary, history):
+        del trainer, train_summary, val_summary
+        if epoch >= history["epochs"]:
+            return
+        self.current_value = self._value_for_epoch(epoch + 1)
+        self._apply_ldam_max_margin()
+
+    def on_fit_end(self, trainer, history):
+        del trainer, history
+        if self._task is not None and self.original_ldam_max_margin is not None:
+            self._task.ldam_max_margin = float(self.original_ldam_max_margin)
+
+
+class PosWeightScheduler(Callback):
+    def __init__(self, start_value, end_value, *, start_epoch=1, end_epoch=1):
+        if start_value <= 0.0:
+            raise ValueError("start_value must be > 0")
+        if end_value <= 0.0:
+            raise ValueError("end_value must be > 0")
+        if start_epoch < 1:
+            raise ValueError("start_epoch must be >= 1")
+        if end_epoch < start_epoch:
+            raise ValueError("end_epoch must be >= start_epoch")
+        self.start_value = float(start_value)
+        self.end_value = float(end_value)
+        self.start_epoch = int(start_epoch)
+        self.end_epoch = int(end_epoch)
+        self.original_pos_weight = None
+        self.current_value = float(start_value)
+        self._task = None
+
+    def _resolve_task(self, task):
+        while hasattr(task, "base_task"):
+            task = task.base_task
+        return task
+
+    def _validate_task(self, task):
+        if not hasattr(task, "pos_weight"):
+            raise ValueError("PosWeightScheduler requires task.pos_weight")
+
+    def _value_for_epoch(self, epoch):
+        epoch = int(epoch)
+        if epoch < self.start_epoch:
+            return self.start_value
+        if self.end_epoch == self.start_epoch:
+            return self.end_value
+        if epoch >= self.end_epoch:
+            return self.end_value
+        progress = (epoch - self.start_epoch) / (self.end_epoch - self.start_epoch)
+        return self.start_value + progress * (self.end_value - self.start_value)
+
+    def _scheduled_pos_weight(self):
+        if self.original_pos_weight is None:
+            return torch.tensor([self.current_value], dtype=torch.float32)
+        return torch.full_like(self.original_pos_weight, self.current_value)
+
+    def _apply_pos_weight(self):
+        if self._task is not None:
+            self._task.pos_weight = self._scheduled_pos_weight()
+
+    def on_fit_start(self, trainer, history):
+        self._task = self._resolve_task(trainer.task)
+        self._validate_task(self._task)
+        if self._task.pos_weight is None:
+            self.original_pos_weight = None
+        else:
+            self.original_pos_weight = self._task.pos_weight.detach().clone()
+        next_epoch = int(history["completed_epochs"]) + 1
+        self.current_value = self._value_for_epoch(next_epoch)
+        self._apply_pos_weight()
+
+    def state_dict(self):
+        return {
+            "current_value": self.current_value,
+        }
+
+    def load_state_dict(self, state):
+        self.current_value = float(state.get("current_value", self.current_value))
+        self._apply_pos_weight()
+
+    def on_epoch_end(self, trainer, epoch, train_summary, val_summary, history):
+        del trainer, train_summary, val_summary
+        if epoch >= history["epochs"]:
+            return
+        self.current_value = self._value_for_epoch(epoch + 1)
+        self._apply_pos_weight()
+
+    def on_fit_end(self, trainer, history):
+        del trainer, history
+        if self._task is None:
+            return
+        if self.original_pos_weight is None:
+            self._task.pos_weight = None
+        else:
+            self._task.pos_weight = self.original_pos_weight.detach().clone()
+
+
+class BootstrapBetaScheduler(Callback):
+    def __init__(self, start_value, end_value, *, start_epoch=1, end_epoch=1):
+        if start_value < 0.0 or start_value > 1.0:
+            raise ValueError("start_value must be in [0, 1]")
+        if end_value < 0.0 or end_value > 1.0:
+            raise ValueError("end_value must be in [0, 1]")
+        if start_epoch < 1:
+            raise ValueError("start_epoch must be >= 1")
+        if end_epoch < start_epoch:
+            raise ValueError("end_epoch must be >= start_epoch")
+        self.start_value = float(start_value)
+        self.end_value = float(end_value)
+        self.start_epoch = int(start_epoch)
+        self.end_epoch = int(end_epoch)
+        self.original_beta = None
+        self.current_value = float(start_value)
+        self._task = None
+
+    def _resolve_task(self, task):
+        while not hasattr(task, "beta"):
+            if not hasattr(task, "base_task"):
+                raise ValueError("BootstrapBetaScheduler requires task.beta")
+            task = task.base_task
+        return task
+
+    def _value_for_epoch(self, epoch):
+        epoch = int(epoch)
+        if epoch < self.start_epoch:
+            return self.start_value
+        if self.end_epoch == self.start_epoch:
+            return self.end_value
+        if epoch >= self.end_epoch:
+            return self.end_value
+        progress = (epoch - self.start_epoch) / (self.end_epoch - self.start_epoch)
+        return self.start_value + progress * (self.end_value - self.start_value)
+
+    def _apply_beta(self):
+        if self._task is not None:
+            self._task.beta = float(self.current_value)
+
+    def on_fit_start(self, trainer, history):
+        self._task = self._resolve_task(trainer.task)
+        self.original_beta = float(self._task.beta)
+        next_epoch = int(history["completed_epochs"]) + 1
+        self.current_value = self._value_for_epoch(next_epoch)
+        self._apply_beta()
+
+    def state_dict(self):
+        return {
+            "current_value": self.current_value,
+        }
+
+    def load_state_dict(self, state):
+        self.current_value = float(state.get("current_value", self.current_value))
+        self._apply_beta()
+
+    def on_epoch_end(self, trainer, epoch, train_summary, val_summary, history):
+        del trainer, train_summary, val_summary
+        if epoch >= history["epochs"]:
+            return
+        self.current_value = self._value_for_epoch(epoch + 1)
+        self._apply_beta()
+
+    def on_fit_end(self, trainer, history):
+        del trainer, history
+        if self._task is not None and self.original_beta is not None:
+            self._task.beta = float(self.original_beta)
+
+
+class ConfidencePenaltyScheduler(Callback):
+    def __init__(self, start_value, end_value, *, start_epoch=1, end_epoch=1):
+        if start_value < 0.0:
+            raise ValueError("start_value must be >= 0")
+        if end_value < 0.0:
+            raise ValueError("end_value must be >= 0")
+        if start_epoch < 1:
+            raise ValueError("start_epoch must be >= 1")
+        if end_epoch < start_epoch:
+            raise ValueError("end_epoch must be >= start_epoch")
+        self.start_value = float(start_value)
+        self.end_value = float(end_value)
+        self.start_epoch = int(start_epoch)
+        self.end_epoch = int(end_epoch)
+        self.original_coefficient = None
+        self.current_value = float(start_value)
+        self._task = None
+
+    def _resolve_task(self, task):
+        while not hasattr(task, "coefficient"):
+            if not hasattr(task, "base_task"):
+                raise ValueError("ConfidencePenaltyScheduler requires task.coefficient")
+            task = task.base_task
+        return task
+
+    def _value_for_epoch(self, epoch):
+        epoch = int(epoch)
+        if epoch < self.start_epoch:
+            return self.start_value
+        if self.end_epoch == self.start_epoch:
+            return self.end_value
+        if epoch >= self.end_epoch:
+            return self.end_value
+        progress = (epoch - self.start_epoch) / (self.end_epoch - self.start_epoch)
+        return self.start_value + progress * (self.end_value - self.start_value)
+
+    def _apply_coefficient(self):
+        if self._task is not None:
+            self._task.coefficient = float(self.current_value)
+
+    def on_fit_start(self, trainer, history):
+        self._task = self._resolve_task(trainer.task)
+        self.original_coefficient = float(self._task.coefficient)
+        next_epoch = int(history["completed_epochs"]) + 1
+        self.current_value = self._value_for_epoch(next_epoch)
+        self._apply_coefficient()
+
+    def state_dict(self):
+        return {
+            "current_value": self.current_value,
+        }
+
+    def load_state_dict(self, state):
+        self.current_value = float(state.get("current_value", self.current_value))
+        self._apply_coefficient()
+
+    def on_epoch_end(self, trainer, epoch, train_summary, val_summary, history):
+        del trainer, train_summary, val_summary
+        if epoch >= history["epochs"]:
+            return
+        self.current_value = self._value_for_epoch(epoch + 1)
+        self._apply_coefficient()
+
+    def on_fit_end(self, trainer, history):
+        del trainer, history
+        if self._task is not None and self.original_coefficient is not None:
+            self._task.coefficient = float(self.original_coefficient)
+
+
+class FloodingLevelScheduler(Callback):
+    def __init__(self, start_value, end_value, *, start_epoch=1, end_epoch=1):
+        if start_value < 0.0:
+            raise ValueError("start_value must be >= 0")
+        if end_value < 0.0:
+            raise ValueError("end_value must be >= 0")
+        if start_epoch < 1:
+            raise ValueError("start_epoch must be >= 1")
+        if end_epoch < start_epoch:
+            raise ValueError("end_epoch must be >= start_epoch")
+        self.start_value = float(start_value)
+        self.end_value = float(end_value)
+        self.start_epoch = int(start_epoch)
+        self.end_epoch = int(end_epoch)
+        self.original_level = None
+        self.current_value = float(start_value)
+        self._task = None
+
+    def _resolve_task(self, task):
+        while not hasattr(task, "level"):
+            if not hasattr(task, "base_task"):
+                raise ValueError("FloodingLevelScheduler requires task.level")
+            task = task.base_task
+        return task
+
+    def _value_for_epoch(self, epoch):
+        epoch = int(epoch)
+        if epoch < self.start_epoch:
+            return self.start_value
+        if self.end_epoch == self.start_epoch:
+            return self.end_value
+        if epoch >= self.end_epoch:
+            return self.end_value
+        progress = (epoch - self.start_epoch) / (self.end_epoch - self.start_epoch)
+        return self.start_value + progress * (self.end_value - self.start_value)
+
+    def _apply_level(self):
+        if self._task is not None:
+            self._task.level = float(self.current_value)
+
+    def on_fit_start(self, trainer, history):
+        self._task = self._resolve_task(trainer.task)
+        self.original_level = float(self._task.level)
+        next_epoch = int(history["completed_epochs"]) + 1
+        self.current_value = self._value_for_epoch(next_epoch)
+        self._apply_level()
+
+    def state_dict(self):
+        return {
+            "current_value": self.current_value,
+        }
+
+    def load_state_dict(self, state):
+        self.current_value = float(state.get("current_value", self.current_value))
+        self._apply_level()
+
+    def on_epoch_end(self, trainer, epoch, train_summary, val_summary, history):
+        del trainer, train_summary, val_summary
+        if epoch >= history["epochs"]:
+            return
+        self.current_value = self._value_for_epoch(epoch + 1)
+        self._apply_level()
+
+    def on_fit_end(self, trainer, history):
+        del trainer, history
+        if self._task is not None and self.original_level is not None:
+            self._task.level = float(self.original_level)
+
+
+class GeneralizedCrossEntropyScheduler(Callback):
+    def __init__(self, start_value, end_value, *, start_epoch=1, end_epoch=1):
+        if start_value <= 0.0 or start_value > 1.0:
+            raise ValueError("start_value must be in (0, 1]")
+        if end_value <= 0.0 or end_value > 1.0:
+            raise ValueError("end_value must be in (0, 1]")
+        if start_epoch < 1:
+            raise ValueError("start_epoch must be >= 1")
+        if end_epoch < start_epoch:
+            raise ValueError("end_epoch must be >= start_epoch")
+        self.start_value = float(start_value)
+        self.end_value = float(end_value)
+        self.start_epoch = int(start_epoch)
+        self.end_epoch = int(end_epoch)
+        self.original_q = None
+        self.current_value = float(start_value)
+        self._task = None
+
+    def _resolve_task(self, task):
+        while not hasattr(task, "q"):
+            if not hasattr(task, "base_task"):
+                raise ValueError("GeneralizedCrossEntropyScheduler requires task.q")
+            task = task.base_task
+        return task
+
+    def _value_for_epoch(self, epoch):
+        epoch = int(epoch)
+        if epoch < self.start_epoch:
+            return self.start_value
+        if self.end_epoch == self.start_epoch:
+            return self.end_value
+        if epoch >= self.end_epoch:
+            return self.end_value
+        progress = (epoch - self.start_epoch) / (self.end_epoch - self.start_epoch)
+        return self.start_value + progress * (self.end_value - self.start_value)
+
+    def _apply_q(self):
+        if self._task is not None:
+            self._task.q = float(self.current_value)
+
+    def on_fit_start(self, trainer, history):
+        self._task = self._resolve_task(trainer.task)
+        self.original_q = float(self._task.q)
+        next_epoch = int(history["completed_epochs"]) + 1
+        self.current_value = self._value_for_epoch(next_epoch)
+        self._apply_q()
+
+    def state_dict(self):
+        return {
+            "current_value": self.current_value,
+        }
+
+    def load_state_dict(self, state):
+        self.current_value = float(state.get("current_value", self.current_value))
+        self._apply_q()
+
+    def on_epoch_end(self, trainer, epoch, train_summary, val_summary, history):
+        del trainer, train_summary, val_summary
+        if epoch >= history["epochs"]:
+            return
+        self.current_value = self._value_for_epoch(epoch + 1)
+        self._apply_q()
+
+    def on_fit_end(self, trainer, history):
+        del trainer, history
+        if self._task is not None and self.original_q is not None:
+            self._task.q = float(self.original_q)
+
+
+class Poly1EpsilonScheduler(Callback):
+    def __init__(self, start_value, end_value, *, start_epoch=1, end_epoch=1):
+        if start_value < 0.0:
+            raise ValueError("start_value must be >= 0")
+        if end_value < 0.0:
+            raise ValueError("end_value must be >= 0")
+        if start_epoch < 1:
+            raise ValueError("start_epoch must be >= 1")
+        if end_epoch < start_epoch:
+            raise ValueError("end_epoch must be >= start_epoch")
+        self.start_value = float(start_value)
+        self.end_value = float(end_value)
+        self.start_epoch = int(start_epoch)
+        self.end_epoch = int(end_epoch)
+        self.original_epsilon = None
+        self.current_value = float(start_value)
+        self._task = None
+
+    def _resolve_task(self, task):
+        while not hasattr(task, "epsilon"):
+            if not hasattr(task, "base_task"):
+                raise ValueError("Poly1EpsilonScheduler requires task.epsilon")
+            task = task.base_task
+        return task
+
+    def _value_for_epoch(self, epoch):
+        epoch = int(epoch)
+        if epoch < self.start_epoch:
+            return self.start_value
+        if self.end_epoch == self.start_epoch:
+            return self.end_value
+        if epoch >= self.end_epoch:
+            return self.end_value
+        progress = (epoch - self.start_epoch) / (self.end_epoch - self.start_epoch)
+        return self.start_value + progress * (self.end_value - self.start_value)
+
+    def _apply_epsilon(self):
+        if self._task is not None:
+            self._task.epsilon = float(self.current_value)
+
+    def on_fit_start(self, trainer, history):
+        self._task = self._resolve_task(trainer.task)
+        self.original_epsilon = float(self._task.epsilon)
+        next_epoch = int(history["completed_epochs"]) + 1
+        self.current_value = self._value_for_epoch(next_epoch)
+        self._apply_epsilon()
+
+    def state_dict(self):
+        return {
+            "current_value": self.current_value,
+        }
+
+    def load_state_dict(self, state):
+        self.current_value = float(state.get("current_value", self.current_value))
+        self._apply_epsilon()
+
+    def on_epoch_end(self, trainer, epoch, train_summary, val_summary, history):
+        del trainer, train_summary, val_summary
+        if epoch >= history["epochs"]:
+            return
+        self.current_value = self._value_for_epoch(epoch + 1)
+        self._apply_epsilon()
+
+    def on_fit_end(self, trainer, history):
+        del trainer, history
+        if self._task is not None and self.original_epsilon is not None:
+            self._task.epsilon = float(self.original_epsilon)
+
+
+class SymmetricCrossEntropyBetaScheduler(Callback):
+    def __init__(self, start_value, end_value, *, start_epoch=1, end_epoch=1):
+        if start_value < 0.0:
+            raise ValueError("start_value must be >= 0")
+        if end_value < 0.0:
+            raise ValueError("end_value must be >= 0")
+        if start_epoch < 1:
+            raise ValueError("start_epoch must be >= 1")
+        if end_epoch < start_epoch:
+            raise ValueError("end_epoch must be >= start_epoch")
+        self.start_value = float(start_value)
+        self.end_value = float(end_value)
+        self.start_epoch = int(start_epoch)
+        self.end_epoch = int(end_epoch)
+        self.original_beta = None
+        self.current_value = float(start_value)
+        self._task = None
+
+    def _resolve_task(self, task):
+        while not (
+            hasattr(task, "beta") and hasattr(task, "alpha") and hasattr(task, "label_clip")
+        ):
+            if not hasattr(task, "base_task"):
+                raise ValueError(
+                    "SymmetricCrossEntropyBetaScheduler requires SymmetricCrossEntropyTask.beta"
+                )
+            task = task.base_task
+        return task
+
+    def _value_for_epoch(self, epoch):
+        epoch = int(epoch)
+        if epoch < self.start_epoch:
+            return self.start_value
+        if self.end_epoch == self.start_epoch:
+            return self.end_value
+        if epoch >= self.end_epoch:
+            return self.end_value
+        progress = (epoch - self.start_epoch) / (self.end_epoch - self.start_epoch)
+        return self.start_value + progress * (self.end_value - self.start_value)
+
+    def _apply_beta(self):
+        if self._task is not None:
+            self._task.beta = float(self.current_value)
+
+    def on_fit_start(self, trainer, history):
+        self._task = self._resolve_task(trainer.task)
+        self.original_beta = float(self._task.beta)
+        next_epoch = int(history["completed_epochs"]) + 1
+        self.current_value = self._value_for_epoch(next_epoch)
+        self._apply_beta()
+
+    def state_dict(self):
+        return {
+            "current_value": self.current_value,
+        }
+
+    def load_state_dict(self, state):
+        self.current_value = float(state.get("current_value", self.current_value))
+        self._apply_beta()
+
+    def on_epoch_end(self, trainer, epoch, train_summary, val_summary, history):
+        del trainer, train_summary, val_summary
+        if epoch >= history["epochs"]:
+            return
+        self.current_value = self._value_for_epoch(epoch + 1)
+        self._apply_beta()
+
+    def on_fit_end(self, trainer, history):
+        del trainer, history
+        if self._task is not None and self.original_beta is not None:
+            self._task.beta = float(self.original_beta)
+
+
+class WeightDecayScheduler(Callback):
+    def __init__(self, start_factor, end_factor, *, start_epoch=1, end_epoch=1):
+        if start_factor < 0.0:
+            raise ValueError("start_factor must be >= 0")
+        if end_factor < 0.0:
+            raise ValueError("end_factor must be >= 0")
+        if start_epoch < 1:
+            raise ValueError("start_epoch must be >= 1")
+        if end_epoch < start_epoch:
+            raise ValueError("end_epoch must be >= start_epoch")
+        self.start_factor = float(start_factor)
+        self.end_factor = float(end_factor)
+        self.start_epoch = int(start_epoch)
+        self.end_epoch = int(end_epoch)
+        self.original_weight_decays = []
+        self.current_factor = float(start_factor)
+        self._optimizer = None
+
+    def _value_for_epoch(self, epoch):
+        epoch = int(epoch)
+        if epoch < self.start_epoch:
+            return self.start_factor
+        if self.end_epoch == self.start_epoch:
+            return self.end_factor
+        if epoch >= self.end_epoch:
+            return self.end_factor
+        progress = (epoch - self.start_epoch) / (self.end_epoch - self.start_epoch)
+        return self.start_factor + progress * (self.end_factor - self.start_factor)
+
+    def _apply_weight_decay(self):
+        if self._optimizer is None:
+            return
+        for group, original_weight_decay in zip(self._optimizer.param_groups, self.original_weight_decays):
+            group["weight_decay"] = float(original_weight_decay * self.current_factor)
+
+    def on_fit_start(self, trainer, history):
+        self._optimizer = trainer.optimizer
+        self.original_weight_decays = [
+            float(group.get("weight_decay", 0.0))
+            for group in self._optimizer.param_groups
+        ]
+        next_epoch = int(history["completed_epochs"]) + 1
+        self.current_factor = self._value_for_epoch(next_epoch)
+        self._apply_weight_decay()
+
+    def state_dict(self):
+        return {
+            "current_factor": self.current_factor,
+            "original_weight_decays": list(self.original_weight_decays),
+        }
+
+    def load_state_dict(self, state):
+        self.current_factor = float(state.get("current_factor", self.current_factor))
+        state_weight_decays = state.get("original_weight_decays")
+        if state_weight_decays is not None:
+            self.original_weight_decays = [float(value) for value in state_weight_decays]
+        if self._optimizer is not None and len(self.original_weight_decays) != len(self._optimizer.param_groups):
+            raise ValueError("WeightDecayScheduler checkpoint state does not match optimizer param groups")
+        self._apply_weight_decay()
+
+    def on_epoch_end(self, trainer, epoch, train_summary, val_summary, history):
+        del trainer, train_summary, val_summary
+        if epoch >= history["epochs"]:
+            return
+        self.current_factor = self._value_for_epoch(epoch + 1)
+        self._apply_weight_decay()
+
+    def on_fit_end(self, trainer, history):
+        del trainer, history
+        if self._optimizer is None:
+            return
+        for group, original_weight_decay in zip(self._optimizer.param_groups, self.original_weight_decays):
+            group["weight_decay"] = float(original_weight_decay)
 
 
 class GradualUnfreezing(Callback):
@@ -579,8 +1520,22 @@ __all__ = [
     "EarlyStopping",
     "HistoryLogger",
     "AdaptiveGradientClipping",
+    "GradientValueClipping",
+    "GradientNoiseInjection",
     "GradientCentralization",
     "DeferredReweighting",
+    "LabelSmoothingScheduler",
+    "FocalGammaScheduler",
+    "LogitAdjustTauScheduler",
+    "LdamMarginScheduler",
+    "PosWeightScheduler",
+    "BootstrapBetaScheduler",
+    "ConfidencePenaltyScheduler",
+    "FloodingLevelScheduler",
+    "GeneralizedCrossEntropyScheduler",
+    "Poly1EpsilonScheduler",
+    "SymmetricCrossEntropyBetaScheduler",
+    "WeightDecayScheduler",
     "GradualUnfreezing",
     "ExponentialMovingAverage",
     "Lookahead",

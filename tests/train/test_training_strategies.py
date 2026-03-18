@@ -14,7 +14,16 @@ from vgl.engine import (
     WarmupCosineScheduler,
 )
 from vgl.train.task import Task
-from vgl.train.tasks import GraphClassificationTask, RDropTask
+from vgl.train.tasks import (
+    BootstrapTask,
+    ConfidencePenaltyTask,
+    FloodingTask,
+    GeneralizedCrossEntropyTask,
+    GraphClassificationTask,
+    Poly1CrossEntropyTask,
+    RDropTask,
+    SymmetricCrossEntropyTask,
+)
 
 
 class ToyBatch:
@@ -412,6 +421,212 @@ def test_trainer_uses_two_forwards_for_rdrop_training_and_one_for_eval():
 
     assert model.calls == 2
     assert history["train"][0]["loss"] == pytest.approx(expected_train_loss)
+
+    model.calls = 0
+    val_summary = trainer.evaluate([batch], stage="val")
+
+    assert model.calls == 1
+    assert val_summary["loss"] == pytest.approx(base_task.loss(batch, batch.logits_a, stage="val").item())
+
+
+def test_trainer_uses_flooded_paired_loss_for_training_and_base_loss_for_eval():
+    batch = RDropBatch([2.0, -1.0], [0.0, 1.0], label=0)
+    base_task = RDropTask(GraphClassificationTask(target="label", label_source="graph"), alpha=0.5)
+    task = FloodingTask(base_task, level=0.3)
+    model = AlternatingLogitModel()
+    trainer = Trainer(
+        model=model,
+        task=task,
+        optimizer=torch.optim.SGD,
+        lr=0.0,
+        max_epochs=1,
+    )
+
+    history = trainer.fit([batch])
+
+    base_train_loss = base_task.paired_loss(batch, batch.logits_a, batch.logits_b, stage="train")
+    expected_train_loss = (base_train_loss - 0.3).abs() + 0.3
+
+    assert model.calls == 2
+    assert history["train"][0]["loss"] == pytest.approx(expected_train_loss.item())
+
+    model.calls = 0
+    val_summary = trainer.evaluate([batch], stage="val")
+
+    assert model.calls == 1
+    assert val_summary["loss"] == pytest.approx(base_task.loss(batch, batch.logits_a, stage="val").item())
+
+
+def test_trainer_uses_confidence_penalized_paired_loss_for_training_and_base_loss_for_eval():
+    batch = RDropBatch([2.0, -1.0], [0.0, 1.0], label=0)
+    base_task = RDropTask(GraphClassificationTask(target="label", label_source="graph"), alpha=0.5)
+    task = ConfidencePenaltyTask(base_task, coefficient=0.2)
+    model = AlternatingLogitModel()
+    trainer = Trainer(
+        model=model,
+        task=task,
+        optimizer=torch.optim.SGD,
+        lr=0.0,
+        max_epochs=1,
+    )
+
+    history = trainer.fit([batch])
+
+    base_train_loss = base_task.paired_loss(batch, batch.logits_a, batch.logits_b, stage="train")
+    probs_a = torch.softmax(batch.logits_a, dim=-1)
+    probs_b = torch.softmax(batch.logits_b, dim=-1)
+    entropy_a = -(probs_a * torch.log(probs_a)).sum(dim=-1).mean()
+    entropy_b = -(probs_b * torch.log(probs_b)).sum(dim=-1).mean()
+    expected_train_loss = base_train_loss - 0.2 * 0.5 * (entropy_a + entropy_b)
+
+    assert model.calls == 2
+    assert history["train"][0]["loss"] == pytest.approx(expected_train_loss.item())
+
+    model.calls = 0
+    val_summary = trainer.evaluate([batch], stage="val")
+
+    assert model.calls == 1
+    assert val_summary["loss"] == pytest.approx(base_task.loss(batch, batch.logits_a, stage="val").item())
+
+
+def test_trainer_uses_generalized_cross_entropy_paired_loss_for_training_and_base_loss_for_eval():
+    batch = RDropBatch([2.0, -1.0], [0.0, 1.0], label=0)
+    base_task = RDropTask(GraphClassificationTask(target="label", label_source="graph"), alpha=0.5)
+    task = GeneralizedCrossEntropyTask(base_task, q=0.7)
+    model = AlternatingLogitModel()
+    trainer = Trainer(
+        model=model,
+        task=task,
+        optimizer=torch.optim.SGD,
+        lr=0.0,
+        max_epochs=1,
+    )
+
+    history = trainer.fit([batch])
+
+    base_train_loss = base_task.paired_loss(batch, batch.logits_a, batch.logits_b, stage="train")
+    base_supervised = 0.5 * (
+        base_task.loss(batch, batch.logits_a, stage="train") + base_task.loss(batch, batch.logits_b, stage="train")
+    )
+    probs_a = torch.softmax(batch.logits_a, dim=-1)[0, 0]
+    probs_b = torch.softmax(batch.logits_b, dim=-1)[0, 0]
+    gce_a = (1.0 - probs_a.pow(0.7)) / 0.7
+    gce_b = (1.0 - probs_b.pow(0.7)) / 0.7
+    expected_train_loss = (base_train_loss - base_supervised) + 0.5 * (gce_a + gce_b)
+
+    assert model.calls == 2
+    assert history["train"][0]["loss"] == pytest.approx(expected_train_loss.item())
+
+    model.calls = 0
+    val_summary = trainer.evaluate([batch], stage="val")
+
+    assert model.calls == 1
+    assert val_summary["loss"] == pytest.approx(base_task.loss(batch, batch.logits_a, stage="val").item())
+
+
+def test_trainer_uses_symmetric_cross_entropy_paired_loss_for_training_and_base_loss_for_eval():
+    batch = RDropBatch([2.0, -1.0], [0.0, 1.0], label=0)
+    base_task = RDropTask(GraphClassificationTask(target="label", label_source="graph"), alpha=0.5)
+    task = SymmetricCrossEntropyTask(base_task, alpha=0.7, beta=0.3, label_clip=1e-4)
+    model = AlternatingLogitModel()
+    trainer = Trainer(
+        model=model,
+        task=task,
+        optimizer=torch.optim.SGD,
+        lr=0.0,
+        max_epochs=1,
+    )
+
+    history = trainer.fit([batch])
+
+    base_train_loss = base_task.paired_loss(batch, batch.logits_a, batch.logits_b, stage="train")
+    base_supervised = 0.5 * (
+        base_task.loss(batch, batch.logits_a, stage="train") + base_task.loss(batch, batch.logits_b, stage="train")
+    )
+    probs_a = torch.softmax(batch.logits_a, dim=-1)
+    probs_b = torch.softmax(batch.logits_b, dim=-1)
+    target_probs = torch.tensor([[1.0, 1e-4]], dtype=probs_a.dtype)
+    rce_a = -(probs_a * torch.log(target_probs)).sum(dim=-1).mean()
+    rce_b = -(probs_b * torch.log(target_probs)).sum(dim=-1).mean()
+    sce_a = 0.7 * base_task.loss(batch, batch.logits_a, stage="train") + 0.3 * rce_a
+    sce_b = 0.7 * base_task.loss(batch, batch.logits_b, stage="train") + 0.3 * rce_b
+    expected_train_loss = (base_train_loss - base_supervised) + 0.5 * (sce_a + sce_b)
+
+    assert model.calls == 2
+    assert history["train"][0]["loss"] == pytest.approx(expected_train_loss.item())
+
+    model.calls = 0
+    val_summary = trainer.evaluate([batch], stage="val")
+
+    assert model.calls == 1
+    assert val_summary["loss"] == pytest.approx(base_task.loss(batch, batch.logits_a, stage="val").item())
+
+
+def test_trainer_uses_poly1_cross_entropy_paired_loss_for_training_and_base_loss_for_eval():
+    batch = RDropBatch([2.0, -1.0], [0.0, 1.0], label=0)
+    base_task = RDropTask(GraphClassificationTask(target="label", label_source="graph"), alpha=0.5)
+    task = Poly1CrossEntropyTask(base_task, epsilon=0.7)
+    model = AlternatingLogitModel()
+    trainer = Trainer(
+        model=model,
+        task=task,
+        optimizer=torch.optim.SGD,
+        lr=0.0,
+        max_epochs=1,
+    )
+
+    history = trainer.fit([batch])
+
+    base_train_loss = base_task.paired_loss(batch, batch.logits_a, batch.logits_b, stage="train")
+    base_supervised = 0.5 * (
+        base_task.loss(batch, batch.logits_a, stage="train") + base_task.loss(batch, batch.logits_b, stage="train")
+    )
+    pt_a = torch.softmax(batch.logits_a, dim=-1)[0, 0]
+    pt_b = torch.softmax(batch.logits_b, dim=-1)[0, 0]
+    poly1_a = base_task.loss(batch, batch.logits_a, stage="train") + 0.7 * (1.0 - pt_a)
+    poly1_b = base_task.loss(batch, batch.logits_b, stage="train") + 0.7 * (1.0 - pt_b)
+    expected_train_loss = (base_train_loss - base_supervised) + 0.5 * (poly1_a + poly1_b)
+
+    assert model.calls == 2
+    assert history["train"][0]["loss"] == pytest.approx(expected_train_loss.item())
+
+    model.calls = 0
+    val_summary = trainer.evaluate([batch], stage="val")
+
+    assert model.calls == 1
+    assert val_summary["loss"] == pytest.approx(base_task.loss(batch, batch.logits_a, stage="val").item())
+
+
+def test_trainer_uses_bootstrap_paired_loss_for_training_and_base_loss_for_eval():
+    batch = RDropBatch([2.0, -1.0], [0.0, 1.0], label=0)
+    base_task = RDropTask(GraphClassificationTask(target="label", label_source="graph"), alpha=0.5)
+    task = BootstrapTask(base_task, beta=0.8, mode="soft")
+    model = AlternatingLogitModel()
+    trainer = Trainer(
+        model=model,
+        task=task,
+        optimizer=torch.optim.SGD,
+        lr=0.0,
+        max_epochs=1,
+    )
+
+    history = trainer.fit([batch])
+
+    base_train_loss = base_task.paired_loss(batch, batch.logits_a, batch.logits_b, stage="train")
+    base_supervised = 0.5 * (
+        base_task.loss(batch, batch.logits_a, stage="train") + base_task.loss(batch, batch.logits_b, stage="train")
+    )
+    probs_a = torch.softmax(batch.logits_a, dim=-1)
+    probs_b = torch.softmax(batch.logits_b, dim=-1)
+    observed_targets = torch.tensor([[1.0, 0.0]], dtype=probs_a.dtype)
+    blended_a = 0.8 * observed_targets + 0.2 * probs_a
+    blended_b = 0.8 * observed_targets + 0.2 * probs_b
+    bootstrap_a = -(blended_a * F.log_softmax(batch.logits_a, dim=-1)).sum(dim=-1).mean()
+    bootstrap_b = -(blended_b * F.log_softmax(batch.logits_b, dim=-1)).sum(dim=-1).mean()
+    expected_train_loss = (base_train_loss - base_supervised) + 0.5 * (bootstrap_a + bootstrap_b)
+
+    assert model.calls == 2
+    assert history["train"][0]["loss"] == pytest.approx(expected_train_loss.item())
 
     model.calls = 0
     val_summary = trainer.evaluate([batch], stage="val")

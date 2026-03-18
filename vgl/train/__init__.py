@@ -1,16 +1,30 @@
 from vgl.engine import ASAM as ASAM
 from vgl.engine import AdaptiveGradientClipping as AdaptiveGradientClipping
+from vgl.engine import BootstrapBetaScheduler as BootstrapBetaScheduler
 from vgl.engine import Callback as Callback
+from vgl.engine import ConfidencePenaltyScheduler as ConfidencePenaltyScheduler
 from vgl.engine import CHECKPOINT_FORMAT as CHECKPOINT_FORMAT
 from vgl.engine import CHECKPOINT_FORMAT_VERSION as CHECKPOINT_FORMAT_VERSION
 from vgl.engine import DeferredReweighting as DeferredReweighting
 from vgl.engine import EarlyStopping as EarlyStopping
 from vgl.engine import ExponentialMovingAverage as ExponentialMovingAverage
 from vgl.engine import Evaluator as Evaluator
+from vgl.engine import FocalGammaScheduler as FocalGammaScheduler
+from vgl.engine import FloodingLevelScheduler as FloodingLevelScheduler
+from vgl.engine import GeneralizedCrossEntropyScheduler as GeneralizedCrossEntropyScheduler
+from vgl.engine import GradientNoiseInjection as GradientNoiseInjection
+from vgl.engine import GradientValueClipping as GradientValueClipping
 from vgl.engine import GradientCentralization as GradientCentralization
 from vgl.engine import GSAM as GSAM
 from vgl.engine import GradualUnfreezing as GradualUnfreezing
 from vgl.engine import HistoryLogger as HistoryLogger
+from vgl.engine import LabelSmoothingScheduler as LabelSmoothingScheduler
+from vgl.engine import LdamMarginScheduler as LdamMarginScheduler
+from vgl.engine import LogitAdjustTauScheduler as LogitAdjustTauScheduler
+from vgl.engine import Poly1EpsilonScheduler as Poly1EpsilonScheduler
+from vgl.engine import PosWeightScheduler as PosWeightScheduler
+from vgl.engine import SymmetricCrossEntropyBetaScheduler as SymmetricCrossEntropyBetaScheduler
+from vgl.engine import WeightDecayScheduler as WeightDecayScheduler
 from vgl.engine import LayerwiseLrDecay as LayerwiseLrDecay
 from vgl.engine import Lookahead as Lookahead
 from vgl.engine import SAM as SAM
@@ -25,10 +39,16 @@ from vgl.engine import save_checkpoint as save_checkpoint
 from vgl.metrics import Accuracy as Accuracy
 from vgl.metrics import Metric as Metric
 from vgl.metrics import build_metric as build_metric
+from vgl.tasks import BootstrapTask as BootstrapTask
+from vgl.tasks import ConfidencePenaltyTask as ConfidencePenaltyTask
+from vgl.tasks import FloodingTask as FloodingTask
+from vgl.tasks import GeneralizedCrossEntropyTask as GeneralizedCrossEntropyTask
 from vgl.tasks import GraphClassificationTask as GraphClassificationTask
 from vgl.tasks import LinkPredictionTask as LinkPredictionTask
 from vgl.tasks import NodeClassificationTask as NodeClassificationTask
+from vgl.tasks import Poly1CrossEntropyTask as Poly1CrossEntropyTask
 from vgl.tasks import RDropTask as RDropTask
+from vgl.tasks import SymmetricCrossEntropyTask as SymmetricCrossEntropyTask
 from vgl.tasks import Task as Task
 from vgl.tasks import TemporalEventPredictionTask as TemporalEventPredictionTask
 
@@ -36,17 +56,32 @@ __all__ = [
     "Accuracy",
     "ASAM",
     "AdaptiveGradientClipping",
+    "BootstrapBetaScheduler",
+    "BootstrapTask",
     "Callback",
+    "ConfidencePenaltyScheduler",
     "CHECKPOINT_FORMAT",
     "CHECKPOINT_FORMAT_VERSION",
     "DeferredReweighting",
     "EarlyStopping",
     "ExponentialMovingAverage",
     "Evaluator",
+    "FocalGammaScheduler",
+    "FloodingLevelScheduler",
+    "GeneralizedCrossEntropyScheduler",
+    "SymmetricCrossEntropyBetaScheduler",
+    "GradientNoiseInjection",
+    "GradientValueClipping",
     "GradientCentralization",
     "GSAM",
     "GradualUnfreezing",
     "HistoryLogger",
+    "LabelSmoothingScheduler",
+    "LdamMarginScheduler",
+    "LogitAdjustTauScheduler",
+    "Poly1EpsilonScheduler",
+    "PosWeightScheduler",
+    "WeightDecayScheduler",
     "LayerwiseLrDecay",
     "Lookahead",
     "Metric",
@@ -59,11 +94,16 @@ __all__ = [
     "load_checkpoint",
     "restore_checkpoint",
     "WarmupCosineScheduler",
+    "ConfidencePenaltyTask",
+    "FloodingTask",
+    "GeneralizedCrossEntropyTask",
     "Task",
     "Trainer",
     "NodeClassificationTask",
     "GraphClassificationTask",
     "LinkPredictionTask",
+    "Poly1CrossEntropyTask",
     "RDropTask",
+    "SymmetricCrossEntropyTask",
     "TemporalEventPredictionTask",
 ]

@@ -7,9 +7,13 @@ from vgl import (
     APPNPConv,
     ARMAConv,
     BernConv,
+    BootstrapBetaScheduler,
+    BootstrapTask,
     CGConv,
     ChebConv,
     ClusterGCNConv,
+    ConfidencePenaltyScheduler,
+    ConfidencePenaltyTask,
     DAGNNConv,
     DNAConv,
     EdgeConv,
@@ -18,6 +22,11 @@ from vgl import (
     FAGCNConv,
     FiLMConv,
     FeaStConv,
+    FocalGammaScheduler,
+    FloodingLevelScheduler,
+    GeneralizedCrossEntropyScheduler,
+    GradientNoiseInjection,
+    GradientValueClipping,
     GATConv,
     GeneralConv,
     GATv2Conv,
@@ -28,6 +37,7 @@ from vgl import (
     GENConv,
     GINEConv,
     GradualUnfreezing,
+    GeneralizedCrossEntropyTask,
     Graph,
     GraphBatch,
     GraphConv,
@@ -59,11 +69,14 @@ from vgl import (
     Loader,
     LEConv,
     FullGraphSampler,
+    FloodingTask,
     MFConv,
     NNConv,
     NodeSeedSubgraphSampler,
     PointNetConv,
     PointTransformerConv,
+    Poly1CrossEntropyTask,
+    Poly1EpsilonScheduler,
     ResGatedGraphConv,
     RDropTask,
     SampleRecord,
@@ -83,6 +96,8 @@ from vgl import (
     SGFormerEncoderLayer,
     StochasticWeightAveraging,
     SuperGATConv,
+    SymmetricCrossEntropyBetaScheduler,
+    SymmetricCrossEntropyTask,
     Task,
     Metric,
     SplineConv,
@@ -96,6 +111,11 @@ from vgl import (
     EarlyStopping,
     ExponentialMovingAverage,
     GradientCentralization,
+    LabelSmoothingScheduler,
+    LdamMarginScheduler,
+    LogitAdjustTauScheduler,
+    PosWeightScheduler,
+    WeightDecayScheduler,
     NodeClassificationTask,
     GraphClassificationTask,
     GroupRevRes,
@@ -125,9 +145,13 @@ def test_package_exposes_broad_vgl_root_surface():
     assert APPNPConv.__name__ == "APPNPConv"
     assert ARMAConv.__name__ == "ARMAConv"
     assert BernConv.__name__ == "BernConv"
+    assert BootstrapBetaScheduler.__name__ == "BootstrapBetaScheduler"
+    assert BootstrapTask.__name__ == "BootstrapTask"
     assert CGConv.__name__ == "CGConv"
     assert ChebConv.__name__ == "ChebConv"
     assert ClusterGCNConv.__name__ == "ClusterGCNConv"
+    assert ConfidencePenaltyScheduler.__name__ == "ConfidencePenaltyScheduler"
+    assert ConfidencePenaltyTask.__name__ == "ConfidencePenaltyTask"
     assert DAGNNConv.__name__ == "DAGNNConv"
     assert DNAConv.__name__ == "DNAConv"
     assert EdgeConv.__name__ == "EdgeConv"
@@ -136,6 +160,14 @@ def test_package_exposes_broad_vgl_root_surface():
     assert FAGCNConv.__name__ == "FAGCNConv"
     assert FiLMConv.__name__ == "FiLMConv"
     assert FeaStConv.__name__ == "FeaStConv"
+    assert FocalGammaScheduler.__name__ == "FocalGammaScheduler"
+    assert FloodingLevelScheduler.__name__ == "FloodingLevelScheduler"
+    assert GeneralizedCrossEntropyScheduler.__name__ == "GeneralizedCrossEntropyScheduler"
+    assert SymmetricCrossEntropyBetaScheduler.__name__ == "SymmetricCrossEntropyBetaScheduler"
+    assert FloodingTask.__name__ == "FloodingTask"
+    assert GradientNoiseInjection.__name__ == "GradientNoiseInjection"
+    assert GradientValueClipping.__name__ == "GradientValueClipping"
+    assert GeneralizedCrossEntropyTask.__name__ == "GeneralizedCrossEntropyTask"
     assert GATConv.__name__ == "GATConv"
     assert GeneralConv.__name__ == "GeneralConv"
     assert GATv2Conv.__name__ == "GATv2Conv"
@@ -166,6 +198,8 @@ def test_package_exposes_broad_vgl_root_surface():
     assert TemporalEventBatch.__name__ == "TemporalEventBatch"
     assert PointNetConv.__name__ == "PointNetConv"
     assert PointTransformerConv.__name__ == "PointTransformerConv"
+    assert Poly1CrossEntropyTask.__name__ == "Poly1CrossEntropyTask"
+    assert Poly1EpsilonScheduler.__name__ == "Poly1EpsilonScheduler"
     assert GINConv.__name__ == "GINConv"
     assert HGTConv.__name__ == "HGTConv"
     assert GraphSchema.__name__ == "GraphSchema"
@@ -215,10 +249,16 @@ def test_package_exposes_broad_vgl_root_surface():
     assert EarlyStopping.__name__ == "EarlyStopping"
     assert ExponentialMovingAverage.__name__ == "ExponentialMovingAverage"
     assert GradientCentralization.__name__ == "GradientCentralization"
+    assert LabelSmoothingScheduler.__name__ == "LabelSmoothingScheduler"
+    assert LdamMarginScheduler.__name__ == "LdamMarginScheduler"
+    assert LogitAdjustTauScheduler.__name__ == "LogitAdjustTauScheduler"
+    assert PosWeightScheduler.__name__ == "PosWeightScheduler"
+    assert WeightDecayScheduler.__name__ == "WeightDecayScheduler"
     assert GradualUnfreezing.__name__ == "GradualUnfreezing"
     assert HistoryLogger.__name__ == "HistoryLogger"
     assert LayerwiseLrDecay.__name__ == "LayerwiseLrDecay"
     assert StochasticWeightAveraging.__name__ == "StochasticWeightAveraging"
+    assert SymmetricCrossEntropyTask.__name__ == "SymmetricCrossEntropyTask"
     assert TrainingHistory.__name__ == "TrainingHistory"
     assert WarmupCosineScheduler.__name__ == "WarmupCosineScheduler"
     assert WLConvContinuous.__name__ == "WLConvContinuous"
@@ -226,6 +266,7 @@ def test_package_exposes_broad_vgl_root_surface():
     assert GraphClassificationTask.__name__ == "GraphClassificationTask"
     assert GroupRevRes.__name__ == "GroupRevRes"
     assert LinkPredictionTask.__name__ == "LinkPredictionTask"
+    assert FloodingTask.__name__ == "FloodingTask"
     assert TemporalEventPredictionTask.__name__ == "TemporalEventPredictionTask"
     assert callable(global_mean_pool)
     assert callable(global_sum_pool)

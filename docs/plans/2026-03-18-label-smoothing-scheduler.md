@@ -1,0 +1,29 @@
+# Label Smoothing Scheduler Plan
+
+## Goal
+
+Add a callback-based training strategy that schedules multiclass `label_smoothing` over epochs, and extend temporal event prediction so it also supports `label_smoothing`.
+
+## Scope
+
+- Add `LabelSmoothingScheduler` callback in `vgl.engine.callbacks`
+- Support callback export from `vgl.engine`, `vgl.train`, `vgl.train.callbacks`, and `vgl`
+- Extend `TemporalEventPredictionTask` with `label_smoothing`
+- Add tests for:
+  - temporal task label smoothing
+  - callback scheduling behavior
+  - callback state restoration / checkpoint resume
+  - package exports
+
+## Design
+
+- Use a linear epoch schedule from `start_value` to `end_value`
+- Apply the scheduled value before each epoch by updating `task.label_smoothing`
+- Support wrapped tasks such as `RDropTask` by resolving `base_task`
+- Restore the original task `label_smoothing` after `fit()`
+
+## Verification
+
+- `python -m pytest tests/train/test_callbacks.py tests/train/test_temporal_event_task.py tests/train/test_trainer_evaluation.py tests/test_package_exports.py tests/test_package_layout.py -q`
+- `python -m pytest -q`
+- `python -m ruff check vgl tests examples`

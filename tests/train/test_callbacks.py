@@ -4,18 +4,40 @@ from torch import nn
 
 from vgl.engine import (
     AdaptiveGradientClipping,
+    BootstrapBetaScheduler,
     Callback,
+    ConfidencePenaltyScheduler,
     EarlyStopping,
     ExponentialMovingAverage,
+    FocalGammaScheduler,
+    FloodingLevelScheduler,
+    GeneralizedCrossEntropyScheduler,
+    GradientNoiseInjection,
+    GradientValueClipping,
     GradientCentralization,
     GradualUnfreezing,
     HistoryLogger,
+    LabelSmoothingScheduler,
+    LdamMarginScheduler,
+    LogitAdjustTauScheduler,
     Lookahead,
+    Poly1EpsilonScheduler,
+    PosWeightScheduler,
     StopTraining,
     StochasticWeightAveraging,
+    SymmetricCrossEntropyBetaScheduler,
     Trainer,
+    WeightDecayScheduler,
 )
 from vgl.train.task import Task
+from vgl.train.tasks import BootstrapTask
+from vgl.train.tasks import ConfidencePenaltyTask
+from vgl.train.tasks import FloodingTask
+from vgl.train.tasks import GeneralizedCrossEntropyTask
+from vgl.train.tasks import GraphClassificationTask
+from vgl.train.tasks import LinkPredictionTask
+from vgl.train.tasks import Poly1CrossEntropyTask
+from vgl.train.tasks import SymmetricCrossEntropyTask
 
 
 class ToyBatch:
@@ -148,6 +170,272 @@ class GradientHolderModel(nn.Module):
 class DummyTrainer:
     def __init__(self, model):
         self.model = model
+
+
+class MulticlassToyBatch:
+    def __init__(self, label):
+        self.labels = torch.tensor([label])
+        self.metadata = [{"label": label}]
+
+
+class MulticlassToyModel(nn.Module):
+    def __init__(self):
+        super().__init__()
+        self.logits = nn.Parameter(torch.tensor([[0.5, -0.5]], dtype=torch.float32))
+
+    def forward(self, batch):
+        return self.logits.repeat(batch.labels.size(0), 1)
+
+
+class BinaryToyBatch:
+    def __init__(self, labels):
+        self.labels = torch.tensor(labels, dtype=torch.float32)
+
+
+class BinaryToyModel(nn.Module):
+    def __init__(self):
+        super().__init__()
+        self.logit = nn.Parameter(torch.tensor([0.25], dtype=torch.float32))
+
+    def forward(self, batch):
+        return self.logit.repeat(batch.labels.size(0))
+
+
+class LabelSmoothingRecorder(Callback):
+    def __init__(self):
+        self.values = []
+
+    def _record(self, trainer):
+        task = trainer.task
+        while hasattr(task, "base_task"):
+            task = task.base_task
+        self.values.append(float(task.label_smoothing))
+
+    def on_fit_start(self, trainer, history):
+        del history
+        self._record(trainer)
+
+    def on_epoch_end(self, trainer, epoch, train_summary, val_summary, history):
+        del epoch, train_summary, val_summary, history
+        self._record(trainer)
+
+
+class FocalGammaRecorder(Callback):
+    def __init__(self):
+        self.values = []
+
+    def _record(self, trainer):
+        task = trainer.task
+        while hasattr(task, "base_task"):
+            task = task.base_task
+        self.values.append(float(task.focal_gamma))
+
+    def on_fit_start(self, trainer, history):
+        del history
+        self._record(trainer)
+
+    def on_epoch_end(self, trainer, epoch, train_summary, val_summary, history):
+        del epoch, train_summary, val_summary, history
+        self._record(trainer)
+
+
+class LogitAdjustTauRecorder(Callback):
+    def __init__(self):
+        self.values = []
+
+    def _record(self, trainer):
+        task = trainer.task
+        while hasattr(task, "base_task"):
+            task = task.base_task
+        self.values.append(float(task.logit_adjust_tau))
+
+    def on_fit_start(self, trainer, history):
+        del history
+        self._record(trainer)
+
+    def on_epoch_end(self, trainer, epoch, train_summary, val_summary, history):
+        del epoch, train_summary, val_summary, history
+        self._record(trainer)
+
+
+class LdamMarginRecorder(Callback):
+    def __init__(self):
+        self.values = []
+
+    def _record(self, trainer):
+        task = trainer.task
+        while hasattr(task, "base_task"):
+            task = task.base_task
+        self.values.append(float(task.ldam_max_margin))
+
+    def on_fit_start(self, trainer, history):
+        del history
+        self._record(trainer)
+
+    def on_epoch_end(self, trainer, epoch, train_summary, val_summary, history):
+        del epoch, train_summary, val_summary, history
+        self._record(trainer)
+
+
+class PosWeightRecorder(Callback):
+    def __init__(self):
+        self.values = []
+
+    def _record(self, trainer):
+        task = trainer.task
+        while hasattr(task, "base_task"):
+            task = task.base_task
+        self.values.append(float(task.pos_weight.reshape(-1)[0]))
+
+    def on_fit_start(self, trainer, history):
+        del history
+        self._record(trainer)
+
+    def on_epoch_end(self, trainer, epoch, train_summary, val_summary, history):
+        del epoch, train_summary, val_summary, history
+        self._record(trainer)
+
+
+class BootstrapBetaRecorder(Callback):
+    def __init__(self):
+        self.values = []
+
+    def _record(self, trainer):
+        task = trainer.task
+        while not hasattr(task, "beta"):
+            if not hasattr(task, "base_task"):
+                raise AssertionError("Bootstrap beta task not found")
+            task = task.base_task
+        self.values.append(float(task.beta))
+
+    def on_fit_start(self, trainer, history):
+        del history
+        self._record(trainer)
+
+    def on_epoch_end(self, trainer, epoch, train_summary, val_summary, history):
+        del epoch, train_summary, val_summary, history
+        self._record(trainer)
+
+
+class ConfidencePenaltyRecorder(Callback):
+    def __init__(self):
+        self.values = []
+
+    def _record(self, trainer):
+        task = trainer.task
+        while not hasattr(task, "coefficient"):
+            if not hasattr(task, "base_task"):
+                raise AssertionError("Confidence penalty task not found")
+            task = task.base_task
+        self.values.append(float(task.coefficient))
+
+    def on_fit_start(self, trainer, history):
+        del history
+        self._record(trainer)
+
+    def on_epoch_end(self, trainer, epoch, train_summary, val_summary, history):
+        del epoch, train_summary, val_summary, history
+        self._record(trainer)
+
+
+class FloodingLevelRecorder(Callback):
+    def __init__(self):
+        self.values = []
+
+    def _record(self, trainer):
+        task = trainer.task
+        while not hasattr(task, "level"):
+            if not hasattr(task, "base_task"):
+                raise AssertionError("Flooding task not found")
+            task = task.base_task
+        self.values.append(float(task.level))
+
+    def on_fit_start(self, trainer, history):
+        del history
+        self._record(trainer)
+
+    def on_epoch_end(self, trainer, epoch, train_summary, val_summary, history):
+        del epoch, train_summary, val_summary, history
+        self._record(trainer)
+
+
+class GeneralizedCrossEntropyRecorder(Callback):
+    def __init__(self):
+        self.values = []
+
+    def _record(self, trainer):
+        task = trainer.task
+        while not hasattr(task, "q"):
+            if not hasattr(task, "base_task"):
+                raise AssertionError("Generalized cross entropy task not found")
+            task = task.base_task
+        self.values.append(float(task.q))
+
+    def on_fit_start(self, trainer, history):
+        del history
+        self._record(trainer)
+
+    def on_epoch_end(self, trainer, epoch, train_summary, val_summary, history):
+        del epoch, train_summary, val_summary, history
+        self._record(trainer)
+
+
+class Poly1EpsilonRecorder(Callback):
+    def __init__(self):
+        self.values = []
+
+    def _record(self, trainer):
+        task = trainer.task
+        while not hasattr(task, "epsilon"):
+            if not hasattr(task, "base_task"):
+                raise AssertionError("Poly1 cross entropy task not found")
+            task = task.base_task
+        self.values.append(float(task.epsilon))
+
+    def on_fit_start(self, trainer, history):
+        del history
+        self._record(trainer)
+
+    def on_epoch_end(self, trainer, epoch, train_summary, val_summary, history):
+        del epoch, train_summary, val_summary, history
+        self._record(trainer)
+
+
+class SymmetricCrossEntropyBetaRecorder(Callback):
+    def __init__(self):
+        self.values = []
+
+    def _record(self, trainer):
+        task = trainer.task
+        while not hasattr(task, "beta"):
+            if not hasattr(task, "base_task"):
+                raise AssertionError("Symmetric cross entropy task not found")
+            task = task.base_task
+        self.values.append(float(task.beta))
+
+    def on_fit_start(self, trainer, history):
+        del history
+        self._record(trainer)
+
+    def on_epoch_end(self, trainer, epoch, train_summary, val_summary, history):
+        del epoch, train_summary, val_summary, history
+        self._record(trainer)
+
+
+class WeightDecayRecorder(Callback):
+    def __init__(self):
+        self.values = []
+
+    def _record(self, trainer):
+        self.values.append(float(trainer.optimizer.param_groups[0]["weight_decay"]))
+
+    def on_fit_start(self, trainer, history):
+        del history
+        self._record(trainer)
+
+    def on_epoch_end(self, trainer, epoch, train_summary, val_summary, history):
+        del epoch, train_summary, val_summary, history
+        self._record(trainer)
 
 
 def test_trainer_callbacks_observe_fit_lifecycle():
@@ -301,9 +589,44 @@ def test_adaptive_gradient_clipping_rejects_invalid_configuration():
         AdaptiveGradientClipping(eps=0.0)
 
 
+def test_gradient_value_clipping_rejects_invalid_configuration():
+    with pytest.raises(ValueError, match="clip_value"):
+        GradientValueClipping(clip_value=0.0)
+
+
 def test_gradient_centralization_rejects_invalid_configuration():
     with pytest.raises(TypeError, match="conv_only"):
         GradientCentralization(conv_only="yes")
+
+
+def test_gradient_value_clipping_clips_dense_gradients():
+    callback = GradientValueClipping(clip_value=0.5)
+    model = GradientHolderModel(torch.zeros(2, 2))
+    model.weight.grad = torch.tensor([[1.5, -1.2], [0.25, -0.4]])
+    trainer = DummyTrainer(model)
+
+    callback.on_before_optimizer_step(trainer, step=1)
+
+    assert torch.allclose(
+        model.weight.grad,
+        torch.tensor([[0.5, -0.5], [0.25, -0.4]]),
+    )
+
+
+def test_gradient_value_clipping_skips_sparse_gradients():
+    callback = GradientValueClipping(clip_value=0.5)
+    model = GradientHolderModel(torch.zeros(2, 2))
+    sparse_grad = torch.sparse_coo_tensor(
+        indices=torch.tensor([[0, 1], [1, 0]]),
+        values=torch.tensor([1.5, -1.2]),
+        size=(2, 2),
+    )
+    model.weight.grad = sparse_grad
+    trainer = DummyTrainer(model)
+
+    callback.on_before_optimizer_step(trainer, step=1)
+
+    assert model.weight.grad is sparse_grad
 
 
 def test_gradient_centralization_centralizes_matrix_gradients():
@@ -523,3 +846,1110 @@ def test_stochastic_weight_averaging_can_apply_averaged_weights_at_fit_end():
     assert callback.num_averaged == 2
     assert torch.allclose(callback.avg_state["weight"], torch.tensor([2.0]))
     assert torch.allclose(trainer.model.weight.detach(), torch.tensor([2.0]))
+
+
+def test_label_smoothing_scheduler_rejects_invalid_configuration():
+    with pytest.raises(ValueError, match="start_value"):
+        LabelSmoothingScheduler(start_value=-0.1, end_value=0.2, start_epoch=1, end_epoch=3)
+
+    with pytest.raises(ValueError, match="end_value"):
+        LabelSmoothingScheduler(start_value=0.0, end_value=1.0, start_epoch=1, end_epoch=3)
+
+    with pytest.raises(ValueError, match="start_epoch"):
+        LabelSmoothingScheduler(start_value=0.0, end_value=0.2, start_epoch=0, end_epoch=3)
+
+    with pytest.raises(ValueError, match="end_epoch"):
+        LabelSmoothingScheduler(start_value=0.0, end_value=0.2, start_epoch=3, end_epoch=2)
+
+
+def test_label_smoothing_scheduler_updates_task_on_linear_schedule_and_restores_original_value():
+    callback = LabelSmoothingScheduler(start_value=0.0, end_value=0.2, start_epoch=2, end_epoch=4)
+    recorder = LabelSmoothingRecorder()
+    task = GraphClassificationTask(target="label", label_source="graph", label_smoothing=0.05)
+    trainer = Trainer(
+        model=MulticlassToyModel(),
+        task=task,
+        optimizer=torch.optim.SGD,
+        lr=0.0,
+        max_epochs=4,
+        callbacks=[callback, recorder],
+    )
+
+    history = trainer.fit([MulticlassToyBatch(0)])
+
+    assert history["completed_epochs"] == 4
+    assert recorder.values == pytest.approx([0.0, 0.0, 0.1, 0.2, 0.2])
+    assert callback.current_value == pytest.approx(0.2)
+    assert task.label_smoothing == pytest.approx(0.05)
+
+
+def test_label_smoothing_scheduler_state_dict_round_trip_preserves_current_value():
+    callback = LabelSmoothingScheduler(start_value=0.0, end_value=0.2, start_epoch=2, end_epoch=4)
+    task = GraphClassificationTask(target="label", label_source="graph", label_smoothing=0.05)
+    trainer = Trainer(
+        model=MulticlassToyModel(),
+        task=task,
+        optimizer=torch.optim.SGD,
+        lr=0.0,
+        max_epochs=3,
+        callbacks=[callback],
+    )
+
+    trainer.fit([MulticlassToyBatch(0)])
+
+    restored = LabelSmoothingScheduler(start_value=0.0, end_value=0.2, start_epoch=2, end_epoch=4)
+    restored_task = GraphClassificationTask(target="label", label_source="graph", label_smoothing=0.05)
+    restored_trainer = Trainer(
+        model=MulticlassToyModel(),
+        task=restored_task,
+        optimizer=torch.optim.SGD,
+        lr=0.0,
+        max_epochs=3,
+        callbacks=[restored],
+    )
+    restored.on_fit_start(restored_trainer, history={"completed_epochs": 0})
+    restored.load_state_dict(callback.state_dict())
+
+    assert restored.current_value == pytest.approx(0.1)
+    assert restored_task.label_smoothing == pytest.approx(0.1)
+
+
+def test_label_smoothing_scheduler_requires_task_with_label_smoothing():
+    trainer = Trainer(
+        model=ToyModel(),
+        task=ToyTask(),
+        optimizer=torch.optim.SGD,
+        lr=1.0,
+        max_epochs=1,
+        callbacks=[LabelSmoothingScheduler(start_value=0.0, end_value=0.1, start_epoch=1, end_epoch=2)],
+    )
+
+    with pytest.raises(ValueError, match="label_smoothing"):
+        trainer.fit([ToyBatch(1.0)])
+
+
+def test_focal_gamma_scheduler_rejects_invalid_configuration():
+    with pytest.raises(ValueError, match="start_value"):
+        FocalGammaScheduler(start_value=-0.1, end_value=3.0, start_epoch=1, end_epoch=3)
+
+    with pytest.raises(ValueError, match="end_value"):
+        FocalGammaScheduler(start_value=0.0, end_value=-0.1, start_epoch=1, end_epoch=3)
+
+    with pytest.raises(ValueError, match="start_epoch"):
+        FocalGammaScheduler(start_value=0.0, end_value=3.0, start_epoch=0, end_epoch=3)
+
+    with pytest.raises(ValueError, match="end_epoch"):
+        FocalGammaScheduler(start_value=0.0, end_value=3.0, start_epoch=3, end_epoch=2)
+
+
+def test_focal_gamma_scheduler_updates_task_on_linear_schedule_and_restores_original_value():
+    callback = FocalGammaScheduler(start_value=0.5, end_value=3.0, start_epoch=2, end_epoch=4)
+    recorder = FocalGammaRecorder()
+    task = GraphClassificationTask(
+        target="label",
+        label_source="graph",
+        loss="focal",
+        focal_gamma=1.5,
+    )
+    trainer = Trainer(
+        model=MulticlassToyModel(),
+        task=task,
+        optimizer=torch.optim.SGD,
+        lr=0.0,
+        max_epochs=4,
+        callbacks=[callback, recorder],
+    )
+
+    history = trainer.fit([MulticlassToyBatch(0)])
+
+    assert history["completed_epochs"] == 4
+    assert recorder.values == pytest.approx([0.5, 0.5, 1.75, 3.0, 3.0])
+    assert callback.current_value == pytest.approx(3.0)
+    assert task.focal_gamma == pytest.approx(1.5)
+
+
+def test_focal_gamma_scheduler_state_dict_round_trip_preserves_current_value():
+    callback = FocalGammaScheduler(start_value=0.5, end_value=3.0, start_epoch=2, end_epoch=4)
+    task = GraphClassificationTask(
+        target="label",
+        label_source="graph",
+        loss="focal",
+        focal_gamma=1.5,
+    )
+    trainer = Trainer(
+        model=MulticlassToyModel(),
+        task=task,
+        optimizer=torch.optim.SGD,
+        lr=0.0,
+        max_epochs=3,
+        callbacks=[callback],
+    )
+
+    trainer.fit([MulticlassToyBatch(0)])
+
+    restored = FocalGammaScheduler(start_value=0.5, end_value=3.0, start_epoch=2, end_epoch=4)
+    restored_task = GraphClassificationTask(
+        target="label",
+        label_source="graph",
+        loss="focal",
+        focal_gamma=1.5,
+    )
+    restored_trainer = Trainer(
+        model=MulticlassToyModel(),
+        task=restored_task,
+        optimizer=torch.optim.SGD,
+        lr=0.0,
+        max_epochs=3,
+        callbacks=[restored],
+    )
+    restored.on_fit_start(restored_trainer, history={"completed_epochs": 0})
+    restored.load_state_dict(callback.state_dict())
+
+    assert restored.current_value == pytest.approx(1.75)
+    assert restored_task.focal_gamma == pytest.approx(1.75)
+
+
+def test_focal_gamma_scheduler_requires_task_with_focal_gamma():
+    trainer = Trainer(
+        model=ToyModel(),
+        task=ToyTask(),
+        optimizer=torch.optim.SGD,
+        lr=1.0,
+        max_epochs=1,
+        callbacks=[FocalGammaScheduler(start_value=0.0, end_value=1.0, start_epoch=1, end_epoch=2)],
+    )
+
+    with pytest.raises(ValueError, match="focal_gamma"):
+        trainer.fit([ToyBatch(1.0)])
+
+
+def test_logit_adjust_tau_scheduler_rejects_invalid_configuration():
+    with pytest.raises(ValueError, match="start_value"):
+        LogitAdjustTauScheduler(start_value=-0.1, end_value=1.5, start_epoch=1, end_epoch=3)
+
+    with pytest.raises(ValueError, match="end_value"):
+        LogitAdjustTauScheduler(start_value=0.0, end_value=-0.1, start_epoch=1, end_epoch=3)
+
+    with pytest.raises(ValueError, match="start_epoch"):
+        LogitAdjustTauScheduler(start_value=0.0, end_value=1.5, start_epoch=0, end_epoch=3)
+
+    with pytest.raises(ValueError, match="end_epoch"):
+        LogitAdjustTauScheduler(start_value=0.0, end_value=1.5, start_epoch=3, end_epoch=2)
+
+
+def test_logit_adjust_tau_scheduler_updates_task_on_linear_schedule_and_restores_original_value():
+    callback = LogitAdjustTauScheduler(start_value=0.0, end_value=1.5, start_epoch=2, end_epoch=4)
+    recorder = LogitAdjustTauRecorder()
+    task = GraphClassificationTask(
+        target="label",
+        label_source="graph",
+        loss="logit_adjustment",
+        class_count=[3.0, 1.0],
+        logit_adjust_tau=0.2,
+    )
+    trainer = Trainer(
+        model=MulticlassToyModel(),
+        task=task,
+        optimizer=torch.optim.SGD,
+        lr=0.0,
+        max_epochs=4,
+        callbacks=[callback, recorder],
+    )
+
+    history = trainer.fit([MulticlassToyBatch(0)])
+
+    assert history["completed_epochs"] == 4
+    assert recorder.values == pytest.approx([0.0, 0.0, 0.75, 1.5, 1.5])
+    assert callback.current_value == pytest.approx(1.5)
+    assert task.logit_adjust_tau == pytest.approx(0.2)
+
+
+def test_logit_adjust_tau_scheduler_state_dict_round_trip_preserves_current_value():
+    callback = LogitAdjustTauScheduler(start_value=0.0, end_value=1.5, start_epoch=2, end_epoch=4)
+    task = GraphClassificationTask(
+        target="label",
+        label_source="graph",
+        loss="logit_adjustment",
+        class_count=[3.0, 1.0],
+        logit_adjust_tau=0.2,
+    )
+    trainer = Trainer(
+        model=MulticlassToyModel(),
+        task=task,
+        optimizer=torch.optim.SGD,
+        lr=0.0,
+        max_epochs=3,
+        callbacks=[callback],
+    )
+
+    trainer.fit([MulticlassToyBatch(0)])
+
+    restored = LogitAdjustTauScheduler(start_value=0.0, end_value=1.5, start_epoch=2, end_epoch=4)
+    restored_task = GraphClassificationTask(
+        target="label",
+        label_source="graph",
+        loss="logit_adjustment",
+        class_count=[3.0, 1.0],
+        logit_adjust_tau=0.2,
+    )
+    restored_trainer = Trainer(
+        model=MulticlassToyModel(),
+        task=restored_task,
+        optimizer=torch.optim.SGD,
+        lr=0.0,
+        max_epochs=3,
+        callbacks=[restored],
+    )
+    restored.on_fit_start(restored_trainer, history={"completed_epochs": 0})
+    restored.load_state_dict(callback.state_dict())
+
+    assert restored.current_value == pytest.approx(0.75)
+    assert restored_task.logit_adjust_tau == pytest.approx(0.75)
+
+
+def test_logit_adjust_tau_scheduler_requires_task_with_logit_adjust_tau():
+    trainer = Trainer(
+        model=ToyModel(),
+        task=ToyTask(),
+        optimizer=torch.optim.SGD,
+        lr=1.0,
+        max_epochs=1,
+        callbacks=[LogitAdjustTauScheduler(start_value=0.0, end_value=1.0, start_epoch=1, end_epoch=2)],
+    )
+
+    with pytest.raises(ValueError, match="logit_adjust_tau"):
+        trainer.fit([ToyBatch(1.0)])
+
+
+def test_ldam_margin_scheduler_rejects_invalid_configuration():
+    with pytest.raises(ValueError, match="start_value"):
+        LdamMarginScheduler(start_value=0.0, end_value=0.4, start_epoch=1, end_epoch=3)
+
+    with pytest.raises(ValueError, match="end_value"):
+        LdamMarginScheduler(start_value=0.2, end_value=0.0, start_epoch=1, end_epoch=3)
+
+    with pytest.raises(ValueError, match="start_epoch"):
+        LdamMarginScheduler(start_value=0.2, end_value=0.4, start_epoch=0, end_epoch=3)
+
+    with pytest.raises(ValueError, match="end_epoch"):
+        LdamMarginScheduler(start_value=0.2, end_value=0.4, start_epoch=3, end_epoch=2)
+
+
+def test_ldam_margin_scheduler_updates_task_on_linear_schedule_and_restores_original_value():
+    callback = LdamMarginScheduler(start_value=0.2, end_value=0.5, start_epoch=2, end_epoch=4)
+    recorder = LdamMarginRecorder()
+    task = GraphClassificationTask(
+        target="label",
+        label_source="graph",
+        loss="ldam",
+        class_count=[3.0, 1.0],
+        ldam_max_margin=0.35,
+    )
+    trainer = Trainer(
+        model=MulticlassToyModel(),
+        task=task,
+        optimizer=torch.optim.SGD,
+        lr=0.0,
+        max_epochs=4,
+        callbacks=[callback, recorder],
+    )
+
+    history = trainer.fit([MulticlassToyBatch(0)])
+
+    assert history["completed_epochs"] == 4
+    assert recorder.values == pytest.approx([0.2, 0.2, 0.35, 0.5, 0.5])
+    assert callback.current_value == pytest.approx(0.5)
+    assert task.ldam_max_margin == pytest.approx(0.35)
+
+
+def test_ldam_margin_scheduler_state_dict_round_trip_preserves_current_value():
+    callback = LdamMarginScheduler(start_value=0.2, end_value=0.5, start_epoch=2, end_epoch=4)
+    task = GraphClassificationTask(
+        target="label",
+        label_source="graph",
+        loss="ldam",
+        class_count=[3.0, 1.0],
+        ldam_max_margin=0.35,
+    )
+    trainer = Trainer(
+        model=MulticlassToyModel(),
+        task=task,
+        optimizer=torch.optim.SGD,
+        lr=0.0,
+        max_epochs=3,
+        callbacks=[callback],
+    )
+
+    trainer.fit([MulticlassToyBatch(0)])
+
+    restored = LdamMarginScheduler(start_value=0.2, end_value=0.5, start_epoch=2, end_epoch=4)
+    restored_task = GraphClassificationTask(
+        target="label",
+        label_source="graph",
+        loss="ldam",
+        class_count=[3.0, 1.0],
+        ldam_max_margin=0.35,
+    )
+    restored_trainer = Trainer(
+        model=MulticlassToyModel(),
+        task=restored_task,
+        optimizer=torch.optim.SGD,
+        lr=0.0,
+        max_epochs=3,
+        callbacks=[restored],
+    )
+    restored.on_fit_start(restored_trainer, history={"completed_epochs": 0})
+    restored.load_state_dict(callback.state_dict())
+
+    assert restored.current_value == pytest.approx(0.35)
+    assert restored_task.ldam_max_margin == pytest.approx(0.35)
+
+
+def test_ldam_margin_scheduler_requires_task_with_ldam_max_margin():
+    trainer = Trainer(
+        model=ToyModel(),
+        task=ToyTask(),
+        optimizer=torch.optim.SGD,
+        lr=1.0,
+        max_epochs=1,
+        callbacks=[LdamMarginScheduler(start_value=0.2, end_value=0.5, start_epoch=1, end_epoch=2)],
+    )
+
+    with pytest.raises(ValueError, match="ldam_max_margin"):
+        trainer.fit([ToyBatch(1.0)])
+
+
+def test_pos_weight_scheduler_rejects_invalid_configuration():
+    with pytest.raises(ValueError, match="start_value"):
+        PosWeightScheduler(start_value=0.0, end_value=4.0, start_epoch=1, end_epoch=3)
+
+    with pytest.raises(ValueError, match="end_value"):
+        PosWeightScheduler(start_value=1.0, end_value=0.0, start_epoch=1, end_epoch=3)
+
+    with pytest.raises(ValueError, match="start_epoch"):
+        PosWeightScheduler(start_value=1.0, end_value=4.0, start_epoch=0, end_epoch=3)
+
+    with pytest.raises(ValueError, match="end_epoch"):
+        PosWeightScheduler(start_value=1.0, end_value=4.0, start_epoch=3, end_epoch=2)
+
+
+def test_pos_weight_scheduler_updates_task_on_linear_schedule_and_restores_original_value():
+    callback = PosWeightScheduler(start_value=1.0, end_value=4.0, start_epoch=2, end_epoch=4)
+    recorder = PosWeightRecorder()
+    task = LinkPredictionTask(target="label", pos_weight=2.0)
+    trainer = Trainer(
+        model=BinaryToyModel(),
+        task=task,
+        optimizer=torch.optim.SGD,
+        lr=0.0,
+        max_epochs=4,
+        callbacks=[callback, recorder],
+    )
+
+    history = trainer.fit([BinaryToyBatch([1.0, 0.0, 1.0])])
+
+    assert history["completed_epochs"] == 4
+    assert recorder.values == pytest.approx([1.0, 1.0, 2.5, 4.0, 4.0])
+    assert callback.current_value == pytest.approx(4.0)
+    assert torch.allclose(task.pos_weight, torch.tensor([2.0]))
+
+
+def test_pos_weight_scheduler_state_dict_round_trip_preserves_current_value():
+    callback = PosWeightScheduler(start_value=1.0, end_value=4.0, start_epoch=2, end_epoch=4)
+    task = LinkPredictionTask(target="label", pos_weight=2.0)
+    trainer = Trainer(
+        model=BinaryToyModel(),
+        task=task,
+        optimizer=torch.optim.SGD,
+        lr=0.0,
+        max_epochs=3,
+        callbacks=[callback],
+    )
+
+    trainer.fit([BinaryToyBatch([1.0, 0.0, 1.0])])
+
+    restored = PosWeightScheduler(start_value=1.0, end_value=4.0, start_epoch=2, end_epoch=4)
+    restored_task = LinkPredictionTask(target="label", pos_weight=2.0)
+    restored_trainer = Trainer(
+        model=BinaryToyModel(),
+        task=restored_task,
+        optimizer=torch.optim.SGD,
+        lr=0.0,
+        max_epochs=3,
+        callbacks=[restored],
+    )
+    restored.on_fit_start(restored_trainer, history={"completed_epochs": 0})
+    restored.load_state_dict(callback.state_dict())
+
+    assert restored.current_value == pytest.approx(2.5)
+    assert torch.allclose(restored_task.pos_weight, torch.tensor([2.5]))
+
+
+def test_pos_weight_scheduler_requires_task_with_pos_weight():
+    trainer = Trainer(
+        model=ToyModel(),
+        task=ToyTask(),
+        optimizer=torch.optim.SGD,
+        lr=1.0,
+        max_epochs=1,
+        callbacks=[PosWeightScheduler(start_value=1.0, end_value=4.0, start_epoch=1, end_epoch=2)],
+    )
+
+    with pytest.raises(ValueError, match="pos_weight"):
+        trainer.fit([ToyBatch(1.0)])
+
+
+def test_bootstrap_beta_scheduler_rejects_invalid_configuration():
+    with pytest.raises(ValueError, match="start_value"):
+        BootstrapBetaScheduler(start_value=-0.1, end_value=0.9, start_epoch=1, end_epoch=3)
+
+    with pytest.raises(ValueError, match="end_value"):
+        BootstrapBetaScheduler(start_value=0.2, end_value=1.1, start_epoch=1, end_epoch=3)
+
+    with pytest.raises(ValueError, match="start_epoch"):
+        BootstrapBetaScheduler(start_value=0.2, end_value=0.9, start_epoch=0, end_epoch=3)
+
+    with pytest.raises(ValueError, match="end_epoch"):
+        BootstrapBetaScheduler(start_value=0.2, end_value=0.9, start_epoch=3, end_epoch=2)
+
+
+def test_bootstrap_beta_scheduler_updates_task_on_linear_schedule_and_restores_original_value():
+    callback = BootstrapBetaScheduler(start_value=0.2, end_value=0.8, start_epoch=2, end_epoch=4)
+    recorder = BootstrapBetaRecorder()
+    task = BootstrapTask(
+        GraphClassificationTask(target="label", label_source="graph"),
+        beta=0.95,
+        mode="soft",
+    )
+    trainer = Trainer(
+        model=MulticlassToyModel(),
+        task=task,
+        optimizer=torch.optim.SGD,
+        lr=0.0,
+        max_epochs=4,
+        callbacks=[callback, recorder],
+    )
+
+    history = trainer.fit([MulticlassToyBatch(0)])
+
+    assert history["completed_epochs"] == 4
+    assert recorder.values == pytest.approx([0.2, 0.2, 0.5, 0.8, 0.8])
+    assert callback.current_value == pytest.approx(0.8)
+    assert task.beta == pytest.approx(0.95)
+
+
+def test_bootstrap_beta_scheduler_state_dict_round_trip_preserves_current_value():
+    callback = BootstrapBetaScheduler(start_value=0.2, end_value=0.8, start_epoch=2, end_epoch=4)
+    task = BootstrapTask(
+        GraphClassificationTask(target="label", label_source="graph"),
+        beta=0.95,
+        mode="soft",
+    )
+    trainer = Trainer(
+        model=MulticlassToyModel(),
+        task=task,
+        optimizer=torch.optim.SGD,
+        lr=0.0,
+        max_epochs=3,
+        callbacks=[callback],
+    )
+
+    trainer.fit([MulticlassToyBatch(0)])
+
+    restored = BootstrapBetaScheduler(start_value=0.2, end_value=0.8, start_epoch=2, end_epoch=4)
+    restored_task = BootstrapTask(
+        GraphClassificationTask(target="label", label_source="graph"),
+        beta=0.95,
+        mode="soft",
+    )
+    restored_trainer = Trainer(
+        model=MulticlassToyModel(),
+        task=restored_task,
+        optimizer=torch.optim.SGD,
+        lr=0.0,
+        max_epochs=3,
+        callbacks=[restored],
+    )
+    restored.on_fit_start(restored_trainer, history={"completed_epochs": 0})
+    restored.load_state_dict(callback.state_dict())
+
+    assert restored.current_value == pytest.approx(0.5)
+    assert restored_task.beta == pytest.approx(0.5)
+
+
+def test_bootstrap_beta_scheduler_requires_task_with_beta():
+    trainer = Trainer(
+        model=ToyModel(),
+        task=ToyTask(),
+        optimizer=torch.optim.SGD,
+        lr=1.0,
+        max_epochs=1,
+        callbacks=[BootstrapBetaScheduler(start_value=0.2, end_value=0.8, start_epoch=1, end_epoch=2)],
+    )
+
+    with pytest.raises(ValueError, match="beta"):
+        trainer.fit([ToyBatch(1.0)])
+
+
+def test_confidence_penalty_scheduler_rejects_invalid_configuration():
+    with pytest.raises(ValueError, match="start_value"):
+        ConfidencePenaltyScheduler(start_value=-0.1, end_value=0.3, start_epoch=1, end_epoch=3)
+
+    with pytest.raises(ValueError, match="end_value"):
+        ConfidencePenaltyScheduler(start_value=0.0, end_value=-0.1, start_epoch=1, end_epoch=3)
+
+    with pytest.raises(ValueError, match="start_epoch"):
+        ConfidencePenaltyScheduler(start_value=0.0, end_value=0.3, start_epoch=0, end_epoch=3)
+
+    with pytest.raises(ValueError, match="end_epoch"):
+        ConfidencePenaltyScheduler(start_value=0.0, end_value=0.3, start_epoch=3, end_epoch=2)
+
+
+def test_confidence_penalty_scheduler_updates_task_on_linear_schedule_and_restores_original_value():
+    callback = ConfidencePenaltyScheduler(start_value=0.0, end_value=0.3, start_epoch=2, end_epoch=4)
+    recorder = ConfidencePenaltyRecorder()
+    task = ConfidencePenaltyTask(
+        GraphClassificationTask(target="label", label_source="graph"),
+        coefficient=0.1,
+    )
+    trainer = Trainer(
+        model=MulticlassToyModel(),
+        task=task,
+        optimizer=torch.optim.SGD,
+        lr=0.0,
+        max_epochs=4,
+        callbacks=[callback, recorder],
+    )
+
+    history = trainer.fit([MulticlassToyBatch(0)])
+
+    assert history["completed_epochs"] == 4
+    assert recorder.values == pytest.approx([0.0, 0.0, 0.15, 0.3, 0.3])
+    assert callback.current_value == pytest.approx(0.3)
+    assert task.coefficient == pytest.approx(0.1)
+
+
+def test_confidence_penalty_scheduler_state_dict_round_trip_preserves_current_value():
+    callback = ConfidencePenaltyScheduler(start_value=0.0, end_value=0.3, start_epoch=2, end_epoch=4)
+    task = ConfidencePenaltyTask(
+        GraphClassificationTask(target="label", label_source="graph"),
+        coefficient=0.1,
+    )
+    trainer = Trainer(
+        model=MulticlassToyModel(),
+        task=task,
+        optimizer=torch.optim.SGD,
+        lr=0.0,
+        max_epochs=3,
+        callbacks=[callback],
+    )
+
+    trainer.fit([MulticlassToyBatch(0)])
+
+    restored = ConfidencePenaltyScheduler(start_value=0.0, end_value=0.3, start_epoch=2, end_epoch=4)
+    restored_task = ConfidencePenaltyTask(
+        GraphClassificationTask(target="label", label_source="graph"),
+        coefficient=0.1,
+    )
+    restored_trainer = Trainer(
+        model=MulticlassToyModel(),
+        task=restored_task,
+        optimizer=torch.optim.SGD,
+        lr=0.0,
+        max_epochs=3,
+        callbacks=[restored],
+    )
+    restored.on_fit_start(restored_trainer, history={"completed_epochs": 0})
+    restored.load_state_dict(callback.state_dict())
+
+    assert restored.current_value == pytest.approx(0.15)
+    assert restored_task.coefficient == pytest.approx(0.15)
+
+
+def test_confidence_penalty_scheduler_requires_task_with_coefficient():
+    trainer = Trainer(
+        model=ToyModel(),
+        task=ToyTask(),
+        optimizer=torch.optim.SGD,
+        lr=1.0,
+        max_epochs=1,
+        callbacks=[ConfidencePenaltyScheduler(start_value=0.0, end_value=0.3, start_epoch=1, end_epoch=2)],
+    )
+
+    with pytest.raises(ValueError, match="coefficient"):
+        trainer.fit([ToyBatch(1.0)])
+
+
+def test_flooding_level_scheduler_rejects_invalid_configuration():
+    with pytest.raises(ValueError, match="start_value"):
+        FloodingLevelScheduler(start_value=-0.1, end_value=0.3, start_epoch=1, end_epoch=3)
+
+    with pytest.raises(ValueError, match="end_value"):
+        FloodingLevelScheduler(start_value=0.0, end_value=-0.1, start_epoch=1, end_epoch=3)
+
+    with pytest.raises(ValueError, match="start_epoch"):
+        FloodingLevelScheduler(start_value=0.0, end_value=0.3, start_epoch=0, end_epoch=3)
+
+    with pytest.raises(ValueError, match="end_epoch"):
+        FloodingLevelScheduler(start_value=0.0, end_value=0.3, start_epoch=3, end_epoch=2)
+
+
+def test_flooding_level_scheduler_updates_task_on_linear_schedule_and_restores_original_value():
+    callback = FloodingLevelScheduler(start_value=0.0, end_value=0.3, start_epoch=2, end_epoch=4)
+    recorder = FloodingLevelRecorder()
+    task = FloodingTask(
+        GraphClassificationTask(target="label", label_source="graph"),
+        level=0.1,
+    )
+    trainer = Trainer(
+        model=MulticlassToyModel(),
+        task=task,
+        optimizer=torch.optim.SGD,
+        lr=0.0,
+        max_epochs=4,
+        callbacks=[callback, recorder],
+    )
+
+    history = trainer.fit([MulticlassToyBatch(0)])
+
+    assert history["completed_epochs"] == 4
+    assert recorder.values == pytest.approx([0.0, 0.0, 0.15, 0.3, 0.3])
+    assert callback.current_value == pytest.approx(0.3)
+    assert task.level == pytest.approx(0.1)
+
+
+def test_flooding_level_scheduler_state_dict_round_trip_preserves_current_value():
+    callback = FloodingLevelScheduler(start_value=0.0, end_value=0.3, start_epoch=2, end_epoch=4)
+    task = FloodingTask(
+        GraphClassificationTask(target="label", label_source="graph"),
+        level=0.1,
+    )
+    trainer = Trainer(
+        model=MulticlassToyModel(),
+        task=task,
+        optimizer=torch.optim.SGD,
+        lr=0.0,
+        max_epochs=3,
+        callbacks=[callback],
+    )
+
+    trainer.fit([MulticlassToyBatch(0)])
+
+    restored = FloodingLevelScheduler(start_value=0.0, end_value=0.3, start_epoch=2, end_epoch=4)
+    restored_task = FloodingTask(
+        GraphClassificationTask(target="label", label_source="graph"),
+        level=0.1,
+    )
+    restored_trainer = Trainer(
+        model=MulticlassToyModel(),
+        task=restored_task,
+        optimizer=torch.optim.SGD,
+        lr=0.0,
+        max_epochs=3,
+        callbacks=[restored],
+    )
+    restored.on_fit_start(restored_trainer, history={"completed_epochs": 0})
+    restored.load_state_dict(callback.state_dict())
+
+    assert restored.current_value == pytest.approx(0.15)
+    assert restored_task.level == pytest.approx(0.15)
+
+
+def test_flooding_level_scheduler_requires_task_with_level():
+    trainer = Trainer(
+        model=ToyModel(),
+        task=ToyTask(),
+        optimizer=torch.optim.SGD,
+        lr=1.0,
+        max_epochs=1,
+        callbacks=[FloodingLevelScheduler(start_value=0.0, end_value=0.3, start_epoch=1, end_epoch=2)],
+    )
+
+    with pytest.raises(ValueError, match="level"):
+        trainer.fit([ToyBatch(1.0)])
+
+
+def test_generalized_cross_entropy_scheduler_rejects_invalid_configuration():
+    with pytest.raises(ValueError, match="start_value"):
+        GeneralizedCrossEntropyScheduler(start_value=0.0, end_value=0.9, start_epoch=1, end_epoch=3)
+
+    with pytest.raises(ValueError, match="end_value"):
+        GeneralizedCrossEntropyScheduler(start_value=0.3, end_value=1.1, start_epoch=1, end_epoch=3)
+
+    with pytest.raises(ValueError, match="start_epoch"):
+        GeneralizedCrossEntropyScheduler(start_value=0.3, end_value=0.9, start_epoch=0, end_epoch=3)
+
+    with pytest.raises(ValueError, match="end_epoch"):
+        GeneralizedCrossEntropyScheduler(start_value=0.3, end_value=0.9, start_epoch=3, end_epoch=2)
+
+
+def test_generalized_cross_entropy_scheduler_updates_task_on_linear_schedule_and_restores_original_value():
+    callback = GeneralizedCrossEntropyScheduler(start_value=0.3, end_value=0.9, start_epoch=2, end_epoch=4)
+    recorder = GeneralizedCrossEntropyRecorder()
+    task = GeneralizedCrossEntropyTask(
+        GraphClassificationTask(target="label", label_source="graph"),
+        q=0.7,
+    )
+    trainer = Trainer(
+        model=MulticlassToyModel(),
+        task=task,
+        optimizer=torch.optim.SGD,
+        lr=0.0,
+        max_epochs=4,
+        callbacks=[callback, recorder],
+    )
+
+    history = trainer.fit([MulticlassToyBatch(0)])
+
+    assert history["completed_epochs"] == 4
+    assert recorder.values == pytest.approx([0.3, 0.3, 0.6, 0.9, 0.9])
+    assert callback.current_value == pytest.approx(0.9)
+    assert task.q == pytest.approx(0.7)
+
+
+def test_generalized_cross_entropy_scheduler_state_dict_round_trip_preserves_current_value():
+    callback = GeneralizedCrossEntropyScheduler(start_value=0.3, end_value=0.9, start_epoch=2, end_epoch=4)
+    task = GeneralizedCrossEntropyTask(
+        GraphClassificationTask(target="label", label_source="graph"),
+        q=0.7,
+    )
+    trainer = Trainer(
+        model=MulticlassToyModel(),
+        task=task,
+        optimizer=torch.optim.SGD,
+        lr=0.0,
+        max_epochs=3,
+        callbacks=[callback],
+    )
+
+    trainer.fit([MulticlassToyBatch(0)])
+
+    restored = GeneralizedCrossEntropyScheduler(start_value=0.3, end_value=0.9, start_epoch=2, end_epoch=4)
+    restored_task = GeneralizedCrossEntropyTask(
+        GraphClassificationTask(target="label", label_source="graph"),
+        q=0.7,
+    )
+    restored_trainer = Trainer(
+        model=MulticlassToyModel(),
+        task=restored_task,
+        optimizer=torch.optim.SGD,
+        lr=0.0,
+        max_epochs=3,
+        callbacks=[restored],
+    )
+    restored.on_fit_start(restored_trainer, history={"completed_epochs": 0})
+    restored.load_state_dict(callback.state_dict())
+
+    assert restored.current_value == pytest.approx(0.6)
+    assert restored_task.q == pytest.approx(0.6)
+
+
+def test_generalized_cross_entropy_scheduler_requires_task_with_q():
+    trainer = Trainer(
+        model=ToyModel(),
+        task=ToyTask(),
+        optimizer=torch.optim.SGD,
+        lr=1.0,
+        max_epochs=1,
+        callbacks=[GeneralizedCrossEntropyScheduler(start_value=0.3, end_value=0.9, start_epoch=1, end_epoch=2)],
+    )
+
+    with pytest.raises(ValueError, match="q"):
+        trainer.fit([ToyBatch(1.0)])
+
+
+def test_poly1_epsilon_scheduler_rejects_invalid_configuration():
+    with pytest.raises(ValueError, match="start_value"):
+        Poly1EpsilonScheduler(start_value=-0.1, end_value=0.9, start_epoch=1, end_epoch=3)
+
+    with pytest.raises(ValueError, match="end_value"):
+        Poly1EpsilonScheduler(start_value=0.3, end_value=-0.1, start_epoch=1, end_epoch=3)
+
+    with pytest.raises(ValueError, match="start_epoch"):
+        Poly1EpsilonScheduler(start_value=0.3, end_value=0.9, start_epoch=0, end_epoch=3)
+
+    with pytest.raises(ValueError, match="end_epoch"):
+        Poly1EpsilonScheduler(start_value=0.3, end_value=0.9, start_epoch=3, end_epoch=2)
+
+
+def test_poly1_epsilon_scheduler_updates_task_on_linear_schedule_and_restores_original_value():
+    callback = Poly1EpsilonScheduler(start_value=0.3, end_value=0.9, start_epoch=2, end_epoch=4)
+    recorder = Poly1EpsilonRecorder()
+    task = Poly1CrossEntropyTask(
+        GraphClassificationTask(target="label", label_source="graph"),
+        epsilon=0.7,
+    )
+    trainer = Trainer(
+        model=MulticlassToyModel(),
+        task=task,
+        optimizer=torch.optim.SGD,
+        lr=0.0,
+        max_epochs=4,
+        callbacks=[callback, recorder],
+    )
+
+    history = trainer.fit([MulticlassToyBatch(0)])
+
+    assert history["completed_epochs"] == 4
+    assert recorder.values == pytest.approx([0.3, 0.3, 0.6, 0.9, 0.9])
+    assert callback.current_value == pytest.approx(0.9)
+    assert task.epsilon == pytest.approx(0.7)
+
+
+def test_poly1_epsilon_scheduler_state_dict_round_trip_preserves_current_value():
+    callback = Poly1EpsilonScheduler(start_value=0.3, end_value=0.9, start_epoch=2, end_epoch=4)
+    task = Poly1CrossEntropyTask(
+        GraphClassificationTask(target="label", label_source="graph"),
+        epsilon=0.7,
+    )
+    trainer = Trainer(
+        model=MulticlassToyModel(),
+        task=task,
+        optimizer=torch.optim.SGD,
+        lr=0.0,
+        max_epochs=3,
+        callbacks=[callback],
+    )
+
+    trainer.fit([MulticlassToyBatch(0)])
+
+    restored = Poly1EpsilonScheduler(start_value=0.3, end_value=0.9, start_epoch=2, end_epoch=4)
+    restored_task = Poly1CrossEntropyTask(
+        GraphClassificationTask(target="label", label_source="graph"),
+        epsilon=0.7,
+    )
+    restored_trainer = Trainer(
+        model=MulticlassToyModel(),
+        task=restored_task,
+        optimizer=torch.optim.SGD,
+        lr=0.0,
+        max_epochs=3,
+        callbacks=[restored],
+    )
+    restored.on_fit_start(restored_trainer, history={"completed_epochs": 0})
+    restored.load_state_dict(callback.state_dict())
+
+    assert restored.current_value == pytest.approx(0.6)
+    assert restored_task.epsilon == pytest.approx(0.6)
+
+
+def test_poly1_epsilon_scheduler_requires_task_with_epsilon():
+    trainer = Trainer(
+        model=ToyModel(),
+        task=ToyTask(),
+        optimizer=torch.optim.SGD,
+        lr=1.0,
+        max_epochs=1,
+        callbacks=[Poly1EpsilonScheduler(start_value=0.3, end_value=0.9, start_epoch=1, end_epoch=2)],
+    )
+
+    with pytest.raises(ValueError, match="epsilon"):
+        trainer.fit([ToyBatch(1.0)])
+
+
+def test_symmetric_cross_entropy_beta_scheduler_rejects_invalid_configuration():
+    with pytest.raises(ValueError, match="start_value"):
+        SymmetricCrossEntropyBetaScheduler(start_value=-0.1, end_value=0.9, start_epoch=1, end_epoch=3)
+
+    with pytest.raises(ValueError, match="end_value"):
+        SymmetricCrossEntropyBetaScheduler(start_value=0.3, end_value=-0.1, start_epoch=1, end_epoch=3)
+
+    with pytest.raises(ValueError, match="start_epoch"):
+        SymmetricCrossEntropyBetaScheduler(start_value=0.3, end_value=0.9, start_epoch=0, end_epoch=3)
+
+    with pytest.raises(ValueError, match="end_epoch"):
+        SymmetricCrossEntropyBetaScheduler(start_value=0.3, end_value=0.9, start_epoch=3, end_epoch=2)
+
+
+def test_symmetric_cross_entropy_beta_scheduler_updates_task_on_linear_schedule_and_restores_original_value():
+    callback = SymmetricCrossEntropyBetaScheduler(start_value=0.3, end_value=0.9, start_epoch=2, end_epoch=4)
+    recorder = SymmetricCrossEntropyBetaRecorder()
+    task = SymmetricCrossEntropyTask(
+        GraphClassificationTask(target="label", label_source="graph"),
+        alpha=1.0,
+        beta=0.7,
+    )
+    trainer = Trainer(
+        model=MulticlassToyModel(),
+        task=task,
+        optimizer=torch.optim.SGD,
+        lr=0.0,
+        max_epochs=4,
+        callbacks=[callback, recorder],
+    )
+
+    history = trainer.fit([MulticlassToyBatch(0)])
+
+    assert history["completed_epochs"] == 4
+    assert recorder.values == pytest.approx([0.3, 0.3, 0.6, 0.9, 0.9])
+    assert callback.current_value == pytest.approx(0.9)
+    assert task.beta == pytest.approx(0.7)
+
+
+def test_symmetric_cross_entropy_beta_scheduler_state_dict_round_trip_preserves_current_value():
+    callback = SymmetricCrossEntropyBetaScheduler(start_value=0.3, end_value=0.9, start_epoch=2, end_epoch=4)
+    task = SymmetricCrossEntropyTask(
+        GraphClassificationTask(target="label", label_source="graph"),
+        alpha=1.0,
+        beta=0.7,
+    )
+    trainer = Trainer(
+        model=MulticlassToyModel(),
+        task=task,
+        optimizer=torch.optim.SGD,
+        lr=0.0,
+        max_epochs=3,
+        callbacks=[callback],
+    )
+
+    trainer.fit([MulticlassToyBatch(0)])
+
+    restored = SymmetricCrossEntropyBetaScheduler(start_value=0.3, end_value=0.9, start_epoch=2, end_epoch=4)
+    restored_task = SymmetricCrossEntropyTask(
+        GraphClassificationTask(target="label", label_source="graph"),
+        alpha=1.0,
+        beta=0.7,
+    )
+    restored_trainer = Trainer(
+        model=MulticlassToyModel(),
+        task=restored_task,
+        optimizer=torch.optim.SGD,
+        lr=0.0,
+        max_epochs=3,
+        callbacks=[restored],
+    )
+    restored.on_fit_start(restored_trainer, history={"completed_epochs": 0})
+    restored.load_state_dict(callback.state_dict())
+
+    assert restored.current_value == pytest.approx(0.6)
+    assert restored_task.beta == pytest.approx(0.6)
+
+
+def test_symmetric_cross_entropy_beta_scheduler_requires_task_with_beta():
+    trainer = Trainer(
+        model=ToyModel(),
+        task=ToyTask(),
+        optimizer=torch.optim.SGD,
+        lr=1.0,
+        max_epochs=1,
+        callbacks=[SymmetricCrossEntropyBetaScheduler(start_value=0.3, end_value=0.9, start_epoch=1, end_epoch=2)],
+    )
+
+    with pytest.raises(ValueError, match="beta"):
+        trainer.fit([ToyBatch(1.0)])
+
+
+def test_weight_decay_scheduler_rejects_invalid_configuration():
+    with pytest.raises(ValueError, match="start_factor"):
+        WeightDecayScheduler(start_factor=-0.1, end_factor=1.0, start_epoch=1, end_epoch=3)
+
+    with pytest.raises(ValueError, match="end_factor"):
+        WeightDecayScheduler(start_factor=0.0, end_factor=-0.1, start_epoch=1, end_epoch=3)
+
+    with pytest.raises(ValueError, match="start_epoch"):
+        WeightDecayScheduler(start_factor=0.0, end_factor=1.0, start_epoch=0, end_epoch=3)
+
+    with pytest.raises(ValueError, match="end_epoch"):
+        WeightDecayScheduler(start_factor=0.0, end_factor=1.0, start_epoch=3, end_epoch=2)
+
+
+def test_weight_decay_scheduler_updates_optimizer_on_linear_schedule_and_restores_original_values():
+    callback = WeightDecayScheduler(start_factor=0.0, end_factor=1.5, start_epoch=2, end_epoch=4)
+    recorder = WeightDecayRecorder()
+    trainer = Trainer(
+        model=ToyModel(),
+        task=ToyTask(),
+        optimizer=lambda params, lr: torch.optim.SGD(params, lr=lr, weight_decay=0.2),
+        lr=0.0,
+        max_epochs=4,
+        callbacks=[callback, recorder],
+    )
+
+    history = trainer.fit([ToyBatch(1.0)])
+
+    assert history["completed_epochs"] == 4
+    assert recorder.values == pytest.approx([0.0, 0.0, 0.15, 0.3, 0.3])
+    assert callback.current_factor == pytest.approx(1.5)
+    assert trainer.optimizer.param_groups[0]["weight_decay"] == pytest.approx(0.2)
+
+
+def test_weight_decay_scheduler_state_dict_round_trip_preserves_current_factor():
+    callback = WeightDecayScheduler(start_factor=0.0, end_factor=1.5, start_epoch=2, end_epoch=4)
+    trainer = Trainer(
+        model=ToyModel(),
+        task=ToyTask(),
+        optimizer=lambda params, lr: torch.optim.SGD(params, lr=lr, weight_decay=0.2),
+        lr=0.0,
+        max_epochs=3,
+        callbacks=[callback],
+    )
+
+    trainer.fit([ToyBatch(1.0)])
+
+    restored = WeightDecayScheduler(start_factor=0.0, end_factor=1.5, start_epoch=2, end_epoch=4)
+    restored_trainer = Trainer(
+        model=ToyModel(),
+        task=ToyTask(),
+        optimizer=lambda params, lr: torch.optim.SGD(params, lr=lr, weight_decay=0.2),
+        lr=0.0,
+        max_epochs=3,
+        callbacks=[restored],
+    )
+    restored.on_fit_start(restored_trainer, history={"completed_epochs": 0})
+    restored.load_state_dict(callback.state_dict())
+
+    assert restored.current_factor == pytest.approx(0.75)
+    assert restored_trainer.optimizer.param_groups[0]["weight_decay"] == pytest.approx(0.15)
+
+
+def test_gradient_noise_injection_rejects_invalid_configuration():
+    with pytest.raises(ValueError, match="std"):
+        GradientNoiseInjection(std=0.0)
+
+    with pytest.raises(ValueError, match="decay_exponent"):
+        GradientNoiseInjection(std=0.1, decay_exponent=-0.1)
+
+
+def test_gradient_noise_injection_adds_deterministic_noise_to_dense_gradients():
+    parameter = torch.tensor([[1.0, -1.0], [0.5, -0.5]], dtype=torch.float32)
+    model = GradientHolderModel(parameter)
+    model.weight.grad = torch.ones_like(model.weight)
+    trainer = DummyTrainer(model)
+    callback = GradientNoiseInjection(std=0.2, decay_exponent=0.5, seed=13)
+
+    callback.on_fit_start(trainer, history={})
+    callback.on_before_optimizer_step(trainer, step=4)
+
+    expected_generator = torch.Generator(device="cpu")
+    expected_generator.manual_seed(13)
+    expected_std = 0.2 / (4 ** 0.5)
+    expected_noise = torch.randn(model.weight.grad.shape, generator=expected_generator) * expected_std
+    expected_grad = torch.ones_like(model.weight) + expected_noise
+
+    assert torch.allclose(model.weight.grad, expected_grad)
+    assert callback.step_count == 4
+
+
+def test_gradient_noise_injection_state_dict_round_trip_preserves_generator_progress():
+    parameter = torch.tensor([1.0, -1.0], dtype=torch.float32)
+    trainer = DummyTrainer(GradientHolderModel(parameter))
+    trainer.model.weight.grad = torch.zeros_like(trainer.model.weight)
+    callback = GradientNoiseInjection(std=0.1, decay_exponent=0.0, seed=7)
+
+    callback.on_fit_start(trainer, history={})
+    callback.on_before_optimizer_step(trainer, step=1)
+    callback.on_before_optimizer_step(trainer, step=2)
+
+    restored_trainer = DummyTrainer(GradientHolderModel(parameter))
+    restored_trainer.model.weight.grad = torch.zeros_like(restored_trainer.model.weight)
+    restored = GradientNoiseInjection(std=0.1, decay_exponent=0.0, seed=7)
+    restored.on_fit_start(restored_trainer, history={})
+    restored.load_state_dict(callback.state_dict())
+
+    trainer.model.weight.grad = torch.zeros_like(trainer.model.weight)
+    restored_trainer.model.weight.grad = torch.zeros_like(restored_trainer.model.weight)
+    callback.on_before_optimizer_step(trainer, step=3)
+    restored.on_before_optimizer_step(restored_trainer, step=3)
+
+    assert restored.step_count == callback.step_count == 3
+    assert torch.allclose(restored_trainer.model.weight.grad, trainer.model.weight.grad)

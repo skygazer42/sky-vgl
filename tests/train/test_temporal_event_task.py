@@ -54,6 +54,20 @@ def test_temporal_event_prediction_task_computes_loss():
     assert loss.ndim == 0
 
 
+def test_temporal_event_prediction_task_applies_label_smoothing():
+    task = TemporalEventPredictionTask(target="label", label_smoothing=0.2)
+    logits = torch.tensor([[2.0, -1.0], [0.5, 1.5]], requires_grad=True)
+
+    loss = task.loss(_batch(), logits, stage="train")
+
+    expected = F.cross_entropy(
+        logits,
+        torch.tensor([1, 0]),
+        label_smoothing=0.2,
+    )
+    assert loss.item() == pytest.approx(expected.item())
+
+
 def test_temporal_event_prediction_task_computes_focal_loss():
     task = TemporalEventPredictionTask(target="label", loss="focal", focal_gamma=2.0)
     logits = torch.tensor([[2.0, -1.0], [0.5, 1.5]], requires_grad=True)
@@ -132,6 +146,12 @@ def test_temporal_event_prediction_task_computes_logit_adjustment_loss():
 def test_temporal_event_prediction_task_rejects_unsupported_loss():
     with pytest.raises(ValueError, match="Unsupported loss"):
         TemporalEventPredictionTask(target="label", loss="bce")
+
+    with pytest.raises(ValueError, match="label_smoothing"):
+        TemporalEventPredictionTask(target="label", label_smoothing=-0.1)
+
+    with pytest.raises(ValueError, match="label_smoothing"):
+        TemporalEventPredictionTask(target="label", label_smoothing=1.0)
 
     with pytest.raises(ValueError, match="focal_gamma"):
         TemporalEventPredictionTask(target="label", focal_gamma=-1.0)

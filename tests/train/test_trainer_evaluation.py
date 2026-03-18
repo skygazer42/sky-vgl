@@ -6,18 +6,38 @@ from vgl import Graph
 from vgl.engine import (
     ASAM,
     AdaptiveGradientClipping,
+    BootstrapBetaScheduler,
     Callback,
+    ConfidencePenaltyScheduler,
     DeferredReweighting,
+    FocalGammaScheduler,
+    FloodingLevelScheduler,
+    GeneralizedCrossEntropyScheduler,
+    GradientNoiseInjection,
+    LabelSmoothingScheduler,
+    LdamMarginScheduler,
+    LogitAdjustTauScheduler,
     ExponentialMovingAverage,
     GSAM,
     GradualUnfreezing,
     LayerwiseLrDecay,
     Lookahead,
+    Poly1EpsilonScheduler,
+    PosWeightScheduler,
     SAM,
+    SymmetricCrossEntropyBetaScheduler,
     WarmupCosineScheduler,
+    WeightDecayScheduler,
 )
 from vgl.train.task import Task
+from vgl.train.tasks import BootstrapTask
+from vgl.train.tasks import ConfidencePenaltyTask
+from vgl.train.tasks import FloodingTask
+from vgl.train.tasks import GeneralizedCrossEntropyTask
+from vgl.train.tasks import LinkPredictionTask
 from vgl.train.tasks import NodeClassificationTask
+from vgl.train.tasks import Poly1CrossEntropyTask
+from vgl.train.tasks import SymmetricCrossEntropyTask
 from vgl.train.trainer import Trainer
 
 
@@ -28,6 +48,15 @@ class TinyNodeModel(nn.Module):
 
     def forward(self, graph):
         return self.linear(graph.x)
+
+
+class TinyBinaryModel(nn.Module):
+    def __init__(self):
+        super().__init__()
+        self.linear = nn.Linear(1, 1)
+
+    def forward(self, batch):
+        return self.linear(batch.x).view(-1)
 
 
 def _graph():
@@ -102,6 +131,12 @@ class FineTuneBatch:
     def __init__(self, value, target):
         self.x = torch.tensor([[value]], dtype=torch.float32)
         self.target = torch.tensor([target], dtype=torch.float32)
+
+
+class BinaryBatch:
+    def __init__(self, values, labels):
+        self.x = torch.tensor(values, dtype=torch.float32).view(-1, 1)
+        self.labels = torch.tensor(labels, dtype=torch.float32)
 
 
 class FineTuneModel(nn.Module):
@@ -875,5 +910,995 @@ def test_trainer_can_resume_deferred_reweighting_callback_from_checkpoint(tmp_pa
     assert torch.allclose(
         resumed_trainer.model.linear.bias.detach(),
         uninterrupted_trainer.model.linear.bias.detach(),
+    )
+    assert resumed_history["best_epoch"] == uninterrupted_history["best_epoch"]
+
+
+def test_trainer_can_resume_label_smoothing_scheduler_callback_from_checkpoint(tmp_path):
+    checkpoint = tmp_path / "label-smoothing-resume.pt"
+    torch.manual_seed(19)
+    graph = _graph()
+    torch.manual_seed(23)
+    paused_callback = LabelSmoothingScheduler(start_value=0.0, end_value=0.2, start_epoch=2, end_epoch=4)
+    paused_task = NodeClassificationTask(
+        target="y",
+        split=("train_mask", "val_mask", "test_mask"),
+        label_smoothing=0.05,
+    )
+    paused_trainer = Trainer(
+        model=TinyNodeModel(),
+        task=paused_task,
+        optimizer=torch.optim.SGD,
+        lr=0.05,
+        max_epochs=4,
+        callbacks=[paused_callback, SaveAndStop(checkpoint, stop_epoch=2)],
+    )
+
+    with pytest.raises(RuntimeError, match="pause"):
+        paused_trainer.fit(graph)
+
+    torch.manual_seed(31)
+    resumed_callback = LabelSmoothingScheduler(start_value=0.0, end_value=0.2, start_epoch=2, end_epoch=4)
+    resumed_task = NodeClassificationTask(
+        target="y",
+        split=("train_mask", "val_mask", "test_mask"),
+        label_smoothing=0.05,
+    )
+    resumed_trainer = Trainer(
+        model=TinyNodeModel(),
+        task=resumed_task,
+        optimizer=torch.optim.SGD,
+        lr=0.05,
+        max_epochs=4,
+        callbacks=[resumed_callback],
+    )
+    resumed_payload = resumed_trainer.restore_training_checkpoint(checkpoint)
+    resumed_history = resumed_trainer.fit(graph)
+
+    torch.manual_seed(23)
+    uninterrupted_callback = LabelSmoothingScheduler(start_value=0.0, end_value=0.2, start_epoch=2, end_epoch=4)
+    uninterrupted_task = NodeClassificationTask(
+        target="y",
+        split=("train_mask", "val_mask", "test_mask"),
+        label_smoothing=0.05,
+    )
+    uninterrupted_trainer = Trainer(
+        model=TinyNodeModel(),
+        task=uninterrupted_task,
+        optimizer=torch.optim.SGD,
+        lr=0.05,
+        max_epochs=4,
+        callbacks=[uninterrupted_callback],
+    )
+    uninterrupted_history = uninterrupted_trainer.fit(graph)
+
+    assert resumed_payload["metadata"] == {"phase": "resume"}
+    assert resumed_history["completed_epochs"] == 4
+    assert resumed_trainer.global_step == uninterrupted_trainer.global_step == 4
+    assert resumed_callback.current_value == uninterrupted_callback.current_value == pytest.approx(0.2)
+    assert resumed_task.label_smoothing == pytest.approx(0.05)
+    assert uninterrupted_task.label_smoothing == pytest.approx(0.05)
+    assert torch.allclose(
+        resumed_trainer.model.linear.weight.detach(),
+        uninterrupted_trainer.model.linear.weight.detach(),
+    )
+    assert torch.allclose(
+        resumed_trainer.model.linear.bias.detach(),
+        uninterrupted_trainer.model.linear.bias.detach(),
+    )
+    assert resumed_history["best_epoch"] == uninterrupted_history["best_epoch"]
+
+
+def test_trainer_can_resume_focal_gamma_scheduler_callback_from_checkpoint(tmp_path):
+    checkpoint = tmp_path / "focal-gamma-resume.pt"
+    torch.manual_seed(29)
+    graph = _graph()
+    torch.manual_seed(37)
+    paused_callback = FocalGammaScheduler(start_value=0.5, end_value=3.0, start_epoch=2, end_epoch=4)
+    paused_task = NodeClassificationTask(
+        target="y",
+        split=("train_mask", "val_mask", "test_mask"),
+        loss="focal",
+        focal_gamma=1.5,
+    )
+    paused_trainer = Trainer(
+        model=TinyNodeModel(),
+        task=paused_task,
+        optimizer=torch.optim.SGD,
+        lr=0.05,
+        max_epochs=4,
+        callbacks=[paused_callback, SaveAndStop(checkpoint, stop_epoch=2)],
+    )
+
+    with pytest.raises(RuntimeError, match="pause"):
+        paused_trainer.fit(graph)
+
+    torch.manual_seed(41)
+    resumed_callback = FocalGammaScheduler(start_value=0.5, end_value=3.0, start_epoch=2, end_epoch=4)
+    resumed_task = NodeClassificationTask(
+        target="y",
+        split=("train_mask", "val_mask", "test_mask"),
+        loss="focal",
+        focal_gamma=1.5,
+    )
+    resumed_trainer = Trainer(
+        model=TinyNodeModel(),
+        task=resumed_task,
+        optimizer=torch.optim.SGD,
+        lr=0.05,
+        max_epochs=4,
+        callbacks=[resumed_callback],
+    )
+    resumed_payload = resumed_trainer.restore_training_checkpoint(checkpoint)
+    resumed_history = resumed_trainer.fit(graph)
+
+    torch.manual_seed(37)
+    uninterrupted_callback = FocalGammaScheduler(start_value=0.5, end_value=3.0, start_epoch=2, end_epoch=4)
+    uninterrupted_task = NodeClassificationTask(
+        target="y",
+        split=("train_mask", "val_mask", "test_mask"),
+        loss="focal",
+        focal_gamma=1.5,
+    )
+    uninterrupted_trainer = Trainer(
+        model=TinyNodeModel(),
+        task=uninterrupted_task,
+        optimizer=torch.optim.SGD,
+        lr=0.05,
+        max_epochs=4,
+        callbacks=[uninterrupted_callback],
+    )
+    uninterrupted_history = uninterrupted_trainer.fit(graph)
+
+    assert resumed_payload["metadata"] == {"phase": "resume"}
+    assert resumed_history["completed_epochs"] == 4
+    assert resumed_trainer.global_step == uninterrupted_trainer.global_step == 4
+    assert resumed_callback.current_value == uninterrupted_callback.current_value == pytest.approx(3.0)
+    assert resumed_task.focal_gamma == pytest.approx(1.5)
+    assert uninterrupted_task.focal_gamma == pytest.approx(1.5)
+    assert torch.allclose(
+        resumed_trainer.model.linear.weight.detach(),
+        uninterrupted_trainer.model.linear.weight.detach(),
+    )
+    assert torch.allclose(
+        resumed_trainer.model.linear.bias.detach(),
+        uninterrupted_trainer.model.linear.bias.detach(),
+    )
+    assert resumed_history["best_epoch"] == uninterrupted_history["best_epoch"]
+
+
+def test_trainer_can_resume_logit_adjust_tau_scheduler_callback_from_checkpoint(tmp_path):
+    checkpoint = tmp_path / "logit-adjust-tau-resume.pt"
+    torch.manual_seed(43)
+    graph = _graph()
+    torch.manual_seed(47)
+    paused_callback = LogitAdjustTauScheduler(start_value=0.0, end_value=1.5, start_epoch=2, end_epoch=4)
+    paused_task = NodeClassificationTask(
+        target="y",
+        split=("train_mask", "val_mask", "test_mask"),
+        loss="logit_adjustment",
+        class_count=[1.0, 2.0],
+        logit_adjust_tau=0.2,
+    )
+    paused_trainer = Trainer(
+        model=TinyNodeModel(),
+        task=paused_task,
+        optimizer=torch.optim.SGD,
+        lr=0.05,
+        max_epochs=4,
+        callbacks=[paused_callback, SaveAndStop(checkpoint, stop_epoch=2)],
+    )
+
+    with pytest.raises(RuntimeError, match="pause"):
+        paused_trainer.fit(graph)
+
+    torch.manual_seed(53)
+    resumed_callback = LogitAdjustTauScheduler(start_value=0.0, end_value=1.5, start_epoch=2, end_epoch=4)
+    resumed_task = NodeClassificationTask(
+        target="y",
+        split=("train_mask", "val_mask", "test_mask"),
+        loss="logit_adjustment",
+        class_count=[1.0, 2.0],
+        logit_adjust_tau=0.2,
+    )
+    resumed_trainer = Trainer(
+        model=TinyNodeModel(),
+        task=resumed_task,
+        optimizer=torch.optim.SGD,
+        lr=0.05,
+        max_epochs=4,
+        callbacks=[resumed_callback],
+    )
+    resumed_payload = resumed_trainer.restore_training_checkpoint(checkpoint)
+    resumed_history = resumed_trainer.fit(graph)
+
+    torch.manual_seed(47)
+    uninterrupted_callback = LogitAdjustTauScheduler(start_value=0.0, end_value=1.5, start_epoch=2, end_epoch=4)
+    uninterrupted_task = NodeClassificationTask(
+        target="y",
+        split=("train_mask", "val_mask", "test_mask"),
+        loss="logit_adjustment",
+        class_count=[1.0, 2.0],
+        logit_adjust_tau=0.2,
+    )
+    uninterrupted_trainer = Trainer(
+        model=TinyNodeModel(),
+        task=uninterrupted_task,
+        optimizer=torch.optim.SGD,
+        lr=0.05,
+        max_epochs=4,
+        callbacks=[uninterrupted_callback],
+    )
+    uninterrupted_history = uninterrupted_trainer.fit(graph)
+
+    assert resumed_payload["metadata"] == {"phase": "resume"}
+    assert resumed_history["completed_epochs"] == 4
+    assert resumed_trainer.global_step == uninterrupted_trainer.global_step == 4
+    assert resumed_callback.current_value == uninterrupted_callback.current_value == pytest.approx(1.5)
+    assert resumed_task.logit_adjust_tau == pytest.approx(0.2)
+    assert uninterrupted_task.logit_adjust_tau == pytest.approx(0.2)
+    assert torch.allclose(
+        resumed_trainer.model.linear.weight.detach(),
+        uninterrupted_trainer.model.linear.weight.detach(),
+    )
+    assert torch.allclose(
+        resumed_trainer.model.linear.bias.detach(),
+        uninterrupted_trainer.model.linear.bias.detach(),
+    )
+    assert resumed_history["best_epoch"] == uninterrupted_history["best_epoch"]
+
+
+def test_trainer_can_resume_ldam_margin_scheduler_callback_from_checkpoint(tmp_path):
+    checkpoint = tmp_path / "ldam-margin-resume.pt"
+    torch.manual_seed(59)
+    graph = _graph()
+    torch.manual_seed(61)
+    paused_callback = LdamMarginScheduler(start_value=0.2, end_value=0.5, start_epoch=2, end_epoch=4)
+    paused_task = NodeClassificationTask(
+        target="y",
+        split=("train_mask", "val_mask", "test_mask"),
+        loss="ldam",
+        class_count=[1.0, 2.0],
+        ldam_max_margin=0.35,
+    )
+    paused_trainer = Trainer(
+        model=TinyNodeModel(),
+        task=paused_task,
+        optimizer=torch.optim.SGD,
+        lr=0.05,
+        max_epochs=4,
+        callbacks=[paused_callback, SaveAndStop(checkpoint, stop_epoch=2)],
+    )
+
+    with pytest.raises(RuntimeError, match="pause"):
+        paused_trainer.fit(graph)
+
+    torch.manual_seed(67)
+    resumed_callback = LdamMarginScheduler(start_value=0.2, end_value=0.5, start_epoch=2, end_epoch=4)
+    resumed_task = NodeClassificationTask(
+        target="y",
+        split=("train_mask", "val_mask", "test_mask"),
+        loss="ldam",
+        class_count=[1.0, 2.0],
+        ldam_max_margin=0.35,
+    )
+    resumed_trainer = Trainer(
+        model=TinyNodeModel(),
+        task=resumed_task,
+        optimizer=torch.optim.SGD,
+        lr=0.05,
+        max_epochs=4,
+        callbacks=[resumed_callback],
+    )
+    resumed_payload = resumed_trainer.restore_training_checkpoint(checkpoint)
+    resumed_history = resumed_trainer.fit(graph)
+
+    torch.manual_seed(61)
+    uninterrupted_callback = LdamMarginScheduler(start_value=0.2, end_value=0.5, start_epoch=2, end_epoch=4)
+    uninterrupted_task = NodeClassificationTask(
+        target="y",
+        split=("train_mask", "val_mask", "test_mask"),
+        loss="ldam",
+        class_count=[1.0, 2.0],
+        ldam_max_margin=0.35,
+    )
+    uninterrupted_trainer = Trainer(
+        model=TinyNodeModel(),
+        task=uninterrupted_task,
+        optimizer=torch.optim.SGD,
+        lr=0.05,
+        max_epochs=4,
+        callbacks=[uninterrupted_callback],
+    )
+    uninterrupted_history = uninterrupted_trainer.fit(graph)
+
+    assert resumed_payload["metadata"] == {"phase": "resume"}
+    assert resumed_history["completed_epochs"] == 4
+    assert resumed_trainer.global_step == uninterrupted_trainer.global_step == 4
+    assert resumed_callback.current_value == uninterrupted_callback.current_value == pytest.approx(0.5)
+    assert resumed_task.ldam_max_margin == pytest.approx(0.35)
+    assert uninterrupted_task.ldam_max_margin == pytest.approx(0.35)
+    assert torch.allclose(
+        resumed_trainer.model.linear.weight.detach(),
+        uninterrupted_trainer.model.linear.weight.detach(),
+    )
+    assert torch.allclose(
+        resumed_trainer.model.linear.bias.detach(),
+        uninterrupted_trainer.model.linear.bias.detach(),
+    )
+    assert resumed_history["best_epoch"] == uninterrupted_history["best_epoch"]
+
+
+def test_trainer_can_resume_pos_weight_scheduler_callback_from_checkpoint(tmp_path):
+    checkpoint = tmp_path / "pos-weight-resume.pt"
+    batch = BinaryBatch(values=[1.0, 0.0, 2.0], labels=[1.0, 0.0, 1.0])
+    torch.manual_seed(71)
+    paused_callback = PosWeightScheduler(start_value=1.0, end_value=4.0, start_epoch=2, end_epoch=4)
+    paused_task = LinkPredictionTask(target="label", pos_weight=2.0)
+    paused_trainer = Trainer(
+        model=TinyBinaryModel(),
+        task=paused_task,
+        optimizer=torch.optim.SGD,
+        lr=0.05,
+        max_epochs=4,
+        callbacks=[paused_callback, SaveAndStop(checkpoint, stop_epoch=2)],
+    )
+
+    with pytest.raises(RuntimeError, match="pause"):
+        paused_trainer.fit([batch])
+
+    torch.manual_seed(73)
+    resumed_callback = PosWeightScheduler(start_value=1.0, end_value=4.0, start_epoch=2, end_epoch=4)
+    resumed_task = LinkPredictionTask(target="label", pos_weight=2.0)
+    resumed_trainer = Trainer(
+        model=TinyBinaryModel(),
+        task=resumed_task,
+        optimizer=torch.optim.SGD,
+        lr=0.05,
+        max_epochs=4,
+        callbacks=[resumed_callback],
+    )
+    resumed_payload = resumed_trainer.restore_training_checkpoint(checkpoint)
+    resumed_history = resumed_trainer.fit([batch])
+
+    torch.manual_seed(71)
+    uninterrupted_callback = PosWeightScheduler(start_value=1.0, end_value=4.0, start_epoch=2, end_epoch=4)
+    uninterrupted_task = LinkPredictionTask(target="label", pos_weight=2.0)
+    uninterrupted_trainer = Trainer(
+        model=TinyBinaryModel(),
+        task=uninterrupted_task,
+        optimizer=torch.optim.SGD,
+        lr=0.05,
+        max_epochs=4,
+        callbacks=[uninterrupted_callback],
+    )
+    uninterrupted_history = uninterrupted_trainer.fit([batch])
+
+    assert resumed_payload["metadata"] == {"phase": "resume"}
+    assert resumed_history["completed_epochs"] == 4
+    assert resumed_trainer.global_step == uninterrupted_trainer.global_step == 4
+    assert resumed_callback.current_value == uninterrupted_callback.current_value == pytest.approx(4.0)
+    assert torch.allclose(resumed_task.pos_weight, torch.tensor([2.0]))
+    assert torch.allclose(uninterrupted_task.pos_weight, torch.tensor([2.0]))
+    assert torch.allclose(
+        resumed_trainer.model.linear.weight.detach(),
+        uninterrupted_trainer.model.linear.weight.detach(),
+    )
+    assert torch.allclose(
+        resumed_trainer.model.linear.bias.detach(),
+        uninterrupted_trainer.model.linear.bias.detach(),
+    )
+    assert resumed_history["best_epoch"] == uninterrupted_history["best_epoch"]
+
+
+def test_trainer_can_resume_bootstrap_beta_scheduler_callback_from_checkpoint(tmp_path):
+    checkpoint = tmp_path / "bootstrap-beta-resume.pt"
+    torch.manual_seed(75)
+    graph = _graph()
+    torch.manual_seed(77)
+    paused_callback = BootstrapBetaScheduler(start_value=0.2, end_value=0.8, start_epoch=2, end_epoch=4)
+    paused_task = BootstrapTask(
+        NodeClassificationTask(
+            target="y",
+            split=("train_mask", "val_mask", "test_mask"),
+        ),
+        beta=0.95,
+        mode="soft",
+    )
+    paused_trainer = Trainer(
+        model=TinyNodeModel(),
+        task=paused_task,
+        optimizer=torch.optim.SGD,
+        lr=0.05,
+        max_epochs=4,
+        callbacks=[paused_callback, SaveAndStop(checkpoint, stop_epoch=2)],
+    )
+
+    with pytest.raises(RuntimeError, match="pause"):
+        paused_trainer.fit(graph)
+
+    torch.manual_seed(81)
+    resumed_callback = BootstrapBetaScheduler(start_value=0.2, end_value=0.8, start_epoch=2, end_epoch=4)
+    resumed_task = BootstrapTask(
+        NodeClassificationTask(
+            target="y",
+            split=("train_mask", "val_mask", "test_mask"),
+        ),
+        beta=0.95,
+        mode="soft",
+    )
+    resumed_trainer = Trainer(
+        model=TinyNodeModel(),
+        task=resumed_task,
+        optimizer=torch.optim.SGD,
+        lr=0.05,
+        max_epochs=4,
+        callbacks=[resumed_callback],
+    )
+    resumed_payload = resumed_trainer.restore_training_checkpoint(checkpoint)
+    resumed_history = resumed_trainer.fit(graph)
+
+    torch.manual_seed(77)
+    uninterrupted_callback = BootstrapBetaScheduler(start_value=0.2, end_value=0.8, start_epoch=2, end_epoch=4)
+    uninterrupted_task = BootstrapTask(
+        NodeClassificationTask(
+            target="y",
+            split=("train_mask", "val_mask", "test_mask"),
+        ),
+        beta=0.95,
+        mode="soft",
+    )
+    uninterrupted_trainer = Trainer(
+        model=TinyNodeModel(),
+        task=uninterrupted_task,
+        optimizer=torch.optim.SGD,
+        lr=0.05,
+        max_epochs=4,
+        callbacks=[uninterrupted_callback],
+    )
+    uninterrupted_history = uninterrupted_trainer.fit(graph)
+
+    assert resumed_payload["metadata"] == {"phase": "resume"}
+    assert resumed_history["completed_epochs"] == 4
+    assert resumed_trainer.global_step == uninterrupted_trainer.global_step == 4
+    assert resumed_callback.current_value == uninterrupted_callback.current_value == pytest.approx(0.8)
+    assert resumed_task.beta == pytest.approx(0.95)
+    assert uninterrupted_task.beta == pytest.approx(0.95)
+    assert torch.allclose(
+        resumed_trainer.model.linear.weight.detach(),
+        uninterrupted_trainer.model.linear.weight.detach(),
+    )
+    assert torch.allclose(
+        resumed_trainer.model.linear.bias.detach(),
+        uninterrupted_trainer.model.linear.bias.detach(),
+    )
+    assert resumed_history["best_epoch"] == uninterrupted_history["best_epoch"]
+
+
+def test_trainer_can_resume_confidence_penalty_scheduler_callback_from_checkpoint(tmp_path):
+    checkpoint = tmp_path / "confidence-penalty-resume.pt"
+    torch.manual_seed(85)
+    graph = _graph()
+    torch.manual_seed(89)
+    paused_callback = ConfidencePenaltyScheduler(start_value=0.0, end_value=0.3, start_epoch=2, end_epoch=4)
+    paused_task = ConfidencePenaltyTask(
+        NodeClassificationTask(
+            target="y",
+            split=("train_mask", "val_mask", "test_mask"),
+        ),
+        coefficient=0.1,
+    )
+    paused_trainer = Trainer(
+        model=TinyNodeModel(),
+        task=paused_task,
+        optimizer=torch.optim.SGD,
+        lr=0.05,
+        max_epochs=4,
+        callbacks=[paused_callback, SaveAndStop(checkpoint, stop_epoch=2)],
+    )
+
+    with pytest.raises(RuntimeError, match="pause"):
+        paused_trainer.fit(graph)
+
+    torch.manual_seed(97)
+    resumed_callback = ConfidencePenaltyScheduler(start_value=0.0, end_value=0.3, start_epoch=2, end_epoch=4)
+    resumed_task = ConfidencePenaltyTask(
+        NodeClassificationTask(
+            target="y",
+            split=("train_mask", "val_mask", "test_mask"),
+        ),
+        coefficient=0.1,
+    )
+    resumed_trainer = Trainer(
+        model=TinyNodeModel(),
+        task=resumed_task,
+        optimizer=torch.optim.SGD,
+        lr=0.05,
+        max_epochs=4,
+        callbacks=[resumed_callback],
+    )
+    resumed_payload = resumed_trainer.restore_training_checkpoint(checkpoint)
+    resumed_history = resumed_trainer.fit(graph)
+
+    torch.manual_seed(89)
+    uninterrupted_callback = ConfidencePenaltyScheduler(start_value=0.0, end_value=0.3, start_epoch=2, end_epoch=4)
+    uninterrupted_task = ConfidencePenaltyTask(
+        NodeClassificationTask(
+            target="y",
+            split=("train_mask", "val_mask", "test_mask"),
+        ),
+        coefficient=0.1,
+    )
+    uninterrupted_trainer = Trainer(
+        model=TinyNodeModel(),
+        task=uninterrupted_task,
+        optimizer=torch.optim.SGD,
+        lr=0.05,
+        max_epochs=4,
+        callbacks=[uninterrupted_callback],
+    )
+    uninterrupted_history = uninterrupted_trainer.fit(graph)
+
+    assert resumed_payload["metadata"] == {"phase": "resume"}
+    assert resumed_history["completed_epochs"] == 4
+    assert resumed_trainer.global_step == uninterrupted_trainer.global_step == 4
+    assert resumed_callback.current_value == uninterrupted_callback.current_value == pytest.approx(0.3)
+    assert resumed_task.coefficient == pytest.approx(0.1)
+    assert uninterrupted_task.coefficient == pytest.approx(0.1)
+    assert torch.allclose(
+        resumed_trainer.model.linear.weight.detach(),
+        uninterrupted_trainer.model.linear.weight.detach(),
+    )
+    assert torch.allclose(
+        resumed_trainer.model.linear.bias.detach(),
+        uninterrupted_trainer.model.linear.bias.detach(),
+    )
+    assert resumed_history["best_epoch"] == uninterrupted_history["best_epoch"]
+
+
+def test_trainer_can_resume_flooding_level_scheduler_callback_from_checkpoint(tmp_path):
+    checkpoint = tmp_path / "flooding-level-resume.pt"
+    torch.manual_seed(101)
+    graph = _graph()
+    torch.manual_seed(103)
+    paused_callback = FloodingLevelScheduler(start_value=0.0, end_value=0.3, start_epoch=2, end_epoch=4)
+    paused_task = FloodingTask(
+        NodeClassificationTask(
+            target="y",
+            split=("train_mask", "val_mask", "test_mask"),
+        ),
+        level=0.1,
+    )
+    paused_trainer = Trainer(
+        model=TinyNodeModel(),
+        task=paused_task,
+        optimizer=torch.optim.SGD,
+        lr=0.05,
+        max_epochs=4,
+        callbacks=[paused_callback, SaveAndStop(checkpoint, stop_epoch=2)],
+    )
+
+    with pytest.raises(RuntimeError, match="pause"):
+        paused_trainer.fit(graph)
+
+    torch.manual_seed(107)
+    resumed_callback = FloodingLevelScheduler(start_value=0.0, end_value=0.3, start_epoch=2, end_epoch=4)
+    resumed_task = FloodingTask(
+        NodeClassificationTask(
+            target="y",
+            split=("train_mask", "val_mask", "test_mask"),
+        ),
+        level=0.1,
+    )
+    resumed_trainer = Trainer(
+        model=TinyNodeModel(),
+        task=resumed_task,
+        optimizer=torch.optim.SGD,
+        lr=0.05,
+        max_epochs=4,
+        callbacks=[resumed_callback],
+    )
+    resumed_payload = resumed_trainer.restore_training_checkpoint(checkpoint)
+    resumed_history = resumed_trainer.fit(graph)
+
+    torch.manual_seed(103)
+    uninterrupted_callback = FloodingLevelScheduler(start_value=0.0, end_value=0.3, start_epoch=2, end_epoch=4)
+    uninterrupted_task = FloodingTask(
+        NodeClassificationTask(
+            target="y",
+            split=("train_mask", "val_mask", "test_mask"),
+        ),
+        level=0.1,
+    )
+    uninterrupted_trainer = Trainer(
+        model=TinyNodeModel(),
+        task=uninterrupted_task,
+        optimizer=torch.optim.SGD,
+        lr=0.05,
+        max_epochs=4,
+        callbacks=[uninterrupted_callback],
+    )
+    uninterrupted_history = uninterrupted_trainer.fit(graph)
+
+    assert resumed_payload["metadata"] == {"phase": "resume"}
+    assert resumed_history["completed_epochs"] == 4
+    assert resumed_trainer.global_step == uninterrupted_trainer.global_step == 4
+    assert resumed_callback.current_value == uninterrupted_callback.current_value == pytest.approx(0.3)
+    assert resumed_task.level == pytest.approx(0.1)
+    assert uninterrupted_task.level == pytest.approx(0.1)
+    assert torch.allclose(
+        resumed_trainer.model.linear.weight.detach(),
+        uninterrupted_trainer.model.linear.weight.detach(),
+    )
+    assert torch.allclose(
+        resumed_trainer.model.linear.bias.detach(),
+        uninterrupted_trainer.model.linear.bias.detach(),
+    )
+    assert resumed_history["best_epoch"] == uninterrupted_history["best_epoch"]
+
+
+def test_trainer_can_resume_generalized_cross_entropy_scheduler_callback_from_checkpoint(tmp_path):
+    checkpoint = tmp_path / "generalized-cross-entropy-resume.pt"
+    torch.manual_seed(109)
+    graph = _graph()
+    torch.manual_seed(113)
+    paused_callback = GeneralizedCrossEntropyScheduler(start_value=0.3, end_value=0.9, start_epoch=2, end_epoch=4)
+    paused_task = GeneralizedCrossEntropyTask(
+        NodeClassificationTask(
+            target="y",
+            split=("train_mask", "val_mask", "test_mask"),
+        ),
+        q=0.7,
+    )
+    paused_trainer = Trainer(
+        model=TinyNodeModel(),
+        task=paused_task,
+        optimizer=torch.optim.SGD,
+        lr=0.05,
+        max_epochs=4,
+        callbacks=[paused_callback, SaveAndStop(checkpoint, stop_epoch=2)],
+    )
+
+    with pytest.raises(RuntimeError, match="pause"):
+        paused_trainer.fit(graph)
+
+    torch.manual_seed(127)
+    resumed_callback = GeneralizedCrossEntropyScheduler(start_value=0.3, end_value=0.9, start_epoch=2, end_epoch=4)
+    resumed_task = GeneralizedCrossEntropyTask(
+        NodeClassificationTask(
+            target="y",
+            split=("train_mask", "val_mask", "test_mask"),
+        ),
+        q=0.7,
+    )
+    resumed_trainer = Trainer(
+        model=TinyNodeModel(),
+        task=resumed_task,
+        optimizer=torch.optim.SGD,
+        lr=0.05,
+        max_epochs=4,
+        callbacks=[resumed_callback],
+    )
+    resumed_payload = resumed_trainer.restore_training_checkpoint(checkpoint)
+    resumed_history = resumed_trainer.fit(graph)
+
+    torch.manual_seed(113)
+    uninterrupted_callback = GeneralizedCrossEntropyScheduler(start_value=0.3, end_value=0.9, start_epoch=2, end_epoch=4)
+    uninterrupted_task = GeneralizedCrossEntropyTask(
+        NodeClassificationTask(
+            target="y",
+            split=("train_mask", "val_mask", "test_mask"),
+        ),
+        q=0.7,
+    )
+    uninterrupted_trainer = Trainer(
+        model=TinyNodeModel(),
+        task=uninterrupted_task,
+        optimizer=torch.optim.SGD,
+        lr=0.05,
+        max_epochs=4,
+        callbacks=[uninterrupted_callback],
+    )
+    uninterrupted_history = uninterrupted_trainer.fit(graph)
+
+    assert resumed_payload["metadata"] == {"phase": "resume"}
+    assert resumed_history["completed_epochs"] == 4
+    assert resumed_trainer.global_step == uninterrupted_trainer.global_step == 4
+    assert resumed_callback.current_value == uninterrupted_callback.current_value == pytest.approx(0.9)
+    assert resumed_task.q == pytest.approx(0.7)
+    assert uninterrupted_task.q == pytest.approx(0.7)
+    assert torch.allclose(
+        resumed_trainer.model.linear.weight.detach(),
+        uninterrupted_trainer.model.linear.weight.detach(),
+    )
+    assert torch.allclose(
+        resumed_trainer.model.linear.bias.detach(),
+        uninterrupted_trainer.model.linear.bias.detach(),
+    )
+    assert resumed_history["best_epoch"] == uninterrupted_history["best_epoch"]
+
+
+def test_trainer_can_resume_poly1_epsilon_scheduler_callback_from_checkpoint(tmp_path):
+    checkpoint = tmp_path / "poly1-epsilon-resume.pt"
+    torch.manual_seed(131)
+    graph = _graph()
+    torch.manual_seed(137)
+    paused_callback = Poly1EpsilonScheduler(start_value=0.3, end_value=0.9, start_epoch=2, end_epoch=4)
+    paused_task = Poly1CrossEntropyTask(
+        NodeClassificationTask(
+            target="y",
+            split=("train_mask", "val_mask", "test_mask"),
+        ),
+        epsilon=0.7,
+    )
+    paused_trainer = Trainer(
+        model=TinyNodeModel(),
+        task=paused_task,
+        optimizer=torch.optim.SGD,
+        lr=0.05,
+        max_epochs=4,
+        callbacks=[paused_callback, SaveAndStop(checkpoint, stop_epoch=2)],
+    )
+
+    with pytest.raises(RuntimeError, match="pause"):
+        paused_trainer.fit(graph)
+
+    torch.manual_seed(139)
+    resumed_callback = Poly1EpsilonScheduler(start_value=0.3, end_value=0.9, start_epoch=2, end_epoch=4)
+    resumed_task = Poly1CrossEntropyTask(
+        NodeClassificationTask(
+            target="y",
+            split=("train_mask", "val_mask", "test_mask"),
+        ),
+        epsilon=0.7,
+    )
+    resumed_trainer = Trainer(
+        model=TinyNodeModel(),
+        task=resumed_task,
+        optimizer=torch.optim.SGD,
+        lr=0.05,
+        max_epochs=4,
+        callbacks=[resumed_callback],
+    )
+    resumed_payload = resumed_trainer.restore_training_checkpoint(checkpoint)
+    resumed_history = resumed_trainer.fit(graph)
+
+    torch.manual_seed(137)
+    uninterrupted_callback = Poly1EpsilonScheduler(start_value=0.3, end_value=0.9, start_epoch=2, end_epoch=4)
+    uninterrupted_task = Poly1CrossEntropyTask(
+        NodeClassificationTask(
+            target="y",
+            split=("train_mask", "val_mask", "test_mask"),
+        ),
+        epsilon=0.7,
+    )
+    uninterrupted_trainer = Trainer(
+        model=TinyNodeModel(),
+        task=uninterrupted_task,
+        optimizer=torch.optim.SGD,
+        lr=0.05,
+        max_epochs=4,
+        callbacks=[uninterrupted_callback],
+    )
+    uninterrupted_history = uninterrupted_trainer.fit(graph)
+
+    assert resumed_payload["metadata"] == {"phase": "resume"}
+    assert resumed_history["completed_epochs"] == 4
+    assert resumed_trainer.global_step == uninterrupted_trainer.global_step == 4
+    assert resumed_callback.current_value == uninterrupted_callback.current_value == pytest.approx(0.9)
+    assert resumed_task.epsilon == pytest.approx(0.7)
+    assert uninterrupted_task.epsilon == pytest.approx(0.7)
+    assert torch.allclose(
+        resumed_trainer.model.linear.weight.detach(),
+        uninterrupted_trainer.model.linear.weight.detach(),
+    )
+    assert torch.allclose(
+        resumed_trainer.model.linear.bias.detach(),
+        uninterrupted_trainer.model.linear.bias.detach(),
+    )
+    assert resumed_history["best_epoch"] == uninterrupted_history["best_epoch"]
+
+
+def test_trainer_can_resume_symmetric_cross_entropy_beta_scheduler_callback_from_checkpoint(tmp_path):
+    checkpoint = tmp_path / "symmetric-cross-entropy-beta-resume.pt"
+    torch.manual_seed(131)
+    graph = _graph()
+    torch.manual_seed(137)
+    paused_callback = SymmetricCrossEntropyBetaScheduler(
+        start_value=0.3,
+        end_value=0.9,
+        start_epoch=2,
+        end_epoch=4,
+    )
+    paused_task = SymmetricCrossEntropyTask(
+        NodeClassificationTask(
+            target="y",
+            split=("train_mask", "val_mask", "test_mask"),
+        ),
+        alpha=1.0,
+        beta=0.7,
+    )
+    paused_trainer = Trainer(
+        model=TinyNodeModel(),
+        task=paused_task,
+        optimizer=torch.optim.SGD,
+        lr=0.05,
+        max_epochs=4,
+        callbacks=[paused_callback, SaveAndStop(checkpoint, stop_epoch=2)],
+    )
+
+    with pytest.raises(RuntimeError, match="pause"):
+        paused_trainer.fit(graph)
+
+    torch.manual_seed(139)
+    resumed_callback = SymmetricCrossEntropyBetaScheduler(
+        start_value=0.3,
+        end_value=0.9,
+        start_epoch=2,
+        end_epoch=4,
+    )
+    resumed_task = SymmetricCrossEntropyTask(
+        NodeClassificationTask(
+            target="y",
+            split=("train_mask", "val_mask", "test_mask"),
+        ),
+        alpha=1.0,
+        beta=0.7,
+    )
+    resumed_trainer = Trainer(
+        model=TinyNodeModel(),
+        task=resumed_task,
+        optimizer=torch.optim.SGD,
+        lr=0.05,
+        max_epochs=4,
+        callbacks=[resumed_callback],
+    )
+    resumed_payload = resumed_trainer.restore_training_checkpoint(checkpoint)
+    resumed_history = resumed_trainer.fit(graph)
+
+    torch.manual_seed(137)
+    uninterrupted_callback = SymmetricCrossEntropyBetaScheduler(
+        start_value=0.3,
+        end_value=0.9,
+        start_epoch=2,
+        end_epoch=4,
+    )
+    uninterrupted_task = SymmetricCrossEntropyTask(
+        NodeClassificationTask(
+            target="y",
+            split=("train_mask", "val_mask", "test_mask"),
+        ),
+        alpha=1.0,
+        beta=0.7,
+    )
+    uninterrupted_trainer = Trainer(
+        model=TinyNodeModel(),
+        task=uninterrupted_task,
+        optimizer=torch.optim.SGD,
+        lr=0.05,
+        max_epochs=4,
+        callbacks=[uninterrupted_callback],
+    )
+    uninterrupted_history = uninterrupted_trainer.fit(graph)
+
+    assert resumed_payload["metadata"] == {"phase": "resume"}
+    assert resumed_history["completed_epochs"] == 4
+    assert resumed_trainer.global_step == uninterrupted_trainer.global_step == 4
+    assert resumed_callback.current_value == uninterrupted_callback.current_value == pytest.approx(0.9)
+    assert resumed_task.beta == pytest.approx(0.7)
+    assert uninterrupted_task.beta == pytest.approx(0.7)
+    assert torch.allclose(
+        resumed_trainer.model.linear.weight.detach(),
+        uninterrupted_trainer.model.linear.weight.detach(),
+    )
+    assert torch.allclose(
+        resumed_trainer.model.linear.bias.detach(),
+        uninterrupted_trainer.model.linear.bias.detach(),
+    )
+    assert resumed_history["best_epoch"] == uninterrupted_history["best_epoch"]
+
+
+def test_trainer_can_resume_weight_decay_scheduler_callback_from_checkpoint(tmp_path):
+    checkpoint = tmp_path / "weight-decay-resume.pt"
+    torch.manual_seed(79)
+    paused_callback = WeightDecayScheduler(start_factor=0.0, end_factor=1.5, start_epoch=2, end_epoch=4)
+    paused_trainer = Trainer(
+        model=ToyModel(),
+        task=ToyTask(),
+        optimizer=lambda params, lr: torch.optim.SGD(params, lr=lr, weight_decay=0.2),
+        lr=0.1,
+        max_epochs=4,
+        callbacks=[paused_callback, SaveAndStop(checkpoint, stop_epoch=2)],
+    )
+
+    with pytest.raises(RuntimeError, match="pause"):
+        paused_trainer.fit([ToyBatch(1.0)])
+
+    torch.manual_seed(83)
+    resumed_callback = WeightDecayScheduler(start_factor=0.0, end_factor=1.5, start_epoch=2, end_epoch=4)
+    resumed_trainer = Trainer(
+        model=ToyModel(),
+        task=ToyTask(),
+        optimizer=lambda params, lr: torch.optim.SGD(params, lr=lr, weight_decay=0.2),
+        lr=0.1,
+        max_epochs=4,
+        callbacks=[resumed_callback],
+    )
+    resumed_payload = resumed_trainer.restore_training_checkpoint(checkpoint)
+    resumed_history = resumed_trainer.fit([ToyBatch(1.0)])
+
+    torch.manual_seed(79)
+    uninterrupted_callback = WeightDecayScheduler(start_factor=0.0, end_factor=1.5, start_epoch=2, end_epoch=4)
+    uninterrupted_trainer = Trainer(
+        model=ToyModel(),
+        task=ToyTask(),
+        optimizer=lambda params, lr: torch.optim.SGD(params, lr=lr, weight_decay=0.2),
+        lr=0.1,
+        max_epochs=4,
+        callbacks=[uninterrupted_callback],
+    )
+    uninterrupted_history = uninterrupted_trainer.fit([ToyBatch(1.0)])
+
+    assert resumed_payload["metadata"] == {"phase": "resume"}
+    assert resumed_history["completed_epochs"] == 4
+    assert resumed_trainer.global_step == uninterrupted_trainer.global_step == 4
+    assert resumed_callback.current_factor == uninterrupted_callback.current_factor == pytest.approx(1.5)
+    assert resumed_trainer.optimizer.param_groups[0]["weight_decay"] == pytest.approx(0.2)
+    assert uninterrupted_trainer.optimizer.param_groups[0]["weight_decay"] == pytest.approx(0.2)
+    assert torch.allclose(
+        resumed_trainer.model.weight.detach(),
+        uninterrupted_trainer.model.weight.detach(),
+    )
+    assert resumed_history["best_epoch"] == uninterrupted_history["best_epoch"]
+
+
+def test_trainer_can_resume_gradient_noise_injection_callback_from_checkpoint(tmp_path):
+    checkpoint = tmp_path / "gradient-noise-resume.pt"
+    torch.manual_seed(89)
+    paused_callback = GradientNoiseInjection(std=0.05, decay_exponent=0.5, seed=123)
+    paused_trainer = Trainer(
+        model=ToyModel(),
+        task=ToyTask(),
+        optimizer=torch.optim.SGD,
+        lr=0.1,
+        max_epochs=4,
+        callbacks=[paused_callback, SaveAndStop(checkpoint, stop_epoch=2)],
+    )
+
+    with pytest.raises(RuntimeError, match="pause"):
+        paused_trainer.fit([ToyBatch(1.0)])
+
+    torch.manual_seed(97)
+    resumed_callback = GradientNoiseInjection(std=0.05, decay_exponent=0.5, seed=123)
+    resumed_trainer = Trainer(
+        model=ToyModel(),
+        task=ToyTask(),
+        optimizer=torch.optim.SGD,
+        lr=0.1,
+        max_epochs=4,
+        callbacks=[resumed_callback],
+    )
+    resumed_payload = resumed_trainer.restore_training_checkpoint(checkpoint)
+    resumed_history = resumed_trainer.fit([ToyBatch(1.0)])
+
+    torch.manual_seed(89)
+    uninterrupted_callback = GradientNoiseInjection(std=0.05, decay_exponent=0.5, seed=123)
+    uninterrupted_trainer = Trainer(
+        model=ToyModel(),
+        task=ToyTask(),
+        optimizer=torch.optim.SGD,
+        lr=0.1,
+        max_epochs=4,
+        callbacks=[uninterrupted_callback],
+    )
+    uninterrupted_history = uninterrupted_trainer.fit([ToyBatch(1.0)])
+
+    assert resumed_payload["metadata"] == {"phase": "resume"}
+    assert resumed_history["completed_epochs"] == 4
+    assert resumed_trainer.global_step == uninterrupted_trainer.global_step == 4
+    assert resumed_callback.step_count == uninterrupted_callback.step_count == 4
+    assert torch.allclose(
+        resumed_trainer.model.weight.detach(),
+        uninterrupted_trainer.model.weight.detach(),
     )
     assert resumed_history["best_epoch"] == uninterrupted_history["best_epoch"]
