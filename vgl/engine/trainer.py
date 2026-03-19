@@ -2,13 +2,16 @@ from collections.abc import Iterable
 from contextlib import nullcontext
 from copy import deepcopy
 from pathlib import Path
+from time import perf_counter
 
 from vgl.engine.callbacks import Callback, StopTraining
 from vgl.engine.checkpoints import CHECKPOINT_FORMAT, CHECKPOINT_FORMAT_VERSION
+from vgl.engine.checkpoints import checkpoint_event_fields
 from vgl.engine.checkpoints import load_checkpoint as load_trainer_checkpoint
 from vgl.engine.checkpoints import restore_checkpoint as restore_trainer_checkpoint
 from vgl.engine.checkpoints import save_checkpoint as save_trainer_checkpoint
 from vgl.engine.history import TrainingHistory
+from vgl.engine.logging import ConsoleLogger
 from vgl.engine.monitoring import extract_monitor_value, is_improvement, resolve_monitor
 from vgl.metrics import build_metric
 import torch
@@ -33,6 +36,17 @@ class Trainer:
         monitor_mode=None,
         save_best_path=None,
         callbacks=None,
+        loggers=None,
+        log_every_n_steps=50,
+        enable_console_logging=True,
+        enable_progress_bar=True,
+        console_flush_every_n_steps=None,
+        console_mode="detailed",
+        console_metric_names=None,
+        console_show_learning_rate=True,
+        console_show_events=True,
+        console_show_timestamp=True,
+        console_theme="default",
         accumulate_grad_batches=1,
         gradient_clip_val=None,
         lr_scheduler=None,
@@ -44,8 +58,12 @@ class Trainer:
     ):
         if accumulate_grad_batches < 1:
             raise ValueError("accumulate_grad_batches must be >= 1")
+        if log_every_n_steps < 1:
+            raise ValueError("log_every_n_steps must be >= 1")
         if gradient_clip_val is not None and gradient_clip_val < 0:
             raise ValueError("gradient_clip_val must be >= 0")
+        if console_flush_every_n_steps is not None and console_flush_every_n_steps < 1:
+            raise ValueError("console_flush_every_n_steps must be >= 1")
         if scheduler_monitor is not None and lr_scheduler is None:
             raise ValueError("scheduler_monitor requires lr_scheduler")
         if lr_scheduler_interval not in self._SUPPORTED_SCHEDULER_INTERVALS:
@@ -68,6 +86,19 @@ class Trainer:
         self.monitor_mode = monitor_mode
         self.save_best_path = Path(save_best_path) if save_best_path is not None else None
         self.callbacks = list(callbacks or [])
+        self.log_every_n_steps = int(log_every_n_steps)
+        self.loggers = self._build_loggers(
+            loggers,
+            enable_console_logging=enable_console_logging,
+            enable_progress_bar=enable_progress_bar,
+            console_flush_every_n_steps=console_flush_every_n_steps,
+            console_mode=console_mode,
+            console_metric_names=console_metric_names,
+            console_show_learning_rate=console_show_learning_rate,
+            console_show_events=console_show_events,
+            console_show_timestamp=console_show_timestamp,
+            console_theme=console_theme,
+        )
         self.best_state_dict = None
         self.best_epoch = None
         self.best_metric = None
@@ -84,6 +115,12 @@ class Trainer:
         self._validate_optimizer_configuration()
         self._resume_state = None
         self.last_history = None
+        self._fit_start_time = None
+        self._active_epoch = None
+        self._active_stage = None
+        self._active_batch_idx = None
+        self._epoch_total_batches = None
+        self._epoch_start_time = None
 
     @classmethod
     def save_checkpoint(cls, path, model_state_dict, *, metadata=None):
@@ -184,8 +221,58 @@ class Trainer:
         if not isinstance(optimizer_param_groups, Iterable):
             raise TypeError(
                 "optimizer_param_groups must be an iterable or a callable returning an iterable"
-            )
+        )
         return optimizer_param_groups
+
+    def _build_loggers(
+        self,
+        loggers,
+        *,
+        enable_console_logging,
+        enable_progress_bar,
+        console_flush_every_n_steps,
+        console_mode,
+        console_metric_names,
+        console_show_learning_rate,
+        console_show_events,
+        console_show_timestamp,
+        console_theme,
+    ):
+        if loggers is None:
+            logger_list = []
+        elif isinstance(loggers, Iterable) and not isinstance(loggers, (str, bytes, dict)):
+            logger_list = list(loggers)
+        else:
+            logger_list = [loggers]
+        required_methods = (
+            "on_fit_start",
+            "on_train_step",
+            "on_epoch_end",
+            "on_evaluate_end",
+            "on_fit_end",
+            "on_exception",
+            "on_event",
+            "finalize",
+        )
+        for logger in logger_list:
+            for method_name in required_methods:
+                if not hasattr(logger, method_name):
+                    raise TypeError(f"logger must define {method_name}()")
+        if enable_console_logging and not any(isinstance(logger, ConsoleLogger) for logger in logger_list):
+            logger_list.insert(
+                0,
+                ConsoleLogger(
+                    enable_progress_bar=enable_progress_bar,
+                    flush_every_n_steps=console_flush_every_n_steps,
+                    mode=console_mode,
+                    metric_names=console_metric_names,
+                    show_learning_rate=console_show_learning_rate,
+                    show_events=console_show_events,
+                    show_timestamp=console_show_timestamp,
+                    theme=console_theme,
+                ),
+            )
+        return logger_list
 
     def _requires_unscaled_gradients(self):
         if self.gradient_clip_val is not None:
@@ -224,6 +311,257 @@ class Trainer:
             if hook is not None:
                 hook(self, **kwargs)
 
+    def _run_loggers(self, hook_name, payload, *, suppress_errors=False):
+        try:
+            for logger in self.loggers:
+                hook = getattr(logger, hook_name, None)
+                if hook is not None:
+                    hook(payload)
+        except Exception:
+            if not suppress_errors:
+                raise
+
+    def _finalize_loggers(self, status, *, suppress_errors=False):
+        try:
+            for logger in self.loggers:
+                logger.finalize(status)
+        except Exception:
+            if not suppress_errors:
+                raise
+
+    def _fit_elapsed_seconds(self):
+        if self._fit_start_time is None:
+            return None
+        return float(perf_counter() - self._fit_start_time)
+
+    def _steps_per_second(self):
+        elapsed_seconds = self._fit_elapsed_seconds()
+        if elapsed_seconds is None or elapsed_seconds <= 0.0 or self.global_step <= 0:
+            return None
+        return float(self.global_step / elapsed_seconds)
+
+    def _epoch_elapsed_seconds(self):
+        if self._epoch_start_time is None:
+            return None
+        return float(perf_counter() - self._epoch_start_time)
+
+    def _parameter_counts(self):
+        total_parameters = 0
+        trainable_parameters = 0
+        for parameter in self.model.parameters():
+            count = int(parameter.numel())
+            total_parameters += count
+            if parameter.requires_grad:
+                trainable_parameters += count
+        return total_parameters, trainable_parameters
+
+    def _learning_rate_metrics(self):
+        param_groups = getattr(self.optimizer, "param_groups", None)
+        if not param_groups:
+            return {}
+        if len(param_groups) == 1:
+            return {"lr": float(param_groups[0]["lr"])}
+        return {
+            f"lr/group_{index}": float(group["lr"])
+            for index, group in enumerate(param_groups)
+        }
+
+    def _summary_metrics(self, summary, *, stage):
+        return {f"{stage}_{key}": float(value) for key, value in summary.items()}
+
+    def _summary_from_metrics(self, metrics, total_loss, total_items, *, stage):
+        if total_items == 0:
+            raise ValueError(f"Trainer.{stage} requires at least one supervised example")
+        summary = {"loss": total_loss / total_items}
+        for metric in metrics:
+            value = metric.compute()
+            if not isinstance(value, (int, float)):
+                raise ValueError(f"Metric {metric.name} must return a scalar value")
+            summary[metric.name] = float(value)
+        return summary
+
+    def _build_fit_start_record(self, monitor):
+        total_parameters, trainable_parameters = self._parameter_counts()
+        return {
+            "event": "fit_start",
+            "stage": "fit",
+            "epoch": self._active_epoch,
+            "epochs": self.max_epochs,
+            "global_step": self.global_step,
+            "batch_idx": None,
+            "metrics": {},
+            "monitor": monitor,
+            "best_epoch": self.best_epoch,
+            "best_metric": self.best_metric,
+            "elapsed_seconds": 0.0,
+            "precision": self.precision,
+            "model_name": self.model.__class__.__name__,
+            "task_name": self.task.__class__.__name__,
+            "optimizer_name": self.optimizer.__class__.__name__,
+            "lr_scheduler_name": None if self.lr_scheduler is None else self.lr_scheduler.__class__.__name__,
+            "total_parameters": total_parameters,
+            "trainable_parameters": trainable_parameters,
+            "callback_names": [callback.__class__.__name__ for callback in self.callbacks],
+            "logger_names": [logger.__class__.__name__ for logger in self.loggers],
+        }
+
+    def _build_stage_start_record(self, stage, *, total_batches):
+        return {
+            "event": "stage_start",
+            "stage": stage,
+            "epoch": self._active_epoch,
+            "epochs": self.max_epochs,
+            "global_step": self.global_step,
+            "batch_idx": None,
+            "metrics": {},
+            "monitor": self.active_monitor,
+            "best_epoch": self.best_epoch,
+            "best_metric": self.best_metric,
+            "elapsed_seconds": self._fit_elapsed_seconds() or 0.0,
+            "total_batches": int(total_batches),
+        }
+
+    def _build_train_step_record(self, summary):
+        metrics = {key: float(value) for key, value in summary.items()}
+        metrics.update(self._learning_rate_metrics())
+        return {
+            "event": "train_step",
+            "stage": "train",
+            "epoch": self._active_epoch,
+            "epochs": self.max_epochs,
+            "global_step": self.global_step,
+            "batch_idx": self._active_batch_idx,
+            "metrics": metrics,
+            "monitor": self.active_monitor,
+            "best_epoch": self.best_epoch,
+            "best_metric": self.best_metric,
+            "elapsed_seconds": self._fit_elapsed_seconds(),
+            "epoch_elapsed_seconds": self._epoch_elapsed_seconds(),
+            "epoch_total_batches": self._epoch_total_batches,
+            "steps_per_second": self._steps_per_second(),
+        }
+
+    def _build_epoch_record(self, train_summary, val_summary, *, epoch_elapsed_seconds):
+        metrics = self._summary_metrics(train_summary, stage="train")
+        if val_summary is not None:
+            metrics.update(self._summary_metrics(val_summary, stage="val"))
+        metrics.update(self._learning_rate_metrics())
+        return {
+            "event": "epoch_end",
+            "stage": "fit",
+            "epoch": self._active_epoch,
+            "epochs": self.max_epochs,
+            "global_step": self.global_step,
+            "batch_idx": None,
+            "metrics": metrics,
+            "monitor": self.active_monitor,
+            "best_epoch": self.best_epoch,
+            "best_metric": self.best_metric,
+            "elapsed_seconds": float(epoch_elapsed_seconds),
+        }
+
+    def _build_stage_record(self, summary, *, stage, elapsed_seconds):
+        return {
+            "event": "evaluate_end",
+            "stage": stage,
+            "epoch": self._active_epoch,
+            "epochs": self.max_epochs,
+            "global_step": self.global_step,
+            "batch_idx": None,
+            "metrics": self._summary_metrics(summary, stage=stage),
+            "monitor": self.active_monitor,
+            "best_epoch": self.best_epoch,
+            "best_metric": self.best_metric,
+            "elapsed_seconds": float(elapsed_seconds),
+        }
+
+    def _build_fit_end_record(self, history):
+        metrics = {}
+        final_train = history.get("final_train")
+        final_val = history.get("final_val")
+        if final_train is not None:
+            metrics.update(self._summary_metrics(final_train, stage="train"))
+        if final_val is not None:
+            metrics.update(self._summary_metrics(final_val, stage="val"))
+        metrics.update(self._learning_rate_metrics())
+        epoch_durations = [
+            float(duration)
+            for duration in history.get("epoch_elapsed_seconds", [])
+            if duration is not None
+        ]
+        average_epoch_seconds = None
+        if epoch_durations:
+            average_epoch_seconds = float(sum(epoch_durations) / len(epoch_durations))
+        average_steps_per_second = None
+        fit_elapsed_seconds = history["fit_elapsed_seconds"] or 0.0
+        if fit_elapsed_seconds > 0.0 and self.global_step > 0:
+            average_steps_per_second = float(self.global_step / fit_elapsed_seconds)
+        return {
+            "event": "fit_end",
+            "stage": "fit",
+            "epoch": history["completed_epochs"],
+            "epochs": self.max_epochs,
+            "global_step": self.global_step,
+            "batch_idx": None,
+            "metrics": metrics,
+            "monitor": history["monitor"],
+            "best_epoch": history["best_epoch"],
+            "best_metric": history["best_metric"],
+            "elapsed_seconds": fit_elapsed_seconds,
+            "average_epoch_seconds": average_epoch_seconds,
+            "average_steps_per_second": average_steps_per_second,
+            "stopped_early": history["stopped_early"],
+            "stop_reason": history["stop_reason"],
+        }
+
+    def _build_exception_record(self, exception):
+        return {
+            "event": "exception",
+            "stage": self._active_stage,
+            "epoch": self._active_epoch,
+            "epochs": self.max_epochs,
+            "global_step": self.global_step,
+            "batch_idx": self._active_batch_idx,
+            "metrics": {},
+            "monitor": self.active_monitor,
+            "best_epoch": self.best_epoch,
+            "best_metric": self.best_metric,
+            "elapsed_seconds": self._fit_elapsed_seconds() or 0.0,
+            "exception_type": type(exception).__name__,
+            "exception_message": str(exception),
+        }
+
+    def _build_custom_event_record(self, event, *, stage=None, metrics=None, **fields):
+        record = {
+            "event": str(event),
+            "stage": self._active_stage if stage is None else stage,
+            "epoch": self._active_epoch,
+            "epochs": self.max_epochs,
+            "global_step": self.global_step,
+            "batch_idx": self._active_batch_idx,
+            "metrics": {} if metrics is None else {key: float(value) for key, value in metrics.items()},
+            "monitor": self.active_monitor,
+            "best_epoch": self.best_epoch,
+            "best_metric": self.best_metric,
+            "elapsed_seconds": self._fit_elapsed_seconds() or 0.0,
+        }
+        for key, value in fields.items():
+            if isinstance(value, Path):
+                value = str(value)
+            record[key] = value
+        return record
+
+    def log_event(self, event, *, stage=None, metrics=None, **fields):
+        self._run_loggers(
+            "on_event",
+            self._build_custom_event_record(
+                event,
+                stage=stage,
+                metrics=metrics,
+                **fields,
+            ),
+        )
+
     def _forward_loss(self, batch, stage):
         with self._autocast_context():
             predictions = self.model(batch)
@@ -250,10 +588,12 @@ class Trainer:
             raise ValueError("Task metric predictions and targets must align in batch size")
         return metric_predictions, targets
 
-    def _record_batch_summary(self, metrics, batch, predictions, loss, stage):
+    def _record_batch_summary(self, metrics, batch, predictions, loss, stage, extra_metrics=None):
         metric_predictions, targets = self._metric_inputs(batch, predictions, stage=stage)
         count = int(targets.size(0))
         for metric in metrics:
+            metric.update(metric_predictions.detach(), targets.detach(), batch=batch)
+        for metric in extra_metrics or []:
             metric.update(metric_predictions.detach(), targets.detach(), batch=batch)
         return loss.detach().item() * count, count
 
@@ -293,9 +633,17 @@ class Trainer:
         group_size = len(group_batches)
         total_loss = 0.0
         total_items = 0
+        step_metrics = self._metrics()
         for batch in group_batches:
             predictions, loss = self._forward_training_loss(batch, stage=stage)
-            batch_loss, batch_items = self._record_batch_summary(metrics, batch, predictions, loss, stage=stage)
+            batch_loss, batch_items = self._record_batch_summary(
+                metrics,
+                batch,
+                predictions,
+                loss,
+                stage=stage,
+                extra_metrics=step_metrics,
+            )
             total_loss += batch_loss
             total_items += batch_items
             self._backward_loss(loss / group_size)
@@ -307,15 +655,26 @@ class Trainer:
             self.grad_scaler.step(self.optimizer)
             self.grad_scaler.update()
         self._finish_optimizer_step(next_step)
+        step_summary = self._summary_from_metrics(step_metrics, total_loss, total_items, stage=stage)
+        if self.global_step % self.log_every_n_steps == 0:
+            self._run_loggers("on_train_step", self._build_train_step_record(step_summary))
         return total_loss, total_items
 
     def _run_sharpness_aware_training_group(self, group_batches, stage, metrics):
         group_size = len(group_batches)
         total_loss = 0.0
         total_items = 0
+        step_metrics = self._metrics()
         for batch in group_batches:
             predictions, loss = self._forward_training_loss(batch, stage=stage)
-            batch_loss, batch_items = self._record_batch_summary(metrics, batch, predictions, loss, stage=stage)
+            batch_loss, batch_items = self._record_batch_summary(
+                metrics,
+                batch,
+                predictions,
+                loss,
+                stage=stage,
+                extra_metrics=step_metrics,
+            )
             total_loss += batch_loss
             total_items += batch_items
             self._backward_loss(loss / group_size)
@@ -328,6 +687,9 @@ class Trainer:
         self._run_before_optimizer_step(next_step)
         self.optimizer.second_step(zero_grad=False)
         self._finish_optimizer_step(next_step)
+        step_summary = self._summary_from_metrics(step_metrics, total_loss, total_items, stage=stage)
+        if self.global_step % self.log_every_n_steps == 0:
+            self._run_loggers("on_train_step", self._build_train_step_record(step_summary))
         return total_loss, total_items
 
     def _callback_states(self):
@@ -447,6 +809,13 @@ class Trainer:
         if not batches:
             raise ValueError(f"Trainer.{stage} requires at least one batch")
 
+        self._active_stage = stage
+        self._epoch_total_batches = len(batches)
+        self._epoch_start_time = perf_counter()
+        self._run_loggers(
+            "on_stage_start",
+            self._build_stage_start_record(stage, total_batches=len(batches)),
+        )
         metrics = self._metrics()
         for metric in metrics:
             metric.reset()
@@ -461,6 +830,7 @@ class Trainer:
             if training:
                 for group_start in range(0, len(batches), self.accumulate_grad_batches):
                     group_end = min(group_start + self.accumulate_grad_batches, len(batches))
+                    self._active_batch_idx = group_end - 1
                     group_batches = batches[group_start:group_end]
                     if self._uses_sharpness_aware_optimizer():
                         batch_loss, batch_items = self._run_sharpness_aware_training_group(
@@ -477,7 +847,8 @@ class Trainer:
                     total_loss += batch_loss
                     total_items += batch_items
             else:
-                for batch in batches:
+                for batch_index, batch in enumerate(batches):
+                    self._active_batch_idx = batch_index
                     predictions, loss = self._forward_loss(batch, stage=stage)
                     batch_loss, batch_items = self._record_batch_summary(
                         metrics,
@@ -488,17 +859,10 @@ class Trainer:
                     )
                     total_loss += batch_loss
                     total_items += batch_items
-
-        if total_items == 0:
-            raise ValueError(f"Trainer.{stage} requires at least one supervised example")
-
-        summary = {"loss": total_loss / total_items}
-        for metric in metrics:
-            value = metric.compute()
-            if not isinstance(value, (int, float)):
-                raise ValueError(f"Metric {metric.name} must return a scalar value")
-            summary[metric.name] = float(value)
-        return summary
+        self._active_batch_idx = None
+        self._epoch_total_batches = None
+        self._epoch_start_time = None
+        return self._summary_from_metrics(metrics, total_loss, total_items, stage=stage)
 
     def _step_lr_scheduler(self, monitor, train_summary, val_summary):
         if self.lr_scheduler is None:
@@ -543,7 +907,8 @@ class Trainer:
     def _save_best(self):
         if self.save_best_path is None:
             return
-        self.save_checkpoint(
+        save_start_time = perf_counter()
+        checkpoint_path = self.save_checkpoint(
             self.save_best_path,
             self.best_state_dict,
             metadata={
@@ -552,9 +917,32 @@ class Trainer:
                 "monitor": self.active_monitor,
             },
         )
+        event_fields = checkpoint_event_fields(
+            checkpoint_path,
+            save_seconds=perf_counter() - save_start_time,
+        )
+        self.log_event(
+            "checkpoint_saved",
+            stage="fit",
+            metrics=None if self.active_monitor is None or self.best_metric is None else {self.active_monitor: self.best_metric},
+            checkpoint_tag="best",
+            monitor_name=self.active_monitor,
+            monitor_value=self.best_metric,
+            **event_fields,
+        )
 
     def evaluate(self, data, stage="val"):
-        return self._run_epoch(data, stage=stage, training=False)
+        stage_start_time = perf_counter()
+        summary = self._run_epoch(data, stage=stage, training=False)
+        self._run_loggers(
+            "on_evaluate_end",
+            self._build_stage_record(
+                summary,
+                stage=stage,
+                elapsed_seconds=perf_counter() - stage_start_time,
+            ),
+        )
+        return summary
 
     def test(self, data):
         return self.evaluate(data, stage="test")
@@ -580,36 +968,63 @@ class Trainer:
             self.best_metric = trainer_state.get("best_metric")
             self.active_monitor = trainer_state.get("active_monitor", monitor) or monitor
             self.global_step = int(trainer_state.get("global_step", 0))
+        self._fit_start_time = perf_counter()
+        self._active_epoch = start_epoch - 1
+        last_train_summary = None
+        last_val_summary = None
         try:
             self._run_callbacks("on_fit_start", history=history)
             if resume_state is not None:
                 self._restore_callback_states(resume_state.get("callback_states"))
                 self._resume_state = None
+            self._run_loggers("on_fit_start", self._build_fit_start_record(monitor))
 
             for epoch in range(start_epoch, self.max_epochs + 1):
+                self._active_epoch = epoch
+                epoch_start_time = perf_counter()
                 train_summary = self._run_epoch(train_data, stage="train", training=True)
+                last_train_summary = train_summary
                 val_summary = None
                 if val_data is not None:
                     val_summary = self._run_epoch(val_data, stage="val", training=False)
+                    last_val_summary = val_summary
 
                 current = self._monitor_value(monitor, train_summary, val_summary)
+                previous_best = self.best_metric
                 improved = is_improvement(
                     current,
                     self.best_metric,
                     mode,
                 )
                 if improved:
+                    improvement_delta = None
+                    if previous_best is not None:
+                        if mode == "min":
+                            improvement_delta = float(previous_best - current)
+                        else:
+                            improvement_delta = float(current - previous_best)
                     self.best_metric = float(current)
                     self.best_epoch = epoch
                     self.best_state_dict = deepcopy(self.model.state_dict())
+                    self.log_event(
+                        "monitor_improved",
+                        stage="fit",
+                        metrics={monitor: float(current)},
+                        monitor_name=monitor,
+                        previous_best=None if previous_best is None else float(previous_best),
+                        current_value=float(current),
+                        improvement_delta=improvement_delta,
+                    )
                     self._save_best()
 
+                epoch_elapsed_seconds = perf_counter() - epoch_start_time
                 history.record_epoch(
                     epoch=epoch,
                     train_summary=train_summary,
                     val_summary=val_summary,
                     best_epoch=self.best_epoch,
                     best_metric=self.best_metric,
+                    elapsed_seconds=epoch_elapsed_seconds,
                 )
                 self._step_lr_scheduler(monitor, train_summary, val_summary)
                 try:
@@ -622,14 +1037,48 @@ class Trainer:
                     )
                 except StopTraining as exc:
                     history.mark_stopped(str(exc) or None)
+                    self._run_loggers(
+                        "on_epoch_end",
+                        self._build_epoch_record(
+                            train_summary,
+                            val_summary,
+                            epoch_elapsed_seconds=epoch_elapsed_seconds,
+                        ),
+                    )
                     break
+                self._run_loggers(
+                    "on_epoch_end",
+                    self._build_epoch_record(
+                        train_summary,
+                        val_summary,
+                        epoch_elapsed_seconds=epoch_elapsed_seconds,
+                    ),
+                )
         except Exception as exc:
             self._run_callbacks("on_exception", exception=exc, history=history)
+            self._run_loggers(
+                "on_exception",
+                self._build_exception_record(exc),
+                suppress_errors=True,
+            )
+            self._finalize_loggers("exception", suppress_errors=True)
+            self._fit_start_time = None
             raise
 
-        history.finalize(best_epoch=self.best_epoch, best_metric=self.best_metric)
+        history.finalize(
+            best_epoch=self.best_epoch,
+            best_metric=self.best_metric,
+            final_train=last_train_summary,
+            final_val=last_val_summary,
+            fit_elapsed_seconds=self._fit_elapsed_seconds(),
+        )
         if self.best_state_dict is not None:
             self.model.load_state_dict(self.best_state_dict)
         self._run_callbacks("on_fit_end", history=history)
+        try:
+            self._run_loggers("on_fit_end", self._build_fit_end_record(history))
+        finally:
+            self._finalize_loggers("success", suppress_errors=True)
+            self._fit_start_time = None
         self.last_history = history
         return history

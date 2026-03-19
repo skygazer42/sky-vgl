@@ -8,7 +8,7 @@ from torch import nn
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
 from vgl.dataloading import DataLoader, ListDataset, NodeNeighborSampler
-from vgl.engine import Trainer
+from vgl.engine import JSONLinesLogger, Trainer
 from vgl.graph import Graph
 from vgl.tasks import NodeClassificationTask
 
@@ -80,6 +80,8 @@ def main():
             max_epochs=2,
             monitor="val_accuracy",
             save_best_path=Path(tmp_dir) / "best.pt",
+            loggers=[JSONLinesLogger(Path(tmp_dir) / "train.jsonl", flush=True)],
+            log_every_n_steps=1,
         )
         history = trainer.fit(train_loader, val_data=val_loader)
         test_result = trainer.test(test_loader)
@@ -87,6 +89,7 @@ def main():
             "epochs": history["epochs"],
             "best_epoch": history["best_epoch"],
             "test_accuracy": test_result["accuracy"],
+            "log_path": str(Path(tmp_dir) / "train.jsonl"),
         }
         print(result)
         return result

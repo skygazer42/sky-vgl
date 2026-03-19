@@ -33,6 +33,7 @@
 - **Temporal encoders & memory** — temporal modules such as `TimeEncoder`, `TGATLayer`, `TGATEncoder`, `IdentityTemporalMessage`, and `TGNMemory` plug into event prediction without changing the training loop.
 - **Edge-aware operators** — homogeneous graphs can now carry `edge_data`, enabling operators such as `NNConv`, `ECConv`, `GINEConv`, `GMMConv`, `CGConv`, `SplineConv`, `GatedGCNConv`, and `PDNConv`.
 - **Point / geometric operators** — homogeneous graphs can also carry node positions via `pos`, enabling operators such as `PointNetConv` and `PointTransformerConv`.
+- **Two-layer training logs** — default console progress plus pluggable structured loggers such as `JSONLinesLogger` and `TensorBoardLogger` make experiments easier to monitor and replay.
 - **End-to-end training** — `Trainer` handles the full loop including `fit()`, `evaluate()`, `test()`, early stopping, best-checkpoint saving, full training-state checkpoint/resume, epoch history tracking, gradient accumulation, scheduled gradient accumulation, gradient clipping, gradient value clipping, adaptive gradient clipping, gradient centralization, gradient noise injection, layer-wise learning-rate strategies, classification label smoothing, label smoothing scheduling, focal loss, focal-gamma scheduling, generalized cross entropy, generalized-cross-entropy scheduling, symmetric cross entropy, symmetric-cross-entropy beta scheduling, Poly-1 cross entropy, Poly-1 epsilon scheduling, soft/hard bootstrap loss correction, bootstrap-beta scheduling, confidence-penalty scheduling, flooding-level scheduling, `LDAM`, LDAM-margin scheduling, logit adjustment, logit-adjustment tau scheduling, balanced softmax, class weighting / `pos_weight`, `pos_weight` scheduling, weight-decay scheduling, loss flooding, confidence-penalty regularization, `R-Drop` regularization, sharpness-aware optimization with `SAM`, `ASAM`, and `GSAM`, link prediction uniform / hard-negative / candidate-set sampling, random edge splitting, and neighbor-subgraph sampling with optional seed-edge exclusion, raw and filtered ranking evaluation metrics such as `MRR` and `Hits@K`, epoch-wise or step-wise LR scheduling including built-in warmup/cosine support and schedulers such as `OneCycleLR`, mixed precision, and training callbacks such as model checkpointing (including optional exception checkpointing), gradual unfreezing, deferred reweighting (`DRW`), EMA, SWA, and Lookahead.
 - **Multiple graph tasks** — node classification, graph classification, link prediction, and temporal event prediction out of the box.
 - **PyG & DGL compatibility** — seamless conversion with `from_pyg()` / `to_pyg()` and `from_dgl()` / `to_dgl()` adapters.
@@ -74,7 +75,7 @@ import torch
 from vgl.dataloading import DataLoader, ListDataset, NodeNeighborSampler
 from vgl.graph import Graph
 from vgl.tasks import NodeClassificationTask
-from vgl.engine import Trainer
+from vgl.engine import JSONLinesLogger, Trainer
 
 graph = Graph.homo(edge_index=edge_index, x=x, y=y,
                    train_mask=train_mask, val_mask=val_mask, test_mask=test_mask)
@@ -93,12 +94,83 @@ task = NodeClassificationTask(target="y",
 
 trainer = Trainer(model=model, task=task,
                   optimizer=torch.optim.Adam, lr=1e-3, max_epochs=200,
-                  monitor="val_accuracy", save_best_path="best.pt")
+                  monitor="val_accuracy", save_best_path="best.pt",
+                  loggers=[JSONLinesLogger("artifacts/train.jsonl", flush=True)],
+                  log_every_n_steps=10)
 
 history = trainer.fit(train_loader, val_data=val_loader)
 result  = trainer.test(test_loader)
 print(f"Test accuracy: {result['accuracy']:.4f}")
 ```
+
+`Trainer` writes console progress by default. Add `loggers=[JSONLinesLogger(...)]` for structured event logs, `loggers=[CSVLogger(...)]` for epoch-by-epoch spreadsheets, `loggers=[TensorBoardLogger(...)]` for TensorBoard scalars, tune step frequency with `log_every_n_steps`, or disable terminal logging with `enable_console_logging=False`.
+
+The default console logger is also configurable through `Trainer`:
+
+```python
+trainer = Trainer(
+    ...,
+    enable_progress_bar=False,
+    console_mode="compact",
+    console_theme="cat",
+    console_metric_names={"loss", "train_loss", "val_loss"},
+    console_show_learning_rate=False,
+    console_show_events=False,
+)
+```
+
+Console logs include `HH:MM:SS` timestamps by default. Detailed mode now starts each run with a compact summary card showing the model, task, optimizer, monitor, precision, and parameter counts, prints explicit stage-start lines for training / validation / testing, shows `tqdm`-style training-step context such as batch progress, percentage, throughput, and ETA, adds whole-fit progress fields such as `fit=3/10 (30.0%)` plus `fit_eta=...` in epoch summaries, and ends with fit-wide averages such as `avg_epoch_time=...` and `avg_steps_per_second=...`. Use `console_mode="compact"` for terse summaries, `console_theme="cat"` for an ASCII status mascot with stage labels such as `starting`, `waiting`, `training`, `validating`, `testing`, `tracking`, `saving`, and `done` plus distinct cat faces per phase and a small ASCII progress bar during training steps, `console_metric_names={...}` to whitelist printed metrics, and the `console_show_*` flags to hide learning-rate fields or lifecycle events from terminal output while keeping them in structured logs. Set `console_show_timestamp=False` if you want to remove the time prefix.
+
+`JSONLinesLogger` also supports event filtering when you only want coarse summaries:
+
+```python
+from vgl.engine import JSONLinesLogger
+
+logger = JSONLinesLogger("artifacts/epochs.jsonl", events={"epoch_end", "fit_end"}, flush=True)
+```
+
+Emitted training-step and epoch-end records now include optimizer learning-rate fields such as `lr` (or `lr/group_0`, `lr/group_1`, ... for multiple parameter groups).
+
+Structured logs now also include richer lifecycle events such as `monitor_improved` and `checkpoint_saved`; `monitor_improved` records carry `previous_best`, `current_value`, and `improvement_delta` so terminal and file logs can show how much the monitor moved, while `checkpoint_saved` records now carry `size_bytes` and `save_seconds` for artifact visibility. Run metadata on `fit_start` includes model/task/optimizer names and parameter counts.
+
+You can also trim structured logs by metric and context:
+
+```python
+from vgl.engine import CSVLogger, JSONLinesLogger
+
+json_logger = JSONLinesLogger(
+    "artifacts/minimal.jsonl",
+    events={"epoch_end", "fit_end"},
+    metric_names={"train_loss", "val_loss"},
+    include_context=False,
+    show_learning_rate=False,
+    flush=True,
+)
+csv_logger = CSVLogger(
+    "artifacts/minimal.csv",
+    metric_names={"train_loss", "val_loss"},
+    include_context=False,
+    show_learning_rate=False,
+    flush=True,
+)
+```
+
+`metric_names={...}` whitelists metrics written to file, `show_learning_rate=False` hides `lr` / `lr/group_*` fields, and `include_context=False` keeps only the core event coordinates plus the filtered metrics.
+
+For TensorBoard integration:
+
+```python
+from vgl.engine import TensorBoardLogger
+
+tb_logger = TensorBoardLogger(
+    "artifacts/tensorboard",
+    events={"train_step", "epoch_end", "fit_end"},
+    show_learning_rate=False,
+    flush=True,
+)
+```
+
+`TensorBoardLogger` writes step / epoch / fit scalars plus run metadata to an event directory. Launch TensorBoard with `tensorboard --logdir artifacts/tensorboard`. This logger requires the optional `tensorboard` package.
 
 ### Graph Classification
 

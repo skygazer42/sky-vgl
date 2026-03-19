@@ -1,7 +1,9 @@
 from pathlib import Path
+from time import perf_counter
 
 import torch
 
+from vgl.engine.checkpoints import checkpoint_event_fields
 from vgl.engine.monitoring import extract_monitor_value, is_improvement, resolve_monitor_mode
 
 
@@ -112,13 +114,18 @@ class HistoryLogger(Callback):
         self.records = [dict(record) for record in state.get("records", [])]
 
     def on_epoch_end(self, trainer, epoch, train_summary, val_summary, history):
-        del trainer
+        elapsed_seconds = None
+        if history["epoch_elapsed_seconds"]:
+            elapsed_seconds = history["epoch_elapsed_seconds"][-1]
         record = {
             "epoch": epoch,
             "train": dict(train_summary),
             "val": None if val_summary is None else dict(val_summary),
             "best_epoch": history["best_epoch"],
             "best_metric": history["best_metric"],
+            "monitor": history["monitor"],
+            "global_step": trainer.global_step,
+            "elapsed_seconds": elapsed_seconds,
         }
         self.records.append(record)
         if self.sink is not None:
@@ -1292,7 +1299,25 @@ class ModelCheckpoint(Callback):
         if self.active_monitor is not None and monitor_value is not None:
             metadata["monitor"] = self.active_monitor
             metadata["monitor_value"] = float(monitor_value)
-        trainer.save_training_checkpoint(path, history=history, metadata=metadata)
+        save_start_time = perf_counter()
+        checkpoint_path = trainer.save_training_checkpoint(path, history=history, metadata=metadata)
+        event_fields = checkpoint_event_fields(
+            checkpoint_path,
+            save_seconds=perf_counter() - save_start_time,
+        )
+        trainer.log_event(
+            "checkpoint_saved",
+            stage="fit",
+            metrics=(
+                None
+                if self.active_monitor is None or monitor_value is None
+                else {self.active_monitor: float(monitor_value)}
+            ),
+            checkpoint_tag=str(tag),
+            monitor_name=self.active_monitor,
+            monitor_value=None if monitor_value is None else float(monitor_value),
+            **event_fields,
+        )
 
     def _save_last_checkpoint(self, trainer, history, *, epoch):
         if not self.save_last:
@@ -1312,8 +1337,21 @@ class ModelCheckpoint(Callback):
             "exception_type": exception.__class__.__name__,
             "exception_message": str(exception),
         }
-        trainer.save_training_checkpoint(path, history=history, metadata=metadata)
-        self.exception_model_path = str(path)
+        save_start_time = perf_counter()
+        checkpoint_path = trainer.save_training_checkpoint(path, history=history, metadata=metadata)
+        self.exception_model_path = str(checkpoint_path)
+        event_fields = checkpoint_event_fields(
+            checkpoint_path,
+            save_seconds=perf_counter() - save_start_time,
+        )
+        trainer.log_event(
+            "checkpoint_saved",
+            stage="fit",
+            checkpoint_tag="exception",
+            exception_type=exception.__class__.__name__,
+            exception_message=str(exception),
+            **event_fields,
+        )
 
     def _upsert_tracked_model(self, path, score):
         path_str = str(path)

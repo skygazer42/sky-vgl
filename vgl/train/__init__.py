@@ -5,6 +5,8 @@ from vgl.engine import Callback as Callback
 from vgl.engine import ConfidencePenaltyScheduler as ConfidencePenaltyScheduler
 from vgl.engine import CHECKPOINT_FORMAT as CHECKPOINT_FORMAT
 from vgl.engine import CHECKPOINT_FORMAT_VERSION as CHECKPOINT_FORMAT_VERSION
+from vgl.engine import CSVLogger as CSVLogger
+from vgl.engine import ConsoleLogger as ConsoleLogger
 from vgl.engine import DeferredReweighting as DeferredReweighting
 from vgl.engine import EarlyStopping as EarlyStopping
 from vgl.engine import ExponentialMovingAverage as ExponentialMovingAverage
@@ -19,10 +21,12 @@ from vgl.engine import GradientCentralization as GradientCentralization
 from vgl.engine import GSAM as GSAM
 from vgl.engine import GradualUnfreezing as GradualUnfreezing
 from vgl.engine import HistoryLogger as HistoryLogger
+from vgl.engine import JSONLinesLogger as JSONLinesLogger
 from vgl.engine import LabelSmoothingScheduler as LabelSmoothingScheduler
 from vgl.engine import LdamMarginScheduler as LdamMarginScheduler
 from vgl.engine import LogitAdjustTauScheduler as LogitAdjustTauScheduler
 from vgl.engine import ModelCheckpoint as ModelCheckpoint
+from vgl.engine import Logger as Logger
 from vgl.engine import Poly1EpsilonScheduler as Poly1EpsilonScheduler
 from vgl.engine import PosWeightScheduler as PosWeightScheduler
 from vgl.engine import SymmetricCrossEntropyBetaScheduler as SymmetricCrossEntropyBetaScheduler
@@ -32,6 +36,7 @@ from vgl.engine import Lookahead as Lookahead
 from vgl.engine import SAM as SAM
 from vgl.engine import StochasticWeightAveraging as StochasticWeightAveraging
 from vgl.engine import StopTraining as StopTraining
+from vgl.engine import TensorBoardLogger as TensorBoardLogger
 from vgl.engine import TrainingHistory as TrainingHistory
 from vgl.engine import Trainer as Trainer
 from vgl.engine import WarmupCosineScheduler as WarmupCosineScheduler
@@ -68,6 +73,8 @@ __all__ = [
     "ConfidencePenaltyScheduler",
     "CHECKPOINT_FORMAT",
     "CHECKPOINT_FORMAT_VERSION",
+    "CSVLogger",
+    "ConsoleLogger",
     "DeferredReweighting",
     "EarlyStopping",
     "ExponentialMovingAverage",
@@ -86,10 +93,12 @@ __all__ = [
     "GradualUnfreezing",
     "HistoryLogger",
     "HitsAtK",
+    "JSONLinesLogger",
     "LabelSmoothingScheduler",
     "LdamMarginScheduler",
     "LogitAdjustTauScheduler",
     "ModelCheckpoint",
+    "Logger",
     "Poly1EpsilonScheduler",
     "PosWeightScheduler",
     "WeightDecayScheduler",
@@ -100,6 +109,7 @@ __all__ = [
     "SAM",
     "StochasticWeightAveraging",
     "StopTraining",
+    "TensorBoardLogger",
     "TrainingHistory",
     "build_metric",
     "save_checkpoint",

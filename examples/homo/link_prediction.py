@@ -1,5 +1,6 @@
 from pathlib import Path
 import sys
+import tempfile
 
 import torch
 from torch import nn
@@ -15,7 +16,7 @@ from vgl.dataloading import (
     ListDataset,
     UniformNegativeLinkSampler,
 )
-from vgl.engine import Trainer
+from vgl.engine import JSONLinesLogger, Trainer
 from vgl.graph import Graph
 from vgl.tasks import LinkPredictionTask
 from vgl.transforms import RandomLinkSplit
@@ -88,19 +89,26 @@ def build_split_demo_loaders():
 
 
 def main():
-    train_loader, val_loader, test_loader = build_split_demo_loaders()
-    trainer = Trainer(
-        model=TinyLinkPredictor(),
-        task=LinkPredictionTask(target="label", metrics=["mrr", "filtered_mrr", "filtered_hits@1"]),
-        optimizer=torch.optim.Adam,
-        lr=1e-2,
-        max_epochs=1,
-    )
-    history = trainer.fit(train_loader, val_data=val_loader)
-    test_result = trainer.test(test_loader)
-    result = {"history": history, "test": test_result}
-    print(result)
-    return result
+    with tempfile.TemporaryDirectory() as tmp_dir:
+        train_loader, val_loader, test_loader = build_split_demo_loaders()
+        trainer = Trainer(
+            model=TinyLinkPredictor(),
+            task=LinkPredictionTask(target="label", metrics=["mrr", "filtered_mrr", "filtered_hits@1"]),
+            optimizer=torch.optim.Adam,
+            lr=1e-2,
+            max_epochs=1,
+            loggers=[JSONLinesLogger(Path(tmp_dir) / "train.jsonl", flush=True)],
+            log_every_n_steps=1,
+        )
+        history = trainer.fit(train_loader, val_data=val_loader)
+        test_result = trainer.test(test_loader)
+        result = {
+            "history": history,
+            "test": test_result,
+            "log_path": str(Path(tmp_dir) / "train.jsonl"),
+        }
+        print(result)
+        return result
 
 
 if __name__ == "__main__":

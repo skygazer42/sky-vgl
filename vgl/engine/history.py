@@ -11,6 +11,10 @@ class TrainingHistory(dict):
                 "monitor": monitor,
                 "stopped_early": False,
                 "stop_reason": None,
+                "fit_elapsed_seconds": None,
+                "epoch_elapsed_seconds": [],
+                "final_train": None,
+                "final_val": None,
             }
         )
 
@@ -26,18 +30,35 @@ class TrainingHistory(dict):
         history.update(dict(state))
         return history
 
-    def record_epoch(self, *, epoch, train_summary, val_summary, best_epoch, best_metric):
+    def record_epoch(
+        self,
+        *,
+        epoch,
+        train_summary,
+        val_summary,
+        best_epoch,
+        best_metric,
+        elapsed_seconds=None,
+    ):
         self["train"].append(dict(train_summary))
         if val_summary is not None:
             self["val"].append(dict(val_summary))
         self["completed_epochs"] = epoch
         self["best_epoch"] = best_epoch
         self["best_metric"] = best_metric
+        self["epoch_elapsed_seconds"].append(
+            None if elapsed_seconds is None else float(elapsed_seconds)
+        )
 
     def mark_stopped(self, reason):
         self["stopped_early"] = True
         self["stop_reason"] = reason
 
-    def finalize(self, *, best_epoch, best_metric):
+    def finalize(self, *, best_epoch, best_metric, final_train=None, final_val=None, fit_elapsed_seconds=None):
         self["best_epoch"] = best_epoch
         self["best_metric"] = best_metric
+        self["final_train"] = None if final_train is None else dict(final_train)
+        self["final_val"] = None if final_val is None else dict(final_val)
+        self["fit_elapsed_seconds"] = (
+            None if fit_elapsed_seconds is None else float(fit_elapsed_seconds)
+        )

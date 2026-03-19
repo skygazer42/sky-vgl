@@ -9,9 +9,11 @@ from vgl import (
     BernConv,
     BootstrapBetaScheduler,
     BootstrapTask,
+    CSVLogger,
     CGConv,
     ChebConv,
     ClusterGCNConv,
+    ConsoleLogger,
     ConfidencePenaltyScheduler,
     ConfidencePenaltyTask,
     DAGNNConv,
@@ -132,9 +134,12 @@ from vgl import (
     GraphClassificationTask,
     GroupRevRes,
     HistoryLogger,
+    JSONLinesLogger,
+    Logger,
     TemporalEventPredictionTask,
     TemporalEventBatch,
     TemporalNeighborSampler,
+    TensorBoardLogger,
     TGNMemory,
     TGATEncoder,
     TGATLayer,
@@ -160,9 +165,11 @@ def test_package_exposes_broad_vgl_root_surface():
     assert BernConv.__name__ == "BernConv"
     assert BootstrapBetaScheduler.__name__ == "BootstrapBetaScheduler"
     assert BootstrapTask.__name__ == "BootstrapTask"
+    assert CSVLogger.__name__ == "CSVLogger"
     assert CGConv.__name__ == "CGConv"
     assert ChebConv.__name__ == "ChebConv"
     assert ClusterGCNConv.__name__ == "ClusterGCNConv"
+    assert ConsoleLogger.__name__ == "ConsoleLogger"
     assert ConfidencePenaltyScheduler.__name__ == "ConfidencePenaltyScheduler"
     assert ConfidencePenaltyTask.__name__ == "ConfidencePenaltyTask"
     assert DAGNNConv.__name__ == "DAGNNConv"
@@ -219,6 +226,7 @@ def test_package_exposes_broad_vgl_root_surface():
     assert NNConv.__name__ == "NNConv"
     assert TemporalEventBatch.__name__ == "TemporalEventBatch"
     assert TemporalNeighborSampler.__name__ == "TemporalNeighborSampler"
+    assert TensorBoardLogger.__name__ == "TensorBoardLogger"
     assert UniformNegativeLinkSampler.__name__ == "UniformNegativeLinkSampler"
     assert PointNetConv.__name__ == "PointNetConv"
     assert PointTransformerConv.__name__ == "PointTransformerConv"
@@ -282,7 +290,9 @@ def test_package_exposes_broad_vgl_root_surface():
     assert WeightDecayScheduler.__name__ == "WeightDecayScheduler"
     assert GradualUnfreezing.__name__ == "GradualUnfreezing"
     assert HistoryLogger.__name__ == "HistoryLogger"
+    assert JSONLinesLogger.__name__ == "JSONLinesLogger"
     assert LayerwiseLrDecay.__name__ == "LayerwiseLrDecay"
+    assert Logger.__name__ == "Logger"
     assert StochasticWeightAveraging.__name__ == "StochasticWeightAveraging"
     assert SymmetricCrossEntropyTask.__name__ == "SymmetricCrossEntropyTask"
     assert TrainingHistory.__name__ == "TrainingHistory"

@@ -116,6 +116,13 @@ The package currently exposes:
 - `test(data)`
 - `load_checkpoint(path, map_location=None, weights_only=True)`
 - `restore_checkpoint(model, path, map_location=None, strict=True, weights_only=True)`
+- optional `loggers=[...]` with built-in `ConsoleLogger`, `JSONLinesLogger`, `CSVLogger`, and `TensorBoardLogger`
+- `log_every_n_steps` for training-step event frequency control
+- console controls such as `console_mode`, `console_theme`, `console_metric_names`, `console_show_learning_rate`, `console_show_events`, and `console_show_timestamp`
+- optional `on_stage_start(stage_record)` logger hook before each train / val / test phase
+- detailed console mode with a fit-start run summary card, explicit stage-start markers, `tqdm`-style training-step progress and ETA, fit-level progress / ETA in epoch summaries, and final average speed fields
+- structured logger controls such as `events`, `metric_names`, and `show_learning_rate`, plus `include_context` on JSON/CSV loggers
+- structured lifecycle events such as `monitor_improved` and `checkpoint_saved`, with monitor-improvement deltas plus checkpoint size/save-time metadata available in event records
 - optional `callbacks=[...]` with `on_fit_start`, `on_epoch_end`, and `on_fit_end` hooks
 - `StopTraining` for callback-driven early stopping
 - built-in `EarlyStopping` and `HistoryLogger` callbacks
@@ -124,6 +131,11 @@ The package currently exposes:
 
 The `vgl.engine` package also exposes module-level checkpoint helpers and format constants:
 
+- `ConsoleLogger`
+- `CSVLogger`
+- `JSONLinesLogger`
+- `TensorBoardLogger`
+- `Logger`
 - `save_checkpoint(...)`
 - `load_checkpoint(...)`
 - `restore_checkpoint(...)`

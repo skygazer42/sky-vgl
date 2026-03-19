@@ -25,6 +25,10 @@ def test_training_history_initializes_expected_shape():
         "monitor": "val_loss",
         "stopped_early": False,
         "stop_reason": None,
+        "fit_elapsed_seconds": None,
+        "epoch_elapsed_seconds": [],
+        "final_train": None,
+        "final_val": None,
     }
 
 
@@ -54,3 +58,6 @@ def test_training_history_records_epochs_and_stop_state():
     assert history["best_metric"] == 0.75
     assert history["stopped_early"] is True
     assert history["stop_reason"] == "requested stop"
+    assert history["epoch_elapsed_seconds"] == [None, None]
+    assert history["final_train"] is None
+    assert history["final_val"] is None

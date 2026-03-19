@@ -71,6 +71,15 @@ def save_checkpoint(
     return checkpoint_path
 
 
+def checkpoint_event_fields(path, *, save_seconds):
+    checkpoint_path = Path(path)
+    return {
+        "path": str(checkpoint_path),
+        "size_bytes": int(checkpoint_path.stat().st_size),
+        "save_seconds": float(save_seconds),
+    }
+
+
 def normalize_checkpoint_payload(payload):
     if (
         isinstance(payload, dict)

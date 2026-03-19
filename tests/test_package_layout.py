@@ -19,8 +19,10 @@ def test_domain_packages_expose_preferred_import_paths():
         ASAM,
         AdaptiveGradientClipping,
         BootstrapBetaScheduler,
+        CSVLogger,
         CHECKPOINT_FORMAT,
         CHECKPOINT_FORMAT_VERSION,
+        ConsoleLogger,
         Callback,
         ConfidencePenaltyScheduler,
         DeferredReweighting,
@@ -35,8 +37,10 @@ def test_domain_packages_expose_preferred_import_paths():
         GSAM,
         GradualUnfreezing,
         HistoryLogger,
+        JSONLinesLogger,
         LabelSmoothingScheduler,
         LdamMarginScheduler,
+        Logger,
         LogitAdjustTauScheduler,
         ModelCheckpoint,
         Poly1EpsilonScheduler,
@@ -45,6 +49,7 @@ def test_domain_packages_expose_preferred_import_paths():
         SAM,
         StopTraining,
         SymmetricCrossEntropyBetaScheduler,
+        TensorBoardLogger,
         TrainingHistory,
         Trainer,
         WarmupCosineScheduler,
@@ -75,6 +80,8 @@ def test_domain_packages_expose_preferred_import_paths():
     from vgl.train import ASAM as LegacyASAM
     from vgl.train import BootstrapBetaScheduler as LegacyBootstrapBetaScheduler
     from vgl.train import BootstrapTask as LegacyBootstrapTask
+    from vgl.train import CSVLogger as LegacyCSVLogger
+    from vgl.train import ConsoleLogger as LegacyConsoleLogger
     from vgl.train import ConfidencePenaltyScheduler as LegacyConfidencePenaltyScheduler
     from vgl.train import ConfidencePenaltyTask as LegacyConfidencePenaltyTask
     from vgl.train import FilteredHitsAtK as LegacyFilteredHitsAtK
@@ -89,7 +96,9 @@ def test_domain_packages_expose_preferred_import_paths():
     from vgl.train import GradientNoiseInjection as LegacyGradientNoiseInjection
     from vgl.train import GradientValueClipping as LegacyGradientValueClipping
     from vgl.train import HitsAtK as LegacyHitsAtK
+    from vgl.train import JSONLinesLogger as LegacyJSONLinesLogger
     from vgl.train import LdamMarginScheduler as LegacyLdamMarginScheduler
+    from vgl.train import Logger as LegacyLogger
     from vgl.train import LogitAdjustTauScheduler as LegacyLogitAdjustTauScheduler
     from vgl.train import ModelCheckpoint as LegacyModelCheckpoint
     from vgl.train import MRR as LegacyMRR
@@ -100,6 +109,7 @@ def test_domain_packages_expose_preferred_import_paths():
     from vgl.train import SAM as LegacySAM
     from vgl.train import SymmetricCrossEntropyBetaScheduler as LegacySymmetricCrossEntropyBetaScheduler
     from vgl.train import SymmetricCrossEntropyTask as LegacySymmetricCrossEntropyTask
+    from vgl.train import TensorBoardLogger as LegacyTensorBoardLogger
     from vgl.train import WeightDecayScheduler as LegacyWeightDecayScheduler
     from vgl.data import CandidateLinkSampler as LegacyCandidateLinkSampler
     from vgl.data import HardNegativeLinkSampler as LegacyHardNegativeLinkSampler
@@ -131,7 +141,10 @@ def test_domain_packages_expose_preferred_import_paths():
     assert AdaptiveGradientClipping.__name__ == "AdaptiveGradientClipping"
     assert BootstrapBetaScheduler.__name__ == "BootstrapBetaScheduler"
     assert BootstrapTask.__name__ == "BootstrapTask"
+    assert CSVLogger.__name__ == "CSVLogger"
     assert Callback.__name__ == "Callback"
+    assert Logger.__name__ == "Logger"
+    assert ConsoleLogger.__name__ == "ConsoleLogger"
     assert ConfidencePenaltyScheduler.__name__ == "ConfidencePenaltyScheduler"
     assert DeferredReweighting.__name__ == "DeferredReweighting"
     assert EarlyStopping.__name__ == "EarlyStopping"
@@ -145,6 +158,8 @@ def test_domain_packages_expose_preferred_import_paths():
     assert GradientCentralization.__name__ == "GradientCentralization"
     assert GradualUnfreezing.__name__ == "GradualUnfreezing"
     assert HistoryLogger.__name__ == "HistoryLogger"
+    assert JSONLinesLogger.__name__ == "JSONLinesLogger"
+    assert TensorBoardLogger.__name__ == "TensorBoardLogger"
     assert LabelSmoothingScheduler.__name__ == "LabelSmoothingScheduler"
     assert LdamMarginScheduler.__name__ == "LdamMarginScheduler"
     assert LogitAdjustTauScheduler.__name__ == "LogitAdjustTauScheduler"
@@ -156,6 +171,8 @@ def test_domain_packages_expose_preferred_import_paths():
     assert LegacyASAM is ASAM
     assert LegacyBootstrapBetaScheduler is BootstrapBetaScheduler
     assert LegacyBootstrapTask is BootstrapTask
+    assert LegacyCSVLogger is CSVLogger
+    assert LegacyConsoleLogger is ConsoleLogger
     assert LegacyConfidencePenaltyScheduler is ConfidencePenaltyScheduler
     assert LegacyFilteredHitsAtK is FilteredHitsAtK
     assert LegacyFilteredMRR is FilteredMRR
@@ -168,7 +185,10 @@ def test_domain_packages_expose_preferred_import_paths():
     assert LegacyGradientNoiseInjection is GradientNoiseInjection
     assert LegacyGradientValueClipping is GradientValueClipping
     assert LegacyHitsAtK is HitsAtK
+    assert LegacyJSONLinesLogger is JSONLinesLogger
+    assert LegacyTensorBoardLogger is TensorBoardLogger
     assert LegacyLdamMarginScheduler is LdamMarginScheduler
+    assert LegacyLogger is Logger
     assert LegacyLogitAdjustTauScheduler is LogitAdjustTauScheduler
     assert LegacyModelCheckpoint is ModelCheckpoint
     assert LegacyMRR is MRR

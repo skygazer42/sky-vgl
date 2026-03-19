@@ -9,9 +9,12 @@ from vgl.dataloading import DataLoader, FullGraphSampler, ListDataset, SampleRec
 from vgl.engine import (
     CHECKPOINT_FORMAT,
     Callback,
+    CSVLogger,
     EarlyStopping,
     HistoryLogger,
+    JSONLinesLogger,
     StopTraining,
+    TensorBoardLogger,
     TrainingHistory,
     Trainer,
     load_checkpoint,
@@ -54,6 +57,8 @@ trainer = Trainer(
     max_epochs=10,
     monitor="val_accuracy",
     save_best_path="artifacts/best.pt",
+    loggers=[JSONLinesLogger("artifacts/train.jsonl", flush=True)],
+    log_every_n_steps=10,
 )
 history = trainer.fit(graph, val_data=graph)
 test_result = trainer.test(graph)
@@ -61,13 +66,73 @@ best_state = load_checkpoint("artifacts/best.pt")
 restored = restore_checkpoint(model, "artifacts/best.pt")
 ```
 
-`trainer.fit(...)` returns a `TrainingHistory` object with epoch summaries, monitor metadata, and early-stop state.
+`Trainer` enables console logging by default, emitting step progress plus epoch/final summaries. Add `loggers=[JSONLinesLogger(...)]` when you also want structured event logs on disk, `loggers=[CSVLogger(...)]` when you want one CSV row per epoch, `loggers=[TensorBoardLogger(...)]` when you want TensorBoard scalars, set `log_every_n_steps` to control training-step emission frequency, or disable terminal output with `enable_console_logging=False`.
+
+For quieter terminal output, configure the default console logger through `Trainer`:
+
+```python
+trainer = Trainer(
+    ...,
+    enable_progress_bar=False,
+    console_mode="compact",
+    console_theme="cat",
+    console_metric_names={"loss", "train_loss", "val_loss"},
+    console_show_learning_rate=False,
+    console_show_events=False,
+)
+```
+
+Console logs include `HH:MM:SS` timestamps by default. Detailed mode starts with a run summary card for model/task/optimizer metadata and parameter counts, emits stage-start lines when training / validation / testing begin, shows `tqdm`-style batch progress, percentage, throughput, and ETA during training steps, adds fit-level progress such as `fit=3/10 (30.0%)` plus `fit_eta=...` in epoch summaries, and finishes with aggregate speed fields such as `avg_epoch_time=...` and `avg_steps_per_second=...`. Set `console_theme="cat"` when you want an ASCII status mascot for phases such as `starting`, `waiting`, `training`, `validating`, `testing`, `tracking`, `saving`, and `done`, with distinct cat faces per phase plus a small ASCII progress bar during training steps, or set `console_show_timestamp=False` when you want to suppress the time prefix.
+
+`JSONLinesLogger` can filter events when you only want coarse-grained summaries:
+
+```python
+epoch_logger = JSONLinesLogger(
+    "artifacts/epochs.jsonl",
+    events={"epoch_end", "fit_end"},
+    flush=True,
+)
+```
+
+Training-step and epoch-end records include current optimizer learning-rate fields such as `lr`.
+
+The structured logger stream also includes lifecycle events such as `monitor_improved` and `checkpoint_saved`. `monitor_improved` records include `previous_best`, `current_value`, and `improvement_delta` so you can track how much the monitored score moved, while `checkpoint_saved` records include `size_bytes` and `save_seconds`. The initial `fit_start` record carries run metadata including model name, task name, optimizer name, callback/logger names, and parameter counts.
+
+To keep file logs small, both `JSONLinesLogger` and `CSVLogger` support metric filtering and reduced context:
+
+```python
+minimal_logger = JSONLinesLogger(
+    "artifacts/minimal.jsonl",
+    events={"epoch_end", "fit_end"},
+    metric_names={"train_loss", "val_loss"},
+    include_context=False,
+    show_learning_rate=False,
+    flush=True,
+)
+```
+
+`show_learning_rate=False` hides `lr` / `lr/group_*` fields, while `include_context=False` keeps only the core event coordinates plus the filtered `metrics` payload.
+
+For TensorBoard:
+
+```python
+tb_logger = TensorBoardLogger(
+    "artifacts/tensorboard",
+    events={"train_step", "epoch_end", "fit_end"},
+    show_learning_rate=False,
+    flush=True,
+)
+```
+
+Launch TensorBoard with `tensorboard --logdir artifacts/tensorboard`. `TensorBoardLogger` requires the optional `tensorboard` package.
+
+`trainer.fit(...)` returns a `TrainingHistory` object with epoch summaries, monitor metadata, elapsed time fields, and early-stop state.
 
 For alternative homogeneous backbones, the same training path can swap in `GINConv`, `GATv2Conv`, `APPNPConv`, `TAGConv`, `SGConv`, `ChebConv`, `AGNNConv`, `LightGCNConv`, `LGConv`, `FAGCNConv`, `ARMAConv`, `GPRGNNConv`, `MixHopConv`, `BernConv`, `SSGConv`, `DAGNNConv`, `GCN2Conv`, `GraphConv`, `H2GCNConv`, `EGConv`, `LEConv`, `ResGatedGraphConv`, `GatedGraphConv`, `ClusterGCNConv`, `GENConv`, `FiLMConv`, `SimpleConv`, `EdgeConv`, `FeaStConv`, `MFConv`, `PNAConv`, `GeneralConv`, `AntiSymmetricConv`, `TransformerConv`, `WLConvContinuous`, `SuperGATConv`, or `DirGNNConv` inside the model definition.
 
 For deeper equal-width stacks, you can also wrap operators such as `LGConv` with `GroupRevRes`.
 
-For training-time hooks, pass callback objects to `Trainer(callbacks=[...])`. Implement `on_epoch_end(...)` for logging or checkpoint policy, inspect the shared `TrainingHistory` object inside callbacks, raise `StopTraining` when you want early stopping, or use the built-in `EarlyStopping` and `HistoryLogger` callbacks directly.
+For training-time hooks, pass callback objects to `Trainer(callbacks=[...])`. Implement `on_epoch_end(...)` for checkpoint policy or control-flow changes, inspect the shared `TrainingHistory` object inside callbacks, raise `StopTraining` when you want early stopping, or use the built-in `EarlyStopping` and `HistoryLogger` callbacks directly. Prefer `loggers=[...]` over callbacks for new logging/reporting integrations.
 
 For graph classification over many small graphs:
 

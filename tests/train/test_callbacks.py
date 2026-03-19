@@ -547,6 +547,7 @@ def test_history_logger_records_epoch_summaries(monkeypatch):
     def fake_run_epoch(data, stage, training):
         del data, training
         if stage == "train":
+            trainer.global_step += 1
             return {"loss": next(train_losses)}
         return {"loss": next(val_losses)}
 
@@ -556,8 +557,26 @@ def test_history_logger_records_epoch_summaries(monkeypatch):
 
     assert history["completed_epochs"] == 2
     assert logger.records == [
-        {"epoch": 1, "train": {"loss": 1.0}, "val": {"loss": 2.0}, "best_epoch": 1, "best_metric": 2.0},
-        {"epoch": 2, "train": {"loss": 0.5}, "val": {"loss": 1.5}, "best_epoch": 2, "best_metric": 1.5},
+        {
+            "epoch": 1,
+            "train": {"loss": 1.0},
+            "val": {"loss": 2.0},
+            "best_epoch": 1,
+            "best_metric": 2.0,
+            "monitor": "val_loss",
+            "global_step": 1,
+            "elapsed_seconds": pytest.approx(0.0, abs=1.0),
+        },
+        {
+            "epoch": 2,
+            "train": {"loss": 0.5},
+            "val": {"loss": 1.5},
+            "best_epoch": 2,
+            "best_metric": 1.5,
+            "monitor": "val_loss",
+            "global_step": 2,
+            "elapsed_seconds": pytest.approx(0.0, abs=1.0),
+        },
     ]
     assert emitted == logger.records
 

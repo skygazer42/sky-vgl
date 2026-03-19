@@ -33,6 +33,11 @@ from vgl.engine.checkpoints import restore_checkpoint as restore_checkpoint
 from vgl.engine.checkpoints import save_checkpoint as save_checkpoint
 from vgl.engine.evaluator import Evaluator as Evaluator
 from vgl.engine.history import TrainingHistory as TrainingHistory
+from vgl.engine.logging import CSVLogger as CSVLogger
+from vgl.engine.logging import ConsoleLogger as ConsoleLogger
+from vgl.engine.logging import JSONLinesLogger as JSONLinesLogger
+from vgl.engine.logging import Logger as Logger
+from vgl.engine.logging import TensorBoardLogger as TensorBoardLogger
 from vgl.engine.optimizers import GSAM as GSAM
 from vgl.engine.optimizers import SAM as SAM
 from vgl.engine.parameter_groups import LayerwiseLrDecay as LayerwiseLrDecay
@@ -46,6 +51,8 @@ __all__ = [
     "AdaptiveGradientClipping",
     "BootstrapBetaScheduler",
     "Callback",
+    "CSVLogger",
+    "ConsoleLogger",
     "ConfidencePenaltyScheduler",
     "DeferredReweighting",
     "EarlyStopping",
@@ -61,10 +68,12 @@ __all__ = [
     "GSAM",
     "GradualUnfreezing",
     "HistoryLogger",
+    "JSONLinesLogger",
     "LabelSmoothingScheduler",
     "LdamMarginScheduler",
     "LogitAdjustTauScheduler",
     "ModelCheckpoint",
+    "Logger",
     "Poly1EpsilonScheduler",
     "PosWeightScheduler",
     "WeightDecayScheduler",
@@ -73,6 +82,7 @@ __all__ = [
     "SAM",
     "StochasticWeightAveraging",
     "StopTraining",
+    "TensorBoardLogger",
     "TrainingHistory",
     "WarmupCosineScheduler",
     "save_checkpoint",
