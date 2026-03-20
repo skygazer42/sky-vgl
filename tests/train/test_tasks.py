@@ -1,3 +1,5 @@
+import warnings
+
 import pytest
 import torch
 import torch.nn.functional as F
@@ -15,6 +17,10 @@ from vgl.train.tasks import (
     RDropTask,
     SymmetricCrossEntropyTask,
 )
+
+
+def _scalar(tensor):
+    return tensor.detach().item()
 
 
 def _expected_ldam_loss(logits, targets, class_count, *, max_margin=0.5, label_smoothing=0.0):
@@ -156,7 +162,9 @@ def test_node_classification_task_applies_label_smoothing():
         torch.tensor([0, 1]),
         label_smoothing=0.2,
     )
-    assert loss.item() == pytest.approx(expected.item())
+    with warnings.catch_warnings():
+        warnings.simplefilter("error", UserWarning)
+        assert _scalar(loss) == pytest.approx(_scalar(expected))
 
 
 def test_node_classification_task_computes_focal_loss():
@@ -179,7 +187,7 @@ def test_node_classification_task_computes_focal_loss():
     ce = F.cross_entropy(logits, torch.tensor([0, 1]), reduction="none")
     pt = torch.softmax(logits, dim=-1).gather(-1, torch.tensor([[0], [1]])).squeeze(-1)
     expected = (((1 - pt) ** 2.0) * ce).mean()
-    assert loss.item() == pytest.approx(expected.item())
+    assert _scalar(loss) == pytest.approx(_scalar(expected))
 
 
 def test_node_classification_task_applies_class_weight():
@@ -199,7 +207,7 @@ def test_node_classification_task_applies_class_weight():
     loss = task.loss(graph, logits, stage="train")
 
     expected = F.cross_entropy(logits, torch.tensor([0, 1]), weight=torch.tensor([1.0, 3.0]))
-    assert loss.item() == pytest.approx(expected.item())
+    assert _scalar(loss) == pytest.approx(_scalar(expected))
 
 
 def test_node_classification_task_computes_balanced_softmax_loss():
@@ -221,7 +229,7 @@ def test_node_classification_task_computes_balanced_softmax_loss():
 
     balanced_logits = logits + torch.log(torch.tensor([10.0, 2.0]))
     expected = F.cross_entropy(balanced_logits, torch.tensor([0, 1]))
-    assert loss.item() == pytest.approx(expected.item())
+    assert _scalar(loss) == pytest.approx(_scalar(expected))
 
 
 def test_node_classification_task_computes_ldam_loss():
@@ -248,7 +256,7 @@ def test_node_classification_task_computes_ldam_loss():
         [16.0, 1.0],
         max_margin=0.4,
     )
-    assert loss.item() == pytest.approx(expected.item())
+    assert _scalar(loss) == pytest.approx(_scalar(expected))
 
 
 def test_node_classification_task_computes_logit_adjustment_loss():
@@ -277,7 +285,7 @@ def test_node_classification_task_computes_logit_adjustment_loss():
         tau=1.2,
         label_smoothing=0.1,
     )
-    assert loss.item() == pytest.approx(expected.item())
+    assert _scalar(loss) == pytest.approx(_scalar(expected))
 
 
 def test_node_classification_task_rejects_invalid_loss_and_label_smoothing():
@@ -417,7 +425,7 @@ def test_rdrop_task_computes_average_supervised_and_consistency_loss():
         reduction="batchmean",
     )
     expected = 0.5 * (ce_a + ce_b) + 0.25 * (kl_ab + kl_ba)
-    assert loss.item() == pytest.approx(expected.item())
+    assert _scalar(loss) == pytest.approx(_scalar(expected))
 
 
 def test_rdrop_task_rejects_invalid_configuration():
@@ -442,8 +450,8 @@ def test_flooding_task_applies_flooded_loss_only_during_training():
     base_loss = base_task.loss(batch, logits, stage="train")
 
     expected = (base_loss - 0.3).abs() + 0.3
-    assert train_loss.item() == pytest.approx(expected.item())
-    assert val_loss.item() == pytest.approx(base_loss.item())
+    assert _scalar(train_loss) == pytest.approx(_scalar(expected))
+    assert _scalar(val_loss) == pytest.approx(_scalar(base_loss))
 
 
 def test_flooding_task_wraps_paired_loss_when_base_task_supports_it():
@@ -457,7 +465,7 @@ def test_flooding_task_wraps_paired_loss_when_base_task_supports_it():
     base_loss = base_task.paired_loss(batch, logits_a, logits_b, stage="train")
     expected = (base_loss - 0.4).abs() + 0.4
 
-    assert loss.item() == pytest.approx(expected.item())
+    assert _scalar(loss) == pytest.approx(_scalar(expected))
 
 
 def test_flooding_task_rejects_invalid_configuration():
@@ -478,8 +486,8 @@ def test_confidence_penalty_task_adds_entropy_regularization_only_during_trainin
     entropy = -(probs * torch.log(probs)).sum(dim=-1).mean()
     expected = base_loss - 0.2 * entropy
 
-    assert train_loss.item() == pytest.approx(expected.item())
-    assert val_loss.item() == pytest.approx(base_loss.item())
+    assert _scalar(train_loss) == pytest.approx(_scalar(expected))
+    assert _scalar(val_loss) == pytest.approx(_scalar(base_loss))
 
 
 def test_confidence_penalty_task_supports_binary_logits():
@@ -495,7 +503,7 @@ def test_confidence_penalty_task_supports_binary_logits():
     entropy = -(probs * torch.log(probs) + (1.0 - probs) * torch.log(1.0 - probs)).mean()
     expected = base_loss - 0.1 * entropy
 
-    assert loss.item() == pytest.approx(expected.item())
+    assert _scalar(loss) == pytest.approx(_scalar(expected))
 
 
 def test_confidence_penalty_task_wraps_paired_loss_when_base_task_supports_it():
@@ -514,7 +522,7 @@ def test_confidence_penalty_task_wraps_paired_loss_when_base_task_supports_it():
     entropy_b = -(probs_b * torch.log(probs_b)).sum(dim=-1).mean()
     expected = base_loss - 0.15 * 0.5 * (entropy_a + entropy_b)
 
-    assert loss.item() == pytest.approx(expected.item())
+    assert _scalar(loss) == pytest.approx(_scalar(expected))
 
 
 def test_confidence_penalty_task_rejects_invalid_configuration():
@@ -534,8 +542,8 @@ def test_generalized_cross_entropy_task_applies_gce_only_during_training():
     pt = torch.softmax(logits, dim=-1)[0, 0]
     expected = (1.0 - pt.pow(0.7)) / 0.7
 
-    assert train_loss.item() == pytest.approx(expected.item())
-    assert val_loss.item() == pytest.approx(base_loss.item())
+    assert _scalar(train_loss) == pytest.approx(_scalar(expected))
+    assert _scalar(val_loss) == pytest.approx(_scalar(base_loss))
 
 
 def test_generalized_cross_entropy_task_supports_binary_logits():
@@ -550,7 +558,7 @@ def test_generalized_cross_entropy_task_supports_binary_logits():
     true_probs = torch.stack([probs[0], 1.0 - probs[1]])
     expected = ((1.0 - true_probs.pow(0.5)) / 0.5).mean()
 
-    assert loss.item() == pytest.approx(expected.item())
+    assert _scalar(loss) == pytest.approx(_scalar(expected))
 
 
 def test_generalized_cross_entropy_task_wraps_paired_loss_and_preserves_extra_regularization():
@@ -572,7 +580,7 @@ def test_generalized_cross_entropy_task_wraps_paired_loss_and_preserves_extra_re
     gce_b = (1.0 - probs_b.pow(0.7)) / 0.7
     expected = (base_paired - base_supervised) + 0.5 * (gce_a + gce_b)
 
-    assert loss.item() == pytest.approx(expected.item())
+    assert _scalar(loss) == pytest.approx(_scalar(expected))
 
 
 def test_generalized_cross_entropy_task_rejects_invalid_configuration():
@@ -600,8 +608,8 @@ def test_symmetric_cross_entropy_task_applies_sce_only_during_training():
         label_clip=1e-4,
     )
 
-    assert train_loss.item() == pytest.approx(expected.item())
-    assert val_loss.item() == pytest.approx(base_loss.item())
+    assert _scalar(train_loss) == pytest.approx(_scalar(expected))
+    assert _scalar(val_loss) == pytest.approx(_scalar(base_loss))
 
 
 def test_symmetric_cross_entropy_task_supports_binary_logits():
@@ -620,7 +628,7 @@ def test_symmetric_cross_entropy_task_supports_binary_logits():
         label_clip=1e-4,
     )
 
-    assert loss.item() == pytest.approx(expected.item())
+    assert _scalar(loss) == pytest.approx(_scalar(expected))
 
 
 def test_symmetric_cross_entropy_task_wraps_paired_loss_and_preserves_extra_regularization():
@@ -652,7 +660,7 @@ def test_symmetric_cross_entropy_task_wraps_paired_loss_and_preserves_extra_regu
     )
     expected = (base_paired - base_supervised) + 0.5 * (sce_a + sce_b)
 
-    assert loss.item() == pytest.approx(expected.item())
+    assert _scalar(loss) == pytest.approx(_scalar(expected))
 
 
 def test_symmetric_cross_entropy_task_rejects_invalid_configuration():
@@ -685,8 +693,8 @@ def test_poly1_cross_entropy_task_applies_poly1_only_during_training():
         base_loss=base_loss,
     )
 
-    assert train_loss.item() == pytest.approx(expected.item())
-    assert val_loss.item() == pytest.approx(base_loss.item())
+    assert _scalar(train_loss) == pytest.approx(_scalar(expected))
+    assert _scalar(val_loss) == pytest.approx(_scalar(base_loss))
 
 
 def test_poly1_cross_entropy_task_supports_binary_logits():
@@ -704,7 +712,7 @@ def test_poly1_cross_entropy_task_supports_binary_logits():
         base_loss=base_task.loss(batch, logits, stage="train"),
     )
 
-    assert loss.item() == pytest.approx(expected.item())
+    assert _scalar(loss) == pytest.approx(_scalar(expected))
 
 
 def test_poly1_cross_entropy_task_wraps_paired_loss_and_preserves_extra_regularization():
@@ -734,7 +742,7 @@ def test_poly1_cross_entropy_task_wraps_paired_loss_and_preserves_extra_regulari
     )
     expected = (base_paired - base_supervised) + 0.5 * (poly1_a + poly1_b)
 
-    assert loss.item() == pytest.approx(expected.item())
+    assert _scalar(loss) == pytest.approx(_scalar(expected))
 
 
 def test_poly1_cross_entropy_task_rejects_invalid_configuration():
@@ -758,8 +766,8 @@ def test_bootstrap_task_applies_soft_bootstrap_only_during_training():
         mode="soft",
     )
 
-    assert train_loss.item() == pytest.approx(expected.item())
-    assert val_loss.item() == pytest.approx(base_loss.item())
+    assert _scalar(train_loss) == pytest.approx(_scalar(expected))
+    assert _scalar(val_loss) == pytest.approx(_scalar(base_loss))
 
 
 def test_bootstrap_task_supports_binary_logits_with_hard_mode():
@@ -777,7 +785,7 @@ def test_bootstrap_task_supports_binary_logits_with_hard_mode():
         mode="hard",
     )
 
-    assert loss.item() == pytest.approx(expected.item())
+    assert _scalar(loss) == pytest.approx(_scalar(expected))
 
 
 def test_bootstrap_task_wraps_paired_loss_and_preserves_extra_regularization():
@@ -807,7 +815,7 @@ def test_bootstrap_task_wraps_paired_loss_and_preserves_extra_regularization():
     )
     expected = (base_paired - base_supervised) + 0.5 * (bootstrap_a + bootstrap_b)
 
-    assert loss.item() == pytest.approx(expected.item())
+    assert _scalar(loss) == pytest.approx(_scalar(expected))
 
 
 def test_bootstrap_task_rejects_invalid_configuration():
@@ -819,3 +827,4 @@ def test_bootstrap_task_rejects_invalid_configuration():
 
     with pytest.raises(ValueError, match="mode"):
         BootstrapTask(GraphClassificationTask(target="label", label_source="graph"), mode="median")
+

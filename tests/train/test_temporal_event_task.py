@@ -1,3 +1,5 @@
+import warnings
+
 import pytest
 import torch
 import torch.nn.functional as F
@@ -6,6 +8,10 @@ from vgl import Graph
 from vgl.core.batch import TemporalEventBatch
 from vgl.data.sample import TemporalEventRecord
 from vgl.train.tasks import TemporalEventPredictionTask
+
+
+def _scalar(tensor):
+    return tensor.detach().item()
 
 
 def _expected_ldam_loss(logits, targets, class_count, *, max_margin=0.5):
@@ -65,7 +71,9 @@ def test_temporal_event_prediction_task_applies_label_smoothing():
         torch.tensor([1, 0]),
         label_smoothing=0.2,
     )
-    assert loss.item() == pytest.approx(expected.item())
+    with warnings.catch_warnings():
+        warnings.simplefilter("error", UserWarning)
+        assert _scalar(loss) == pytest.approx(_scalar(expected))
 
 
 def test_temporal_event_prediction_task_computes_focal_loss():
@@ -77,7 +85,7 @@ def test_temporal_event_prediction_task_computes_focal_loss():
     ce = F.cross_entropy(logits, torch.tensor([1, 0]), reduction="none")
     pt = torch.softmax(logits, dim=-1).gather(-1, torch.tensor([[1], [0]])).squeeze(-1)
     expected = (((1 - pt) ** 2.0) * ce).mean()
-    assert loss.item() == pytest.approx(expected.item())
+    assert _scalar(loss) == pytest.approx(_scalar(expected))
 
 
 def test_temporal_event_prediction_task_applies_class_weight():
@@ -87,7 +95,7 @@ def test_temporal_event_prediction_task_applies_class_weight():
     loss = task.loss(_batch(), logits, stage="train")
 
     expected = F.cross_entropy(logits, torch.tensor([1, 0]), weight=torch.tensor([1.0, 4.0]))
-    assert loss.item() == pytest.approx(expected.item())
+    assert _scalar(loss) == pytest.approx(_scalar(expected))
 
 
 def test_temporal_event_prediction_task_computes_balanced_softmax_loss():
@@ -98,7 +106,7 @@ def test_temporal_event_prediction_task_computes_balanced_softmax_loss():
 
     balanced_logits = logits + torch.log(torch.tensor([10.0, 2.0]))
     expected = F.cross_entropy(balanced_logits, torch.tensor([1, 0]))
-    assert loss.item() == pytest.approx(expected.item())
+    assert _scalar(loss) == pytest.approx(_scalar(expected))
 
 
 def test_temporal_event_prediction_task_computes_ldam_loss():
@@ -118,7 +126,7 @@ def test_temporal_event_prediction_task_computes_ldam_loss():
         [16.0, 1.0],
         max_margin=0.4,
     )
-    assert loss.item() == pytest.approx(expected.item())
+    assert _scalar(loss) == pytest.approx(_scalar(expected))
 
 
 def test_temporal_event_prediction_task_computes_logit_adjustment_loss():
@@ -140,7 +148,7 @@ def test_temporal_event_prediction_task_computes_logit_adjustment_loss():
         tau=1.2,
         class_weight=[1.0, 3.0],
     )
-    assert loss.item() == pytest.approx(expected.item())
+    assert _scalar(loss) == pytest.approx(_scalar(expected))
 
 
 def test_temporal_event_prediction_task_rejects_unsupported_loss():
@@ -183,3 +191,4 @@ def test_temporal_event_prediction_task_rejects_unsupported_loss():
             class_count=[4.0, 2.0],
             logit_adjust_tau=-0.1,
         )
+

@@ -1,3 +1,5 @@
+import warnings
+
 import pytest
 import torch
 import torch.nn.functional as F
@@ -8,6 +10,10 @@ from vgl.train.tasks import GraphClassificationTask
 class FakeBatch:
     labels = torch.tensor([1, 0])
     metadata = [{"label": 1}, {"label": 0}]
+
+
+def _scalar(tensor):
+    return tensor.detach().item()
 
 
 def _expected_ldam_loss(logits, targets, class_count, *, max_margin=0.5, label_smoothing=0.0):
@@ -74,7 +80,9 @@ def test_graph_classification_task_applies_label_smoothing():
         torch.tensor([1, 0]),
         label_smoothing=0.2,
     )
-    assert loss.item() == pytest.approx(expected.item())
+    with warnings.catch_warnings():
+        warnings.simplefilter("error", UserWarning)
+        assert _scalar(loss) == pytest.approx(_scalar(expected))
 
 
 def test_graph_classification_task_computes_focal_loss():
@@ -86,7 +94,7 @@ def test_graph_classification_task_computes_focal_loss():
     ce = F.cross_entropy(logits, torch.tensor([1, 0]), reduction="none")
     pt = torch.softmax(logits, dim=-1).gather(-1, torch.tensor([[1], [0]])).squeeze(-1)
     expected = (((1 - pt) ** 2.0) * ce).mean()
-    assert loss.item() == pytest.approx(expected.item())
+    assert _scalar(loss) == pytest.approx(_scalar(expected))
 
 
 def test_graph_classification_task_applies_class_weight_to_focal_loss():
@@ -109,7 +117,7 @@ def test_graph_classification_task_applies_class_weight_to_focal_loss():
     )
     pt = torch.softmax(logits, dim=-1).gather(-1, torch.tensor([[1], [0]])).squeeze(-1)
     expected = (((1 - pt) ** 2.0) * ce).mean()
-    assert loss.item() == pytest.approx(expected.item())
+    assert _scalar(loss) == pytest.approx(_scalar(expected))
 
 
 def test_graph_classification_task_computes_balanced_softmax_loss():
@@ -125,7 +133,7 @@ def test_graph_classification_task_computes_balanced_softmax_loss():
 
     balanced_logits = logits + torch.log(torch.tensor([10.0, 2.0]))
     expected = F.cross_entropy(balanced_logits, torch.tensor([1, 0]))
-    assert loss.item() == pytest.approx(expected.item())
+    assert _scalar(loss) == pytest.approx(_scalar(expected))
 
 
 def test_graph_classification_task_computes_ldam_loss():
@@ -146,7 +154,7 @@ def test_graph_classification_task_computes_ldam_loss():
         [16.0, 1.0],
         max_margin=0.4,
     )
-    assert loss.item() == pytest.approx(expected.item())
+    assert _scalar(loss) == pytest.approx(_scalar(expected))
 
 
 def test_graph_classification_task_computes_logit_adjustment_loss():
@@ -169,7 +177,7 @@ def test_graph_classification_task_computes_logit_adjustment_loss():
         tau=1.2,
         class_weight=[1.0, 3.0],
     )
-    assert loss.item() == pytest.approx(expected.item())
+    assert _scalar(loss) == pytest.approx(_scalar(expected))
 
 
 def test_graph_classification_task_rejects_invalid_loss_and_label_smoothing():

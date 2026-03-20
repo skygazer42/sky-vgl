@@ -1,3 +1,5 @@
+import warnings
+
 import pytest
 import torch
 import torch.nn.functional as F
@@ -21,6 +23,10 @@ def _batch():
     )
 
 
+def _scalar(tensor):
+    return tensor.detach().item()
+
+
 def test_link_prediction_task_computes_bce_loss():
     task = LinkPredictionTask(target="label")
     logits = torch.randn(2, requires_grad=True)
@@ -41,7 +47,9 @@ def test_link_prediction_task_computes_focal_loss():
     probs = torch.sigmoid(logits)
     pt = probs * targets + (1.0 - probs) * (1.0 - targets)
     expected = (((1.0 - pt) ** 2.0) * bce).mean()
-    assert loss.item() == pytest.approx(expected.item())
+    with warnings.catch_warnings():
+        warnings.simplefilter("error", UserWarning)
+        assert _scalar(loss) == pytest.approx(_scalar(expected))
 
 
 def test_link_prediction_task_applies_pos_weight():
@@ -55,7 +63,7 @@ def test_link_prediction_task_applies_pos_weight():
         torch.tensor([1.0, 0.0]),
         pos_weight=torch.tensor([3.0]),
     )
-    assert loss.item() == pytest.approx(expected.item())
+    assert _scalar(loss) == pytest.approx(_scalar(expected))
 
 
 def test_link_prediction_task_applies_pos_weight_to_focal_loss():
@@ -74,7 +82,7 @@ def test_link_prediction_task_applies_pos_weight_to_focal_loss():
     probs = torch.sigmoid(logits)
     pt = probs * targets + (1.0 - probs) * (1.0 - targets)
     expected = (((1.0 - pt) ** 2.0) * bce).mean()
-    assert loss.item() == pytest.approx(expected.item())
+    assert _scalar(loss) == pytest.approx(_scalar(expected))
 
 
 def test_link_prediction_task_rejects_unsupported_loss():
