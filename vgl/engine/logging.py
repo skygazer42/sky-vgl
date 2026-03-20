@@ -278,6 +278,7 @@ class ConsoleLogger(Logger):
     def _run_banner_lines(self, run_info):
         if self.mode != "detailed":
             return []
+        lines = []
         summary_line = (
             f"model={run_info['model_name']}"
             f" | task={run_info['task_name']}"
@@ -285,20 +286,46 @@ class ConsoleLogger(Logger):
         )
         if run_info.get("lr_scheduler_name") is not None:
             summary_line += f" | scheduler={run_info['lr_scheduler_name']}"
-        return [
-            "Run summary",
-            summary_line,
-            (
-                f"epochs={run_info['epochs']}"
-                f" | monitor={run_info['monitor']}"
-                f" | precision={run_info['precision']}"
-            ),
-            (
-                "parameters"
-                f" | total={run_info['total_parameters']}"
-                f" | trainable={run_info['trainable_parameters']}"
-            ),
-        ]
+        lines.extend(
+            [
+                "Run summary",
+                summary_line,
+                (
+                    f"epochs={run_info['epochs']}"
+                    f" | monitor={run_info['monitor']}"
+                    f" | precision={run_info['precision']}"
+                ),
+                (
+                    "parameters"
+                    f" | total={run_info['total_parameters']}"
+                    f" | trainable={run_info['trainable_parameters']}"
+                ),
+            ]
+        )
+        run_fields = []
+        if run_info.get("run_name") is not None:
+            run_fields.append(f"run_name={run_info['run_name']}")
+        if run_info.get("root_dir") is not None:
+            run_fields.append(f"root_dir={run_info['root_dir']}")
+        if run_fields:
+            lines.append("run | " + " | ".join(run_fields))
+        controls = []
+        if run_info.get("fast_dev_run"):
+            controls.append("fast_dev_run=True")
+        if int(run_info.get("num_sanity_val_steps") or 0) > 0:
+            controls.append(f"sanity_val_steps={int(run_info['num_sanity_val_steps'])}")
+        val_check_interval = run_info.get("val_check_interval")
+        if not (isinstance(val_check_interval, float) and val_check_interval == 1.0):
+            controls.append(f"val_check_interval={val_check_interval}")
+        if controls:
+            lines.append("controls | " + " | ".join(controls))
+        lines.append(
+            "batch_limits"
+            f" | train={run_info.get('limit_train_batches')}"
+            f" | val={run_info.get('limit_val_batches')}"
+            f" | test={run_info.get('limit_test_batches')}"
+        )
+        return lines
 
     def _fit_progress_fields(self, *, epoch, epochs, elapsed_seconds=None, include_eta):
         if self.mode != "detailed" or epoch is None or epochs in (None, 0):
@@ -329,11 +356,12 @@ class ConsoleLogger(Logger):
         line = {
             "train": "Training started",
             "val": "Validation started",
+            "sanity_val": "Sanity validation started",
             "test": "Test started",
         }.get(stage, f"{stage} started")
         epoch = stage_record.get("epoch")
         epochs = stage_record.get("epochs")
-        if epoch is not None and epochs is not None and epoch > 0:
+        if epoch is not None and epochs is not None and (epoch > 0 or stage == "sanity_val"):
             line += f" | epoch={epoch}/{epochs}"
         total_batches = stage_record.get("total_batches")
         if total_batches is not None:
@@ -341,6 +369,7 @@ class ConsoleLogger(Logger):
         status = {
             "train": "training",
             "val": "validating",
+            "sanity_val": "validating",
             "test": "testing",
         }.get(stage, "waiting")
         self._write_line(line, status=status)
@@ -386,10 +415,14 @@ class ConsoleLogger(Logger):
         metrics = self._filtered_metrics(stage_record["metrics"])
         status = {
             "val": "validating",
+            "sanity_val": "validating",
             "test": "testing",
         }.get(stage_record["stage"], "waiting")
+        stage_label = {
+            "sanity_val": "sanity validation summary",
+        }.get(stage_record["stage"], f"{stage_record['stage']} summary")
         self._write_line(
-            f"{stage_record['stage']} summary"
+            f"{stage_label}"
             f" | {_format_metrics(metrics)}"
             f" | elapsed={stage_record['elapsed_seconds']:.2f}s",
             status=status,

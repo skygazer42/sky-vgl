@@ -29,6 +29,12 @@ def test_training_history_initializes_expected_shape():
         "epoch_elapsed_seconds": [],
         "final_train": None,
         "final_val": None,
+        "run_name": None,
+        "root_dir": None,
+        "fast_dev_run": False,
+        "sanity_check_passed": False,
+        "profiler": None,
+        "profile": None,
     }
 
 

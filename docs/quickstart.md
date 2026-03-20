@@ -68,6 +68,22 @@ restored = restore_checkpoint(model, "artifacts/best.pt")
 
 `Trainer` enables console logging by default, emitting step progress plus epoch/final summaries. Add `loggers=[JSONLinesLogger(...)]` when you also want structured event logs on disk, `loggers=[CSVLogger(...)]` when you want one CSV row per epoch, `loggers=[TensorBoardLogger(...)]` when you want TensorBoard scalars, set `log_every_n_steps` to control training-step emission frequency, or disable terminal output with `enable_console_logging=False`.
 
+For debug loops and experiment bookkeeping, `Trainer` also accepts:
+
+```python
+trainer = Trainer(
+    ...,
+    default_root_dir="artifacts/debug-run",
+    run_name="sanity-check",
+    fast_dev_run=True,
+    num_sanity_val_steps=2,
+    val_check_interval=0.5,
+    profiler="simple",
+)
+```
+
+`default_root_dir` becomes the base for relative checkpoint and logger paths, `run_name` is carried into structured records plus `TrainingHistory`, `fast_dev_run` trims every stage to a tiny sample, forces one epoch, and suppresses automatic checkpoint writes, `num_sanity_val_steps` runs validation before training begins, `val_check_interval` can insert mid-epoch validation during `fit(...)`, and `profiler="simple"` attaches coarse timing totals to fit/epoch summaries. When you need deterministic stage caps without enabling fast-dev mode, `limit_train_batches`, `limit_val_batches`, and `limit_test_batches` accept either absolute batch counts or fractions.
+
 For quieter terminal output, configure the default console logger through `Trainer`:
 
 ```python

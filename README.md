@@ -105,6 +105,22 @@ print(f"Test accuracy: {result['accuracy']:.4f}")
 
 `Trainer` writes console progress by default. Add `loggers=[JSONLinesLogger(...)]` for structured event logs, `loggers=[CSVLogger(...)]` for epoch-by-epoch spreadsheets, `loggers=[TensorBoardLogger(...)]` for TensorBoard scalars, tune step frequency with `log_every_n_steps`, or disable terminal logging with `enable_console_logging=False`.
 
+For experiment hygiene and quick debugging, `Trainer` also supports a small set of trainer-level engineering controls:
+
+```python
+trainer = Trainer(
+    ...,
+    default_root_dir="artifacts/node-demo",
+    run_name="debug-neighbors",
+    fast_dev_run=True,
+    num_sanity_val_steps=2,
+    val_check_interval=0.5,
+    profiler="simple",
+)
+```
+
+`default_root_dir` resolves relative artifact paths such as `save_best_path="best.pt"` or `JSONLinesLogger("train.jsonl")` under one run directory, `run_name` is recorded in structured logs and `TrainingHistory`, `fast_dev_run` caps every stage to a tiny sample, forces a single epoch, and suppresses automatic checkpoint writes, `num_sanity_val_steps` validates a few batches before training starts, `val_check_interval` can trigger extra validation passes inside an epoch, and `profiler="simple"` adds coarse timing totals to fit/epoch records without extra dependencies. For finer control, `limit_train_batches`, `limit_val_batches`, and `limit_test_batches` accept either a max batch count or a `(0, 1]` fraction.
+
 The default console logger is also configurable through `Trainer`:
 
 ```python

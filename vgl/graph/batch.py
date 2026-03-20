@@ -1,5 +1,5 @@
 from dataclasses import dataclass
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Hashable, SupportsInt
 
 import torch
 
@@ -71,6 +71,12 @@ def _node_count(store):
         if isinstance(value, torch.Tensor) and value.ndim > 0:
             return int(value.size(0))
     return 0
+
+
+def _require_int(value: SupportsInt | None, *, field_name: str) -> int:
+    if value is None:
+        raise ValueError(f"{field_name} must not be None")
+    return int(value)
 
 
 def _resolve_link_edge_type(record):
@@ -314,7 +320,7 @@ class NodeBatch:
             for sample in samples:
                 sample_graph = sample.graph
                 num_nodes = int(sample_graph.x.size(0))
-                seed_index = int(sample.subgraph_seed)
+                seed_index = _require_int(sample.subgraph_seed, field_name="subgraph_seed")
                 if seed_index < 0 or seed_index >= num_nodes:
                     raise ValueError("NodeBatch subgraph_seed must fall within the sampled graph node range")
                 seed_values.append(seed_index + graph_offsets[id(sample_graph)])
@@ -329,7 +335,7 @@ class NodeBatch:
                 if node_type not in sample_graph.nodes:
                     raise ValueError("NodeBatch metadata['node_type'] must exist in the sampled graph")
                 num_nodes = _node_count(sample_graph.nodes[node_type])
-                seed_index = int(sample.subgraph_seed)
+                seed_index = _require_int(sample.subgraph_seed, field_name="subgraph_seed")
                 if seed_index < 0 or seed_index >= num_nodes:
                     raise ValueError("NodeBatch subgraph_seed must fall within the sampled graph node range")
                 seed_values.append(seed_index + graph_offsets[id(sample_graph)][node_type])
@@ -456,7 +462,7 @@ class LinkPredictionBatch:
         elif any(query_id is None for query_id in query_ids):
             raise ValueError("LinkPredictionBatch requires query_id for either all or none of the records")
         else:
-            query_id_map = {}
+            query_id_map: dict[Hashable, int] = {}
             query_values = []
             for query_id in query_ids:
                 if query_id not in query_id_map:

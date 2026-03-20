@@ -160,6 +160,52 @@ def test_fit_start_record_includes_run_metadata():
     assert fit_start["logger_names"] == ["RecordingLogger"]
 
 
+def test_fit_start_and_checkpoint_records_include_artifact_paths(tmp_path):
+    logger = RecordingLogger()
+    root_dir = tmp_path / "artifacts"
+    checkpoint_callback = ModelCheckpoint("checkpoints", save_top_k=1, save_last=True)
+    trainer = Trainer(
+        model=ToyModel(),
+        task=ToyTask(),
+        optimizer=torch.optim.SGD,
+        lr=0.1,
+        max_epochs=1,
+        callbacks=[checkpoint_callback],
+        loggers=[logger, JSONLinesLogger("logs/train.jsonl", flush=True)],
+        enable_console_logging=False,
+        default_root_dir=root_dir,
+        run_name="artifact-smoke",
+        save_best_path="best.pt",
+    )
+
+    trainer.fit([ToyBatch(1.0)], val_data=[ToyBatch(1.0)])
+
+    fit_start = logger.events[0]
+    checkpoint_event = next(
+        event
+        for event in logger.events
+        if event["event"] == "checkpoint_saved" and event["checkpoint_tag"] == "best"
+    )
+
+    assert fit_start["run_name"] == "artifact-smoke"
+    assert fit_start["artifact_paths"] == {
+        "save_best_path": str(root_dir / "best.pt"),
+        "logger_paths": [
+            {
+                "logger": "JSONLinesLogger",
+                "path": str(root_dir / "logs" / "train.jsonl"),
+            }
+        ],
+        "callback_dirs": [
+            {
+                "callback": "ModelCheckpoint",
+                "dirpath": str(root_dir / "checkpoints"),
+            }
+        ],
+    }
+    assert checkpoint_event["artifact_paths"] == fit_start["artifact_paths"]
+
+
 def test_trainer_emits_evaluate_end_records_for_evaluate_and_test():
     logger = RecordingLogger()
     trainer = Trainer(
@@ -578,6 +624,36 @@ def test_console_logger_detailed_mode_prints_run_banner_before_fit_start(capsys)
     assert output.index("Run summary") < output.index("Fit started")
 
 
+def test_console_logger_detailed_mode_prints_run_controls_in_banner(capsys, tmp_path):
+    root_dir = tmp_path / "artifacts"
+    trainer = Trainer(
+        model=ToyModel(),
+        task=ToyTask(),
+        optimizer=torch.optim.SGD,
+        lr=0.1,
+        max_epochs=3,
+        loggers=[ConsoleLogger(enable_progress_bar=False)],
+        enable_console_logging=False,
+        default_root_dir=root_dir,
+        run_name="smoke-run",
+        fast_dev_run=True,
+        limit_train_batches=0.5,
+        limit_val_batches=0.25,
+        limit_test_batches=2,
+        num_sanity_val_steps=1,
+        val_check_interval=0.5,
+    )
+
+    trainer.fit([ToyBatch(1.0) for _ in range(4)], val_data=[ToyBatch(1.0) for _ in range(4)])
+
+    output = capsys.readouterr().out
+
+    assert "run | run_name=smoke-run" in output
+    assert f"root_dir={root_dir}" in output
+    assert "controls | fast_dev_run=True | sanity_val_steps=1 | val_check_interval=0.5" in output
+    assert "batch_limits | train=0.5 | val=0.25 | test=2" in output
+
+
 def test_console_logger_can_show_timestamp_and_cat_statuses(capsys):
     trainer = Trainer(
         model=ToyModel(),
@@ -672,6 +748,26 @@ def test_console_logger_detailed_mode_prints_stage_start_markers(capsys):
     assert "Training started | epoch=1/1 | batches=1" in output
     assert "Validation started | epoch=1/1 | batches=1" in output
     assert "Test started | epoch=1/1 | batches=1" in output
+
+
+def test_console_logger_detailed_mode_shows_sanity_validation_stage(capsys):
+    trainer = Trainer(
+        model=ToyModel(),
+        task=ToyTask(),
+        optimizer=torch.optim.SGD,
+        lr=0.1,
+        max_epochs=1,
+        loggers=[ConsoleLogger(enable_progress_bar=False)],
+        enable_console_logging=False,
+        num_sanity_val_steps=1,
+    )
+
+    trainer.fit([ToyBatch(1.0)], val_data=[ToyBatch(1.0)])
+
+    output = capsys.readouterr().out
+
+    assert "Sanity validation started | epoch=0/1 | batches=1" in output
+    assert "sanity validation summary" in output
 
 
 def test_console_logger_cat_theme_shows_stage_start_statuses(capsys):

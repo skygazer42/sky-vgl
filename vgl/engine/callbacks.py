@@ -1254,6 +1254,9 @@ class ModelCheckpoint(Callback):
         self.last_model_path = None
         self.exception_model_path = None
 
+    def _checkpointing_enabled(self, trainer):
+        return bool(getattr(trainer, "_checkpointing_enabled", True))
+
     def _ranked_models(self):
         reverse = self.active_mode == "max"
         return sorted(self.best_k_models, key=lambda entry: entry["score"], reverse=reverse)
@@ -1375,6 +1378,17 @@ class ModelCheckpoint(Callback):
                 remove_path.unlink()
 
     def on_fit_start(self, trainer, history):
+        if not self._checkpointing_enabled(trainer):
+            self.active_monitor = None
+            self.active_mode = None
+            self.best_k_models = []
+            self.best_model_path = None
+            self.best_model_score = None
+            self.kth_best_model_path = None
+            self.kth_best_model_score = None
+            self.last_model_path = None
+            self.exception_model_path = None
+            return
         self.dirpath.mkdir(parents=True, exist_ok=True)
         if self.save_top_k != 0 or self.monitor is not None:
             self.active_monitor = self.monitor or history["monitor"]
@@ -1427,6 +1441,8 @@ class ModelCheckpoint(Callback):
         self._refresh_best_model_fields()
 
     def on_epoch_end(self, trainer, epoch, train_summary, val_summary, history):
+        if not self._checkpointing_enabled(trainer):
+            return
         if epoch % self.every_n_epochs != 0:
             return
 
@@ -1463,6 +1479,8 @@ class ModelCheckpoint(Callback):
         self._refresh_best_model_fields()
 
     def on_exception(self, trainer, exception, history):
+        if not self._checkpointing_enabled(trainer):
+            return
         self._save_exception_checkpoint(trainer, exception, history)
 
 
