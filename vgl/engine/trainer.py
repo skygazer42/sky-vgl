@@ -1,6 +1,7 @@
 from collections.abc import Iterable
 from contextlib import nullcontext
 from copy import deepcopy
+from dataclasses import fields, is_dataclass
 from pathlib import Path
 from time import perf_counter
 
@@ -54,6 +55,9 @@ class Trainer:
         optimizer_param_groups=None,
         lr_scheduler_interval="epoch",
         precision="32",
+        device=None,
+        move_batch_to_device=True,
+        non_blocking=None,
         grad_scaler=None,
         default_root_dir=None,
         run_name=None,
@@ -81,12 +85,19 @@ class Trainer:
             )
         if precision not in self._SUPPORTED_PRECISIONS:
             raise ValueError(f"precision must be one of {sorted(self._SUPPORTED_PRECISIONS)}")
+        if non_blocking is not None and not isinstance(non_blocking, bool):
+            raise TypeError("non_blocking must be None or a bool")
         if num_sanity_val_steps < 0:
             raise ValueError("num_sanity_val_steps must be >= 0")
         if profiler not in {None, "simple"}:
             raise ValueError("profiler must be None or 'simple'")
 
         self.model = model
+        self.device = None if device is None else torch.device(device)
+        self.move_batch_to_device = bool(move_batch_to_device)
+        self.non_blocking = non_blocking
+        if self.device is not None:
+            self.model.to(self.device)
         self.task = task
         self.default_root_dir = None if default_root_dir is None else Path(default_root_dir)
         self.run_name = None if run_name is None else str(run_name)
@@ -205,9 +216,53 @@ class Trainer:
             return buffer.device.type
         return "cpu"
 
+    def _resolved_device_type(self):
+        if self.device is not None:
+            return self.device.type
+        return self._model_device_type()
+
+    def _resolved_non_blocking(self, batch):
+        if self.non_blocking is not None:
+            return self.non_blocking
+        if not isinstance(batch, torch.Tensor):
+            return False
+        return self._resolved_device_type() == "cuda" and batch.device.type == "cpu"
+
+    def _move_batch_to_device(self, batch):
+        if isinstance(batch, torch.Tensor):
+            return batch.to(self.device, non_blocking=self._resolved_non_blocking(batch))
+        if isinstance(batch, dict):
+            return {key: self._move_batch_to_device(value) for key, value in batch.items()}
+        if isinstance(batch, list):
+            return [self._move_batch_to_device(item) for item in batch]
+        if isinstance(batch, tuple):
+            return tuple(self._move_batch_to_device(item) for item in batch)
+        if is_dataclass(batch):
+            values = {
+                field.name: self._move_batch_to_device(getattr(batch, field.name))
+                for field in fields(batch)
+            }
+            return type(batch)(**values)
+        if hasattr(batch, "to") and callable(batch.to):
+            non_blocking = self._resolved_non_blocking(batch)
+            try:
+                return batch.to(self.device, non_blocking=non_blocking)
+            except TypeError:
+                return batch.to(self.device)
+        if batch is None or isinstance(batch, (str, bytes, int, float, bool)):
+            return batch
+        raise TypeError(f"Unsupported batch type for automatic device transfer: {type(batch)!r}")
+
+    def _prepare_batch(self, batch):
+        if self.device is None:
+            return batch
+        if not self.move_batch_to_device:
+            return batch
+        return self._move_batch_to_device(batch)
+
     def _build_grad_scaler(self, grad_scaler):
         if grad_scaler is None:
-            if self.precision == "fp16-mixed" and self._model_device_type() == "cuda":
+            if self.precision == "fp16-mixed" and self._resolved_device_type() == "cuda":
                 return torch.cuda.amp.GradScaler()
             return None
         if callable(grad_scaler) and not hasattr(grad_scaler, "scale"):
@@ -516,7 +571,7 @@ class Trainer:
     def _autocast_context(self):
         if self.precision == "32":
             return nullcontext()
-        device_type = self._model_device_type()
+        device_type = self._resolved_device_type()
         if self.precision == "bf16-mixed":
             dtype = torch.bfloat16
         else:
@@ -882,11 +937,12 @@ class Trainer:
 
     def _run_standard_training_group(self, group_batches, stage, metrics):
         train_step_start_time = perf_counter()
-        group_size = len(group_batches)
+        prepared_batches = [self._prepare_batch(batch) for batch in group_batches]
+        group_size = len(prepared_batches)
         total_loss = 0.0
         total_items = 0
         step_metrics = self._metrics()
-        for batch in group_batches:
+        for batch in prepared_batches:
             predictions, loss = self._forward_training_loss(batch, stage=stage)
             batch_loss, batch_items = self._record_batch_summary(
                 metrics,
@@ -921,11 +977,12 @@ class Trainer:
 
     def _run_sharpness_aware_training_group(self, group_batches, stage, metrics):
         train_step_start_time = perf_counter()
-        group_size = len(group_batches)
+        prepared_batches = [self._prepare_batch(batch) for batch in group_batches]
+        group_size = len(prepared_batches)
         total_loss = 0.0
         total_items = 0
         step_metrics = self._metrics()
-        for batch in group_batches:
+        for batch in prepared_batches:
             predictions, loss = self._forward_training_loss(batch, stage=stage)
             batch_loss, batch_items = self._record_batch_summary(
                 metrics,
@@ -940,7 +997,7 @@ class Trainer:
             self._backward_loss(loss / group_size)
         optimizer_step_start_time = perf_counter()
         self.optimizer.first_step(zero_grad=True)
-        for batch in group_batches:
+        for batch in prepared_batches:
             _, loss = self._forward_training_loss(batch, stage=stage)
             self._backward_loss(loss / group_size)
         self._run_after_second_backward()
@@ -1134,6 +1191,7 @@ class Trainer:
                 else:
                     for batch_index, batch in enumerate(batches):
                         self._active_batch_idx = batch_index
+                        batch = self._prepare_batch(batch)
                         predictions, loss = self._forward_loss(batch, stage=stage)
                         batch_loss, batch_items = self._record_batch_summary(
                             metrics,
