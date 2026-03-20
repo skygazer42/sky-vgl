@@ -47,3 +47,29 @@ class GraphView:
     @property
     def edata(self):
         return self.edges[self._default_edge_type()].data
+
+    def to(self, device=None, dtype=None, non_blocking: bool = False):
+        return GraphView(
+            base=self.base,
+            schema=self.schema,
+            nodes={
+                node_type: store.to(
+                    device=device, dtype=dtype, non_blocking=non_blocking
+                )
+                for node_type, store in self.nodes.items()
+            },
+            edges={
+                edge_type: store.to(
+                    device=device, dtype=dtype, non_blocking=non_blocking
+                )
+                for edge_type, store in self.edges.items()
+            },
+        )
+
+    def pin_memory(self):
+        return GraphView(
+            base=self.base,
+            schema=self.schema,
+            nodes={node_type: store.pin_memory() for node_type, store in self.nodes.items()},
+            edges={edge_type: store.pin_memory() for edge_type, store in self.edges.items()},
+        )

@@ -129,6 +129,30 @@ class Graph:
             edges[edge_type] = EdgeStore(edge_type, edge_data)
         return GraphView(base=self, nodes=self.nodes, edges=edges, schema=self.schema)
 
+    def to(self, device=None, dtype=None, non_blocking: bool = False):
+        return Graph(
+            schema=self.schema,
+            nodes={
+                node_type: store.to(
+                    device=device, dtype=dtype, non_blocking=non_blocking
+                )
+                for node_type, store in self.nodes.items()
+            },
+            edges={
+                edge_type: store.to(
+                    device=device, dtype=dtype, non_blocking=non_blocking
+                )
+                for edge_type, store in self.edges.items()
+            },
+        )
+
+    def pin_memory(self):
+        return Graph(
+            schema=self.schema,
+            nodes={node_type: store.pin_memory() for node_type, store in self.nodes.items()},
+            edges={edge_type: store.pin_memory() for edge_type, store in self.edges.items()},
+        )
+
     @property
     def x(self):
         return self.nodes["node"].x
