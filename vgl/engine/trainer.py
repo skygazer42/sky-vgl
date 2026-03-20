@@ -14,6 +14,7 @@ from vgl.engine.checkpoints import save_checkpoint as save_trainer_checkpoint
 from vgl.engine.history import TrainingHistory
 from vgl.engine.logging import ConsoleLogger
 from vgl.engine.monitoring import extract_monitor_value, is_improvement, resolve_monitor
+from vgl.graph import Graph, GraphBatch, GraphView, LinkPredictionBatch, NodeBatch, TemporalEventBatch
 from vgl.metrics import build_metric
 import torch
 from torch.optim.lr_scheduler import ReduceLROnPlateau
@@ -24,6 +25,14 @@ class Trainer:
     CHECKPOINT_FORMAT_VERSION = CHECKPOINT_FORMAT_VERSION
     _SUPPORTED_PRECISIONS = {"32", "bf16-mixed", "fp16-mixed"}
     _SUPPORTED_SCHEDULER_INTERVALS = {"epoch", "step"}
+    _SUPPORTED_VGL_TRANSFER_TYPES = (
+        Graph,
+        GraphView,
+        GraphBatch,
+        NodeBatch,
+        LinkPredictionBatch,
+        TemporalEventBatch,
+    )
 
     def __init__(
         self,
@@ -237,21 +246,45 @@ class Trainer:
             return [self._move_batch_to_device(item) for item in batch]
         if isinstance(batch, tuple):
             return tuple(self._move_batch_to_device(item) for item in batch)
-        if is_dataclass(batch):
-            values = {
-                field.name: self._move_batch_to_device(getattr(batch, field.name))
-                for field in fields(batch)
-            }
-            return type(batch)(**values)
+        if isinstance(batch, self._SUPPORTED_VGL_TRANSFER_TYPES):
+            return self._move_vgl_batch_to_device(batch)
+        if batch is None or isinstance(batch, (str, bytes, int, float, bool)):
+            return batch
+        raise TypeError(f"Unsupported batch type for automatic device transfer: {type(batch)!r}")
+
+    def _move_vgl_batch_to_device(self, batch):
         if hasattr(batch, "to") and callable(batch.to):
             non_blocking = self._resolved_non_blocking(batch)
             try:
                 return batch.to(self.device, non_blocking=non_blocking)
             except TypeError:
                 return batch.to(self.device)
-        if batch is None or isinstance(batch, (str, bytes, int, float, bool)):
-            return batch
-        raise TypeError(f"Unsupported batch type for automatic device transfer: {type(batch)!r}")
+        if is_dataclass(batch):
+            values = {
+                field.name: self._move_vgl_value_to_device(getattr(batch, field.name))
+                for field in fields(batch)
+            }
+            return type(batch)(**values)
+        raise TypeError(f"VGL batch type does not support device transfer: {type(batch)!r}")
+
+    def _move_vgl_value_to_device(self, value):
+        if isinstance(value, torch.Tensor):
+            return value.to(self.device, non_blocking=self._resolved_non_blocking(value))
+        if isinstance(value, dict):
+            return {key: self._move_vgl_value_to_device(item) for key, item in value.items()}
+        if isinstance(value, list):
+            return [self._move_vgl_value_to_device(item) for item in value]
+        if isinstance(value, tuple):
+            return tuple(self._move_vgl_value_to_device(item) for item in value)
+        if isinstance(value, self._SUPPORTED_VGL_TRANSFER_TYPES):
+            return self._move_vgl_batch_to_device(value)
+        if is_dataclass(value):
+            values = {
+                field.name: self._move_vgl_value_to_device(getattr(value, field.name))
+                for field in fields(value)
+            }
+            return type(value)(**values)
+        return value
 
     def _prepare_batch(self, batch):
         if self.device is None:

@@ -15,10 +15,12 @@ class DictBatchModel(nn.Module):
         self.weight = nn.Parameter(torch.tensor([0.0]))
         self.last_target_device_type = None
         self.last_aux_device_type = None
+        self.saw_auto_move_marker = False
 
     def forward(self, batch):
         self.last_target_device_type = batch["target"].device.type
         self.last_aux_device_type = batch["nested"][0].device.type
+        self.saw_auto_move_marker = bool(batch.get("auto_moved_before_forward", False))
         return self.weight.repeat(batch["target"].size(0))
 
 
@@ -39,11 +41,14 @@ class NodeBatchModel(nn.Module):
         self.seed_index_device_type = None
         self.node_feature_device_type = None
         self.edge_index_device_type = None
+        self.saw_auto_move_marker = False
 
     def forward(self, batch):
         self.seed_index_device_type = batch.seed_index.device.type
         self.node_feature_device_type = batch.graph.x.device.type
         self.edge_index_device_type = batch.graph.edge_index.device.type
+        metadata = batch.metadata[0] if batch.metadata else {}
+        self.saw_auto_move_marker = bool(metadata.get("auto_moved_before_forward", False))
         return self.weight.repeat(batch.seed_index.size(0))
 
 
@@ -89,6 +94,10 @@ class UnsupportedBatch:
     def __init__(self):
         self.target = torch.tensor([1.0], dtype=torch.float32)
 
+    def to(self, *args, **kwargs):
+        del args, kwargs
+        return self
+
 
 def _node_batch():
     graph = Graph.homo(
@@ -105,7 +114,7 @@ def _node_batch():
     return NodeBatch.from_samples([sample])
 
 
-def test_trainer_device_moves_model_and_standard_container_batches():
+def test_trainer_device_moves_model_and_standard_container_batches(monkeypatch):
     model = DictBatchModel()
     trainer = Trainer(
         model=model,
@@ -115,6 +124,15 @@ def test_trainer_device_moves_model_and_standard_container_batches():
         max_epochs=1,
         device="cpu",
     )
+    original_move = trainer._move_batch_to_device
+
+    def tracked_move(batch):
+        moved = original_move(batch)
+        if isinstance(moved, dict):
+            moved["auto_moved_before_forward"] = True
+        return moved
+
+    monkeypatch.setattr(trainer, "_move_batch_to_device", tracked_move)
 
     trainer.fit(
         [
@@ -128,9 +146,10 @@ def test_trainer_device_moves_model_and_standard_container_batches():
     assert next(model.parameters()).device.type == "cpu"
     assert model.last_target_device_type == "cpu"
     assert model.last_aux_device_type == "cpu"
+    assert model.saw_auto_move_marker is True
 
 
-def test_trainer_device_moves_node_batch_tensors_before_forward():
+def test_trainer_device_moves_node_batch_tensors_before_forward(monkeypatch):
     model = NodeBatchModel()
     trainer = Trainer(
         model=model,
@@ -140,12 +159,22 @@ def test_trainer_device_moves_node_batch_tensors_before_forward():
         max_epochs=1,
         device="cpu",
     )
+    original_move = trainer._move_batch_to_device
+
+    def tracked_move(batch):
+        moved = original_move(batch)
+        if isinstance(moved, NodeBatch):
+            moved.metadata = [{"auto_moved_before_forward": True}]
+        return moved
+
+    monkeypatch.setattr(trainer, "_move_batch_to_device", tracked_move)
 
     trainer.fit([_node_batch()])
 
     assert model.seed_index_device_type == "cpu"
     assert model.node_feature_device_type == "cpu"
     assert model.edge_index_device_type == "cpu"
+    assert model.saw_auto_move_marker is True
 
 
 def test_trainer_can_skip_batch_auto_movement_while_moving_model():
