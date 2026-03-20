@@ -101,6 +101,47 @@ def test_trainer_enters_autocast_for_bf16_precision(monkeypatch):
     assert calls == [("cpu", torch.bfloat16, True)]
 
 
+def test_trainer_enters_autocast_for_bf16_precision_with_explicit_cpu_device(monkeypatch):
+    calls = []
+
+    class DictBatchModel(nn.Module):
+        def __init__(self):
+            super().__init__()
+            self.weight = nn.Parameter(torch.tensor([0.0]))
+
+        def forward(self, batch):
+            return self.weight.repeat(batch["target"].size(0))
+
+    class DictBatchTask(Task):
+        def loss(self, batch, predictions, stage):
+            del stage
+            return ((predictions - batch["target"]) ** 2).mean()
+
+        def targets(self, batch, stage):
+            del stage
+            return batch["target"]
+
+    @contextmanager
+    def fake_autocast(device_type, dtype=None, enabled=True):
+        calls.append((device_type, dtype, enabled))
+        yield
+
+    monkeypatch.setattr(torch, "autocast", fake_autocast)
+    trainer = Trainer(
+        model=DictBatchModel(),
+        task=DictBatchTask(),
+        optimizer=torch.optim.SGD,
+        lr=1.0,
+        max_epochs=1,
+        precision="bf16-mixed",
+        device="cpu",
+    )
+
+    trainer.fit([{"target": torch.tensor([1.0], dtype=torch.float32)}])
+
+    assert calls == [("cpu", torch.bfloat16, True)]
+
+
 def test_trainer_uses_grad_scaler_when_configured(monkeypatch):
     @contextmanager
     def fake_autocast(device_type, dtype=None, enabled=True):
