@@ -6,6 +6,12 @@ from vgl.dataloading.plan import PlanStage, SamplingPlan
 StageHandler = Callable[[PlanStage, "MaterializationContext"], "MaterializationContext"]
 
 
+def _resolve_feature_store(feature_store, graph):
+    if feature_store is not None:
+        return feature_store
+    return getattr(graph, "feature_store", None)
+
+
 @dataclass(slots=True)
 class MaterializationContext:
     request: Any
@@ -42,7 +48,7 @@ class PlanExecutor:
             state=dict(state or {}),
             metadata=dict(plan.metadata),
             graph=graph,
-            feature_store=feature_store,
+            feature_store=_resolve_feature_store(feature_store, graph),
         )
         for stage in plan.stages:
             try:

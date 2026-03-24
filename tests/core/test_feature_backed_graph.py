@@ -126,3 +126,18 @@ def test_graph_from_storage_fetches_features_lazily_and_caches_them():
     assert torch.equal(graph.y, torch.tensor([0, 1, 0]))
     assert len(y_store.fetch_calls) == 1
     assert torch.equal(y_store.fetch_calls[0], torch.tensor([0, 1, 2]))
+
+
+def test_graph_from_storage_retains_feature_store_context():
+    schema = GraphSchema(
+        node_types=("node",),
+        edge_types=(HOMO_EDGE,),
+        node_features={"node": ("x",)},
+        edge_features={HOMO_EDGE: ("edge_index",)},
+    )
+    feature_store = FeatureStore({("node", "node", "x"): InMemoryTensorStore(torch.tensor([[1.0], [2.0]]))})
+    graph_store = InMemoryGraphStore({HOMO_EDGE: torch.tensor([[0], [1]])}, num_nodes={"node": 2})
+
+    graph = Graph.from_storage(schema=schema, feature_store=feature_store, graph_store=graph_store)
+
+    assert graph.feature_store is feature_store

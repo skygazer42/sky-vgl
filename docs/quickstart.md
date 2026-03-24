@@ -29,7 +29,7 @@ Legacy `vgl.data` and `vgl.train` paths still work, but new code should prefer t
 For advanced systems work, the new foundation layers sit underneath the same surface API:
 
 - `vgl.sparse` for cached COO/CSR/CSC adjacency layouts, transpose/reduction helpers, and sparse operators
-- `vgl.storage` for feature / graph stores, mmap-backed feature tensors, and `Graph.from_storage(...)`
+- `vgl.storage` for feature / graph stores, mmap-backed feature tensors, and `Graph.from_storage(...)` with retained feature-source context
 - `vgl.ops` for reusable graph transforms, homogeneous/heterogeneous relation-local subgraph extraction, and compaction
 - `vgl.data` for dataset manifests, cache helpers, built-in datasets, and manifest-backed homo/hetero/temporal on-disk datasets with lazy per-item payloads and split views
 - `vgl.distributed` for partition metadata, local shard loading, typed node routing, relation-scoped edge routing, edge feature fetches, partition graph queries, sampling coordination contracts, and routed plan feature sources across homogeneous, temporal homogeneous, single-node-type multi-relation, and multi-node-type heterogeneous graphs
@@ -259,9 +259,12 @@ graph_store = InMemoryGraphStore(
 graph = Graph.from_storage(schema=schema, feature_store=feature_store, graph_store=graph_store)
 
 # edge structure is ready immediately; x is resolved from the feature store on first access
+# graph.feature_store retains the originating source for later plan execution
 node_features = graph.x
 adjacency = graph.adjacency(layout="coo")
 ```
+
+When a later `SamplingPlan` includes feature-fetch stages, `PlanExecutor.execute(..., graph=graph)` and `Loader(..., sampler=...)` will reuse `graph.feature_store` automatically unless you pass an explicit `feature_store=` override.
 
 ### On-disk Datasets
 
@@ -305,6 +308,6 @@ edge_weights = coordinator.fetch_edge_features(
 partition_adjacency = coordinator.fetch_partition_adjacency(0, edge_type=("node", "follows", "node"), layout="csr")
 ```
 
-Plan-backed feature fetch stages can also use the same routed source directly through `PlanExecutor.execute(..., feature_store=coordinator)` or `Loader(..., feature_store=coordinator)` when you want executor-driven feature access instead of direct store access.
+Plan-backed feature fetch stages can also use the same routed source directly through `PlanExecutor.execute(..., feature_store=coordinator)` or `Loader(..., feature_store=coordinator)` when you want executor-driven feature access instead of direct store access. Those explicit arguments remain the highest-priority override; otherwise, storage-backed graphs can supply the same context through their retained `graph.feature_store`.
 
 These advanced paths are still designed to terminate in the same public training contracts: `Graph`, batch objects from `Loader`, and `Trainer.fit/evaluate/test`.

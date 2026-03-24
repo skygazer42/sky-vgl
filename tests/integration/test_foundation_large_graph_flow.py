@@ -4,6 +4,7 @@ import torch
 from torch import nn
 
 from vgl.dataloading import DataLoader, ListDataset, NodeNeighborSampler
+from vgl.dataloading.plan import PlanStage
 from vgl.engine import Trainer
 from vgl.graph import Graph, GraphSchema
 from vgl.storage import FeatureStore, InMemoryGraphStore, InMemoryTensorStore, MmapTensorStore
@@ -95,3 +96,29 @@ def test_mmap_feature_backed_graph_sampling_runs_through_public_loader_and_train
     history = trainer.fit(loader)
 
     assert history["completed_epochs"] == 1
+
+
+
+class FeatureFetchingNodeSampler(NodeNeighborSampler):
+    def build_plan(self, item):
+        return super().build_plan(item).append(
+            PlanStage(
+                "fetch_node_features",
+                params={
+                    "node_type": "node",
+                    "feature_names": ("x",),
+                    "index_key": "node_ids",
+                    "output_key": "node_features",
+                },
+            )
+        )
+
+
+def test_storage_backed_graph_plan_feature_fetch_runs_without_manual_feature_store_wiring():
+    graph = _storage_backed_graph()
+    dataset = ListDataset([(graph, {"seed": 0}), (graph, {"seed": 3})])
+    loader = DataLoader(dataset=dataset, sampler=FeatureFetchingNodeSampler(num_neighbors=[-1]), batch_size=2)
+
+    batch = next(iter(loader))
+
+    assert batch.graph.x.size(0) >= 1

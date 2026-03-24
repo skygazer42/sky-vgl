@@ -6,7 +6,7 @@
 
 Homogeneous graphs can carry edge-level tensors through `Graph.homo(edge_data={...})`. These tensors are exposed through `graph.edata` and are what edge-aware operators consume.
 
-`Graph` also has a storage-backed construction path. `Graph.from_storage(schema=..., feature_store=..., graph_store=...)` builds one graph view from feature / graph stores without changing the public graph contract. Structural data such as `edge_index` is available immediately, while node and edge features resolve lazily on first access and then stay cached on the store. Feature tensors can live in lightweight in-memory stores or in `MmapTensorStore` files backed by raw tensor buffers plus metadata sidecars for large feature tables.
+`Graph` also has a storage-backed construction path. `Graph.from_storage(schema=..., feature_store=..., graph_store=...)` builds one graph view from feature / graph stores without changing the public graph contract. Structural data such as `edge_index` is available immediately, while node and edge features resolve lazily on first access and then stay cached on the store. Feature tensors can live in lightweight in-memory stores or in `MmapTensorStore` files backed by raw tensor buffers plus metadata sidecars for large feature tables. Storage-backed graphs also retain the originating `feature_store` on the graph object, so later plan-backed execution can reuse that source when no explicit override is supplied.
 
 ## SparseTensor and Adjacency Caches
 
@@ -18,7 +18,7 @@ Homogeneous graphs can carry edge-level tensors through `Graph.homo(edge_data={.
 
 ## GraphView
 
-`GraphView` is a lightweight projection over an existing graph, used for operations such as `snapshot()` and `window()`.
+`GraphView` is a lightweight projection over an existing graph, used for operations such as `snapshot()` and `window()`. Views continue to reference graph-level runtime context from the base graph, including retained storage-backed feature sources.
 
 ## GraphBatch
 
@@ -66,7 +66,7 @@ This is what makes many-small-graph and sampled-subgraph inputs converge on the 
 
 ## Sampling Plans and Materialization
 
-Neighbor sampling now routes through explicit `SamplingPlan` stages inside `vgl.dataloading`. The public samplers still look like `NodeNeighborSampler`, `LinkNeighborSampler`, and `TemporalNeighborSampler`, but internally they can build plans, execute expansion / feature-fetch stages, and materialize the result back into the same batch contracts. Feature-fetch stages can resolve against a direct `FeatureStore` via `.fetch(...)` or a coordinator-backed routed source such as `LocalSamplingCoordinator` via `fetch_node_features(...)` / `fetch_edge_features(...)`, so the executor stays agnostic to whether tensors come from one local store or a partitioned runtime.
+Neighbor sampling now routes through explicit `SamplingPlan` stages inside `vgl.dataloading`. The public samplers still look like `NodeNeighborSampler`, `LinkNeighborSampler`, and `TemporalNeighborSampler`, but internally they can build plans, execute expansion / feature-fetch stages, and materialize the result back into the same batch contracts. Feature-fetch stages can resolve against an explicit feature source passed into `Loader` or `PlanExecutor`, fall back to a storage-backed graph's retained `feature_store`, or use a coordinator-backed routed source such as `LocalSamplingCoordinator` via `fetch_node_features(...)` / `fetch_edge_features(...)`, so the executor stays agnostic to whether tensors come from one local store or a partitioned runtime.
 
 This keeps the user-facing API stable while opening a path toward larger-graph runtimes, feature stores, and shard-aware coordination.
 

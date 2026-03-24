@@ -8,6 +8,8 @@ from vgl.data.sampler import FullGraphSampler
 from vgl.dataloading.executor import MaterializationContext
 from vgl.dataloading.plan import SamplingPlan
 from vgl.dataloading.requests import GraphSeedRequest
+from vgl.graph import GraphSchema
+from vgl.storage import FeatureStore, InMemoryGraphStore, InMemoryTensorStore
 
 
 class SequenceDataset:
@@ -197,3 +199,37 @@ def test_loader_forwards_feature_store_to_plan_executor():
 
     assert batch.num_graphs == 1
     assert executor.feature_sources == [feature_source]
+
+
+
+def _storage_backed_graph():
+    schema = GraphSchema(
+        node_types=("node",),
+        edge_types=(("node", "to", "node"),),
+        node_features={"node": ("x",)},
+        edge_features={("node", "to", "node"): ("edge_index",)},
+    )
+    feature_store = FeatureStore({("node", "node", "x"): InMemoryTensorStore(torch.randn(2, 4))})
+    graph_store = InMemoryGraphStore(
+        edges={("node", "to", "node"): torch.tensor([[0], [1]])},
+        num_nodes={"node": 2},
+    )
+    return Graph.from_storage(schema=schema, feature_store=feature_store, graph_store=graph_store)
+
+
+def test_loader_forwards_storage_context_feature_store_to_plan_executor():
+    graph = _storage_backed_graph()
+    executor = RecordingPlanExecutor()
+    loader = Loader(
+        dataset=ListDataset([graph]),
+        sampler=PlanBackedGraphSampler(),
+        batch_size=1,
+        label_source="metadata",
+        label_key="label",
+        executor=executor,
+    )
+
+    batch = next(iter(loader))
+
+    assert batch.num_graphs == 1
+    assert executor.feature_sources == [graph.feature_store]

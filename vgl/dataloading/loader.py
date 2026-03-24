@@ -8,9 +8,16 @@ from vgl.dataloading.materialize import materialize_batch, materialize_context
 from vgl.dataloading.plan import SamplingPlan
 
 
+def _resolve_feature_store(feature_store, graph):
+    if feature_store is not None:
+        return feature_store
+    return getattr(graph, "feature_store", None)
+
+
 def _resolve_sampled(sampled, executor, feature_store=None):
     if isinstance(sampled, SamplingPlan):
-        context = executor.execute(sampled, graph=sampled.graph, feature_store=feature_store)
+        resolved_feature_store = _resolve_feature_store(feature_store, sampled.graph)
+        context = executor.execute(sampled, graph=sampled.graph, feature_store=resolved_feature_store)
         return materialize_context(context)
     if isinstance(sampled, (list, tuple)):
         resolved = []

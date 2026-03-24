@@ -28,6 +28,11 @@ class GraphView:
             return nodes["node"].data[name]
         raise AttributeError(name)
 
+
+    @property
+    def feature_store(self):
+        return getattr(self.base, "feature_store", None)
+
     @property
     def x(self):
         return self.nodes["node"].x
