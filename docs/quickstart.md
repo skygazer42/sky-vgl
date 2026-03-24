@@ -32,7 +32,7 @@ For advanced systems work, the new foundation layers sit underneath the same sur
 - `vgl.storage` for feature / graph stores, mmap-backed feature tensors, and `Graph.from_storage(...)`
 - `vgl.ops` for reusable graph transforms, homogeneous/heterogeneous relation-local subgraph extraction, and compaction
 - `vgl.data` for dataset manifests, cache helpers, built-in datasets, and manifest-backed homo/hetero/temporal on-disk datasets with lazy per-item payloads and split views
-- `vgl.distributed` for partition metadata, local shard loading, typed node routing, relation-scoped edge routing, edge feature fetches, partition graph queries, and sampling coordination contracts across homogeneous, temporal homogeneous, single-node-type multi-relation, and multi-node-type heterogeneous graphs
+- `vgl.distributed` for partition metadata, local shard loading, typed node routing, relation-scoped edge routing, edge feature fetches, partition graph queries, sampling coordination contracts, and routed plan feature sources across homogeneous, temporal homogeneous, single-node-type multi-relation, and multi-node-type heterogeneous graphs
 
 The smallest workflow is:
 
@@ -304,5 +304,7 @@ edge_weights = coordinator.fetch_edge_features(
 ).values
 partition_adjacency = coordinator.fetch_partition_adjacency(0, edge_type=("node", "follows", "node"), layout="csr")
 ```
+
+Plan-backed feature fetch stages can also use the same routed source directly through `PlanExecutor.execute(..., feature_store=coordinator)` or `Loader(..., feature_store=coordinator)` when you want executor-driven feature access instead of direct store access.
 
 These advanced paths are still designed to terminate in the same public training contracts: `Graph`, batch objects from `Loader`, and `Trainer.fit/evaluate/test`.

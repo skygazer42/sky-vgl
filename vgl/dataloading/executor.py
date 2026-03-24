@@ -101,14 +101,29 @@ class PlanExecutor:
         entity_kind: str,
         type_key: str,
     ) -> MaterializationContext:
-        if context.feature_store is None:
+        source = context.feature_store
+        if source is None:
             raise ValueError("feature_store is required for feature fetch stages")
         index = context.state[stage.params["index_key"]]
         output_key = stage.params["output_key"]
         type_name = stage.params[type_key]
+
+        direct_fetch = getattr(source, "fetch", None)
+        node_fetch = getattr(source, "fetch_node_features", None)
+        edge_fetch = getattr(source, "fetch_edge_features", None)
+
         fetched = {}
         for feature_name in stage.params["feature_names"]:
             key = (entity_kind, type_name, feature_name)
-            fetched[feature_name] = context.feature_store.fetch(key, index)
+            if callable(direct_fetch):
+                fetched[feature_name] = direct_fetch(key, index)
+            elif entity_kind == "node" and callable(node_fetch):
+                fetched[feature_name] = node_fetch(key, index)
+            elif entity_kind == "edge" and callable(edge_fetch):
+                fetched[feature_name] = edge_fetch(key, index)
+            else:
+                raise TypeError(
+                    f"feature_store does not support {entity_kind} feature fetch for key {key!r}"
+                )
         context.state[output_key] = fetched
         return context

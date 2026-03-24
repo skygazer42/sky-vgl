@@ -8,14 +8,14 @@ from vgl.dataloading.materialize import materialize_batch, materialize_context
 from vgl.dataloading.plan import SamplingPlan
 
 
-def _resolve_sampled(sampled, executor):
+def _resolve_sampled(sampled, executor, feature_store=None):
     if isinstance(sampled, SamplingPlan):
-        context = executor.execute(sampled, graph=sampled.graph)
+        context = executor.execute(sampled, graph=sampled.graph, feature_store=feature_store)
         return materialize_context(context)
     if isinstance(sampled, (list, tuple)):
         resolved = []
         for value in sampled:
-            current = _resolve_sampled(value, executor)
+            current = _resolve_sampled(value, executor, feature_store)
             if isinstance(current, list):
                 resolved.extend(current)
             elif isinstance(current, tuple):
@@ -26,26 +26,27 @@ def _resolve_sampled(sampled, executor):
     return sampled
 
 
-def _sample_item(sampler, item, executor):
+def _sample_item(sampler, item, executor, feature_store=None):
     build_plan = getattr(sampler, "build_plan", None)
     if callable(build_plan):
         sampled = build_plan(item)
     else:
         sampled = sampler.sample(item)
-    return _resolve_sampled(sampled, executor)
+    return _resolve_sampled(sampled, executor, feature_store)
 
 
 class _SampledDataset:
-    def __init__(self, dataset, sampler, executor):
+    def __init__(self, dataset, sampler, executor, feature_store=None):
         self.dataset = dataset
         self.sampler = sampler
         self.executor = executor
+        self.feature_store = feature_store
 
     def __len__(self):
         return len(self.dataset)
 
     def __getitem__(self, index):
-        return _sample_item(self.sampler, self.dataset[index], self.executor)
+        return _sample_item(self.sampler, self.dataset[index], self.executor, self.feature_store)
 
 
 def _identity_collate(batch):
@@ -61,6 +62,7 @@ class Loader:
         label_source=None,
         label_key=None,
         executor=None,
+        feature_store=None,
         prefetch=0,
         num_workers=0,
         pin_memory=False,
@@ -73,6 +75,7 @@ class Loader:
         self.label_source = label_source
         self.label_key = label_key
         self.executor = PlanExecutor() if executor is None else executor
+        self.feature_store = feature_store
         self.prefetch = int(prefetch)
         self.num_workers = num_workers
         self.pin_memory = pin_memory
@@ -101,7 +104,7 @@ class Loader:
             raise TypeError("Loader dataset must be iterable or implement __len__ and __getitem__")
 
     def _sample_item(self, item):
-        return _sample_item(self.sampler, item, self.executor)
+        return _sample_item(self.sampler, item, self.executor, self.feature_store)
 
     def _build_batch(self, items):
         return materialize_batch(items, label_source=self.label_source, label_key=self.label_key)
@@ -148,7 +151,7 @@ class Loader:
 
     def _make_worker_loader(self):
         return torch.utils.data.DataLoader(
-            _SampledDataset(self.dataset, self.sampler, self.executor),
+            _SampledDataset(self.dataset, self.sampler, self.executor, self.feature_store),
             batch_size=self.batch_size,
             shuffle=False,
             num_workers=self.num_workers,

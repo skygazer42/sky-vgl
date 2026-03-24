@@ -66,7 +66,7 @@ This is what makes many-small-graph and sampled-subgraph inputs converge on the 
 
 ## Sampling Plans and Materialization
 
-Neighbor sampling now routes through explicit `SamplingPlan` stages inside `vgl.dataloading`. The public samplers still look like `NodeNeighborSampler`, `LinkNeighborSampler`, and `TemporalNeighborSampler`, but internally they can build plans, execute expansion / feature-fetch stages, and materialize the result back into the same batch contracts.
+Neighbor sampling now routes through explicit `SamplingPlan` stages inside `vgl.dataloading`. The public samplers still look like `NodeNeighborSampler`, `LinkNeighborSampler`, and `TemporalNeighborSampler`, but internally they can build plans, execute expansion / feature-fetch stages, and materialize the result back into the same batch contracts. Feature-fetch stages can resolve against a direct `FeatureStore` via `.fetch(...)` or a coordinator-backed routed source such as `LocalSamplingCoordinator` via `fetch_node_features(...)` / `fetch_edge_features(...)`, so the executor stays agnostic to whether tensors come from one local store or a partitioned runtime.
 
 This keeps the user-facing API stable while opening a path toward larger-graph runtimes, feature stores, and shard-aware coordination.
 

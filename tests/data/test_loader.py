@@ -5,6 +5,9 @@ from vgl import Graph
 from vgl.data.dataset import ListDataset
 from vgl.data.loader import Loader
 from vgl.data.sampler import FullGraphSampler
+from vgl.dataloading.executor import MaterializationContext
+from vgl.dataloading.plan import SamplingPlan
+from vgl.dataloading.requests import GraphSeedRequest
 
 
 class SequenceDataset:
@@ -153,3 +156,44 @@ def test_loader_can_pin_built_batch_tensors():
     batch = next(iter(loader))
 
     assert batch.graphs[0].x.is_pinned()
+
+
+class PlanBackedGraphSampler:
+    def build_plan(self, item):
+        return SamplingPlan(
+            request=GraphSeedRequest(graph_ids=torch.tensor([0]), metadata={"label": 1}),
+            graph=item,
+        )
+
+
+class RecordingPlanExecutor:
+    def __init__(self):
+        self.feature_sources = []
+
+    def execute(self, plan, *, graph=None, feature_store=None, state=None):
+        self.feature_sources.append(feature_store)
+        return MaterializationContext(request=plan.request, graph=graph, feature_store=feature_store)
+
+
+def test_loader_forwards_feature_store_to_plan_executor():
+    graph = Graph.homo(
+        edge_index=torch.tensor([[0], [1]]),
+        x=torch.randn(2, 4),
+        y=torch.tensor([0, 1]),
+    )
+    executor = RecordingPlanExecutor()
+    feature_source = object()
+    loader = Loader(
+        dataset=ListDataset([graph]),
+        sampler=PlanBackedGraphSampler(),
+        batch_size=1,
+        label_source="metadata",
+        label_key="label",
+        executor=executor,
+        feature_store=feature_source,
+    )
+
+    batch = next(iter(loader))
+
+    assert batch.num_graphs == 1
+    assert executor.feature_sources == [feature_source]
