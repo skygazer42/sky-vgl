@@ -1,6 +1,8 @@
 import torch
 
 from vgl import Graph
+from vgl.data.dataset import ListDataset
+from vgl.data.loader import Loader
 from vgl.data.sample import TemporalEventRecord
 from vgl.data.sampler import TemporalNeighborSampler
 
@@ -46,3 +48,24 @@ def test_temporal_neighbor_sampler_can_limit_history_by_max_events():
     assert torch.equal(record.graph.n_id, torch.tensor([0, 2]))
     assert torch.equal(record.graph.edges[edge_type].edge_index, torch.tensor([[1], [0]]))
     assert torch.equal(record.graph.edges[edge_type].timestamp, torch.tensor([5]))
+
+
+def test_loader_routes_temporal_neighbor_sampler_through_plan_execution():
+    graph = _graph()
+    dataset = ListDataset(
+        [
+            TemporalEventRecord(graph=graph, src_index=1, dst_index=2, timestamp=3, label=1),
+        ]
+    )
+
+    class PlanOnlyTemporalNeighborSampler(TemporalNeighborSampler):
+        def sample(self, item):
+            raise AssertionError("loader should use build_plan instead of the legacy sample path")
+
+    loader = Loader(dataset=dataset, sampler=PlanOnlyTemporalNeighborSampler(num_neighbors=[-1]), batch_size=1)
+
+    batch = next(iter(loader))
+    edge_type = ("node", "interacts", "node")
+
+    assert torch.equal(batch.timestamp, torch.tensor([3]))
+    assert torch.equal(batch.graph.edges[edge_type].timestamp, torch.tensor([1]))

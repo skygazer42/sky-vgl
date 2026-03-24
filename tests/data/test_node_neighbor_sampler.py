@@ -75,3 +75,30 @@ def test_node_neighbor_sampler_extracts_hetero_local_subgraph():
     assert torch.equal(sample.graph.nodes["paper"].data["n_id"], torch.tensor([1]))
     assert torch.equal(sample.graph.nodes["author"].data["n_id"], torch.tensor([0]))
     assert torch.equal(sample.graph.edges[("author", "writes", "paper")].edge_index, torch.tensor([[0], [0]]))
+
+
+def test_loader_routes_node_neighbor_sampler_through_plan_execution():
+    graph = Graph.homo(
+        edge_index=torch.tensor([[0, 1, 2], [1, 2, 3]]),
+        x=torch.randn(5, 4),
+        y=torch.tensor([0, 1, 0, 1, 0]),
+    )
+    dataset = ListDataset(
+        [
+            (graph, {"seed": 0, "sample_id": "n0"}),
+            (graph, {"seed": 2, "sample_id": "n2"}),
+        ]
+    )
+
+    class PlanOnlyNodeNeighborSampler(NodeNeighborSampler):
+        def sample(self, item):
+            raise AssertionError("loader should use build_plan instead of the legacy sample path")
+
+    loader = Loader(dataset=dataset, sampler=PlanOnlyNodeNeighborSampler(num_neighbors=[-1]), batch_size=2)
+
+    batch = next(iter(loader))
+
+    assert isinstance(batch, NodeBatch)
+    assert batch.graph.x.size(0) == 5
+    assert torch.equal(batch.seed_index, torch.tensor([0, 3]))
+    assert batch.metadata == [{"seed": 0, "sample_id": "n0"}, {"seed": 2, "sample_id": "n2"}]

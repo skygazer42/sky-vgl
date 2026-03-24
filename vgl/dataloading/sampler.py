@@ -1,8 +1,12 @@
 import torch
 
+from vgl.dataloading.executor import PlanExecutor
+from vgl.dataloading.materialize import materialize_context
+from vgl.dataloading.plan import PlanStage, SamplingPlan
 from vgl.dataloading.records import LinkPredictionRecord
 from vgl.dataloading.records import SampleRecord
 from vgl.dataloading.records import TemporalEventRecord
+from vgl.dataloading.requests import LinkSeedRequest, NodeSeedRequest, TemporalSeedRequest
 from vgl.graph.graph import Graph
 
 
@@ -508,8 +512,7 @@ class LinkNeighborSampler(Sampler):
             filter_ranking=bool(record.filter_ranking),
         )
 
-    def sample(self, item):
-        records, is_sequence = self._seed_records(item)
+    def _sample_from_seed_records(self, records, *, is_sequence):
         graph = records[0].graph
         if set(graph.nodes) == {"node"} and len(graph.edges) == 1:
             node_ids = self._sample_node_ids(graph, records)
@@ -522,6 +525,34 @@ class LinkNeighborSampler(Sampler):
         if is_sequence:
             return sampled
         return sampled[0]
+
+    def build_plan(self, item) -> SamplingPlan:
+        records, is_sequence = self._seed_records(item)
+        return SamplingPlan(
+            request=LinkSeedRequest(
+                src_ids=torch.tensor([int(record.src_index) for record in records], dtype=torch.long),
+                dst_ids=torch.tensor([int(record.dst_index) for record in records], dtype=torch.long),
+                edge_type=_resolve_link_edge_type(records[0]) if len(records) == 1 else None,
+                labels=torch.tensor([int(record.label) for record in records], dtype=torch.long),
+                metadata=dict(records[0].metadata),
+            ),
+            stages=(
+                PlanStage(
+                    "sample_link_neighbors",
+                    params={
+                        "sampler": self,
+                        "records": tuple(records),
+                        "is_sequence": is_sequence,
+                    },
+                ),
+            ),
+            graph=records[0].graph,
+        )
+
+    def sample(self, item):
+        plan = self.build_plan(item)
+        context = PlanExecutor().execute(plan, graph=plan.graph)
+        return materialize_context(context)
 
 
 class TemporalNeighborSampler(LinkNeighborSampler):
@@ -648,7 +679,7 @@ class TemporalNeighborSampler(LinkNeighborSampler):
             sample_id=record.sample_id,
         )
 
-    def sample(self, item):
+    def _sample_event(self, item):
         if not isinstance(item, TemporalEventRecord):
             raise TypeError("TemporalNeighborSampler requires TemporalEventRecord items")
         edge_type, history_edge_ids = self._history_edge_ids(item.graph, int(item.timestamp))
@@ -656,6 +687,34 @@ class TemporalNeighborSampler(LinkNeighborSampler):
         node_ids = self._sample_node_ids(history_edge_index, item.src_index, item.dst_index)
         subgraph, node_mapping = self._subgraph(item.graph, edge_type, node_ids, history_edge_ids)
         return self._local_record(item, subgraph, node_mapping)
+
+    def build_plan(self, item) -> SamplingPlan:
+        if not isinstance(item, TemporalEventRecord):
+            raise TypeError("TemporalNeighborSampler requires TemporalEventRecord items")
+        plan_metadata = {}
+        if item.sample_id is not None:
+            plan_metadata["sample_id"] = item.sample_id
+        return SamplingPlan(
+            request=TemporalSeedRequest(
+                src_ids=torch.tensor([int(item.src_index)], dtype=torch.long),
+                dst_ids=torch.tensor([int(item.dst_index)], dtype=torch.long),
+                timestamps=torch.tensor([int(item.timestamp)], dtype=torch.long),
+                metadata=dict(item.metadata),
+            ),
+            stages=(
+                PlanStage(
+                    "sample_temporal_neighbors",
+                    params={"sampler": self, "record": item},
+                ),
+            ),
+            metadata=plan_metadata,
+            graph=item.graph,
+        )
+
+    def sample(self, item):
+        plan = self.build_plan(item)
+        context = PlanExecutor().execute(plan, graph=plan.graph)
+        return materialize_context(context)
 
 
 class NodeNeighborSampler(LinkNeighborSampler):
@@ -696,138 +755,28 @@ class NodeNeighborSampler(LinkNeighborSampler):
             metadata.setdefault("node_type", node_type)
         return graph, metadata, sample_id, source_graph_id, seed, node_type
 
-    def _hetero_next_frontier(self, graph, frontier, visited, fanout):
-        candidates = {node_type: set() for node_type in graph.schema.node_types}
-        for edge_type, store in graph.edges.items():
-            src_type, _, dst_type = edge_type
-            src_frontier = frontier.get(src_type, set())
-            dst_frontier = frontier.get(dst_type, set())
-            if not src_frontier and not dst_frontier:
-                continue
-            edge_index = store.edge_index
-            incident_mask = torch.zeros(edge_index.size(1), dtype=torch.bool, device=edge_index.device)
-            if src_frontier:
-                src_tensor = torch.tensor(sorted(src_frontier), dtype=torch.long, device=edge_index.device)
-                incident_mask |= torch.isin(edge_index[0], src_tensor)
-            if dst_frontier:
-                dst_tensor = torch.tensor(sorted(dst_frontier), dtype=torch.long, device=edge_index.device)
-                incident_mask |= torch.isin(edge_index[1], dst_tensor)
-            if not incident_mask.any():
-                continue
-            candidates[src_type].update(
-                int(node)
-                for node in edge_index[0, incident_mask].tolist()
-                if int(node) not in visited[src_type]
-            )
-            candidates[dst_type].update(
-                int(node)
-                for node in edge_index[1, incident_mask].tolist()
-                if int(node) not in visited[dst_type]
-            )
-
-        next_frontier = {}
-        for node_type, values in candidates.items():
-            candidate_list = sorted(values)
-            if fanout != -1 and len(candidate_list) > fanout:
-                permutation = torch.randperm(len(candidate_list), generator=self._generator)[:fanout].tolist()
-                candidate_list = [candidate_list[index] for index in permutation]
-            if candidate_list:
-                next_frontier[node_type] = set(candidate_list)
-        return next_frontier
-
-    def _hetero_subgraph(self, graph, node_ids_by_type):
-        node_masks = {}
-        node_mappings = {}
-        nodes = {}
-        for node_type, store in graph.nodes.items():
-            node_ids = node_ids_by_type[node_type]
-            num_nodes = store.x.size(0)
-            node_mask = torch.zeros(num_nodes, dtype=torch.bool, device=store.x.device)
-            if node_ids.numel() > 0:
-                node_mask[node_ids] = True
-            node_mapping = torch.full((num_nodes,), -1, dtype=torch.long, device=store.x.device)
-            node_mapping[node_ids] = torch.arange(node_ids.numel(), dtype=torch.long, device=store.x.device)
-            node_masks[node_type] = node_mask
-            node_mappings[node_type] = node_mapping
-
-            node_data = {}
-            for key, value in store.data.items():
-                if isinstance(value, torch.Tensor) and value.ndim > 0 and value.size(0) == num_nodes:
-                    node_data[key] = value[node_ids]
-                else:
-                    node_data[key] = value
-            if "n_id" not in node_data:
-                node_data["n_id"] = node_ids
-            nodes[node_type] = node_data
-
-        edges = {}
-        for edge_type, store in graph.edges.items():
-            src_type, _, dst_type = edge_type
-            edge_index = store.edge_index
-            edge_mask = node_masks[src_type][edge_index[0]] & node_masks[dst_type][edge_index[1]]
-            subgraph_edge_index = torch.stack(
-                [
-                    node_mappings[src_type][edge_index[0, edge_mask]],
-                    node_mappings[dst_type][edge_index[1, edge_mask]],
-                ],
-                dim=0,
-            )
-            edge_count = int(edge_index.size(1))
-            edge_data = {"edge_index": subgraph_edge_index}
-            edge_ids = torch.arange(edge_count, dtype=torch.long, device=edge_index.device)[edge_mask]
-            for key, value in store.data.items():
-                if key == "edge_index":
-                    continue
-                if isinstance(value, torch.Tensor) and value.ndim > 0 and value.size(0) == edge_count:
-                    edge_data[key] = value[edge_mask]
-                else:
-                    edge_data[key] = value
-            if "e_id" not in edge_data:
-                edge_data["e_id"] = edge_ids
-            edges[edge_type] = edge_data
-        return Graph.hetero(nodes=nodes, edges=edges, time_attr=graph.schema.time_attr), node_mappings
+    def build_plan(self, item) -> SamplingPlan:
+        graph, metadata, sample_id, source_graph_id, seed, node_type = self._seed_item(item)
+        plan_metadata = {}
+        if sample_id is not None:
+            plan_metadata["sample_id"] = sample_id
+        if source_graph_id is not None:
+            plan_metadata["source_graph_id"] = source_graph_id
+        return SamplingPlan(
+            request=NodeSeedRequest(
+                node_ids=torch.tensor([seed], dtype=torch.long),
+                node_type=node_type,
+                metadata=metadata,
+            ),
+            stages=(PlanStage("expand_neighbors", params={"num_neighbors": tuple(self.num_neighbors)}),),
+            metadata=plan_metadata,
+            graph=graph,
+        )
 
     def sample(self, item):
-        graph, metadata, sample_id, source_graph_id, seed, node_type = self._seed_item(item)
-        if set(graph.nodes) == {"node"} and len(graph.edges) == 1:
-            visited = {seed}
-            frontier = {seed}
-            for fanout in self.num_neighbors:
-                frontier = self._next_frontier(graph, frontier, visited, fanout)
-                visited.update(frontier)
-                if not frontier:
-                    break
-            node_ids = torch.tensor(sorted(visited), dtype=torch.long, device=graph.edge_index.device)
-            subgraph, node_mapping = self._subgraph(graph, node_ids)
-            subgraph_seed = int(node_mapping[seed].item())
-        else:
-            visited = {current_type: set() for current_type in graph.schema.node_types}
-            frontier = {current_type: set() for current_type in graph.schema.node_types}
-            visited[node_type].add(seed)
-            frontier[node_type].add(seed)
-            for fanout in self.num_neighbors:
-                frontier = self._hetero_next_frontier(graph, frontier, visited, fanout)
-                for current_type, node_ids in frontier.items():
-                    visited[current_type].update(node_ids)
-                if not any(frontier.values()):
-                    break
-            node_ids_by_type = {
-                current_type: torch.tensor(
-                    sorted(visited[current_type]),
-                    dtype=torch.long,
-                    device=next(iter(graph.nodes[current_type].data.values())).device,
-                )
-                for current_type in graph.schema.node_types
-            }
-            subgraph, node_mapping = self._hetero_subgraph(graph, node_ids_by_type)
-            subgraph_seed = int(node_mapping[node_type][seed].item())
-        return SampleRecord(
-            graph=subgraph,
-            metadata=metadata,
-            sample_id=sample_id,
-            source_graph_id=source_graph_id,
-            subgraph_seed=subgraph_seed,
-        )
+        plan = self.build_plan(item)
+        context = PlanExecutor().execute(plan, graph=plan.graph)
+        return materialize_context(context)
 
 
 class NodeSeedSubgraphSampler(Sampler):

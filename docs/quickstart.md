@@ -26,6 +26,14 @@ from vgl.tasks import GraphClassificationTask, NodeClassificationTask
 
 Legacy `vgl.data` and `vgl.train` paths still work, but new code should prefer the package layout above.
 
+For advanced systems work, the new foundation layers sit underneath the same surface API:
+
+- `vgl.sparse` for cached adjacency layouts and sparse operators
+- `vgl.storage` for feature / graph stores and `Graph.from_storage(...)`
+- `vgl.ops` for reusable graph transforms and subgraph extraction
+- `vgl.data` for dataset manifests, cache helpers, built-in datasets, and on-disk datasets
+- `vgl.distributed` for partition metadata, local shard loading, and sampling coordination contracts
+
 The smallest workflow is:
 
 1. Build a `Graph`
@@ -222,3 +230,58 @@ task = TemporalEventPredictionTask(target="label")
 trainer = Trainer(model=model, task=task, optimizer=torch.optim.Adam, lr=1e-3, max_epochs=10)
 trainer.fit(loader)
 ```
+
+
+## Advanced Foundation Workflows
+
+### Storage-backed Graphs
+
+```python
+import torch
+from vgl.graph import GraphSchema, Graph
+from vgl.storage import FeatureStore, InMemoryGraphStore, InMemoryTensorStore
+
+edge_type = ("node", "to", "node")
+schema = GraphSchema(
+    node_types=("node",),
+    edge_types=(edge_type,),
+    node_features={"node": ("x",)},
+    edge_features={edge_type: ("edge_index",)},
+)
+feature_store = FeatureStore({
+    ("node", "node", "x"): InMemoryTensorStore(torch.randn(4, 16)),
+})
+graph_store = InMemoryGraphStore(
+    edges={edge_type: torch.tensor([[0, 1, 2], [1, 2, 3]])},
+    num_nodes={"node": 4},
+)
+graph = Graph.from_storage(schema=schema, feature_store=feature_store, graph_store=graph_store)
+adjacency = graph.adjacency(layout="coo")
+```
+
+### On-disk Datasets
+
+```python
+from vgl.data.catalog import DatasetManifest, DatasetSplit
+from vgl.data.ondisk import OnDiskGraphDataset
+
+manifest = DatasetManifest(
+    name="toy-graph",
+    version="1.0",
+    splits=(DatasetSplit("train", size=len(graphs)),),
+)
+OnDiskGraphDataset.write("artifacts/toy", manifest, graphs)
+dataset = OnDiskGraphDataset("artifacts/toy")
+```
+
+### Local Partition and Shard Flows
+
+```python
+from vgl.distributed import LocalGraphShard, write_partitioned_graph
+
+manifest = write_partitioned_graph(graph, "artifacts/partitions", num_partitions=2)
+shard = LocalGraphShard.from_partition_dir("artifacts/partitions", partition_id=0)
+local_graph = shard.graph
+```
+
+These advanced paths are still designed to terminate in the same public training contracts: `Graph`, batch objects from `Loader`, and `Trainer.fit/evaluate/test`.

@@ -21,6 +21,13 @@ class Graph:
             return next(iter(self.edges))
         raise AttributeError("edge_index")
 
+    def _node_count(self, node_type: str) -> int:
+        store = self.nodes[node_type]
+        for value in store.data.values():
+            if isinstance(value, torch.Tensor) and value.ndim > 0:
+                return int(value.size(0))
+        raise ValueError(f"Cannot infer node count for node type {node_type!r}")
+
     def __getattr__(self, name: str):
         try:
             nodes = object.__getattribute__(self, "nodes")
@@ -87,6 +94,27 @@ class Graph:
         return cls.hetero(nodes=nodes, edges=edges, time_attr=time_attr)
 
     @classmethod
+    def from_storage(cls, *, schema, feature_store, graph_store):
+        node_stores = {
+            node_type: NodeStore.from_feature_store(
+                node_type,
+                schema.node_features.get(node_type, ()),
+                feature_store,
+            )
+            for node_type in schema.node_types
+        }
+        edge_stores = {
+            edge_type: EdgeStore.from_storage(
+                edge_type,
+                schema.edge_features.get(edge_type, ()),
+                feature_store,
+                graph_store,
+            )
+            for edge_type in schema.edge_types
+        }
+        return cls(schema=schema, nodes=node_stores, edges=edge_stores)
+
+    @classmethod
     def from_pyg(cls, data):
         from vgl.compat.pyg import from_pyg
 
@@ -107,6 +135,67 @@ class Graph:
         from vgl.compat.dgl import to_dgl
 
         return to_dgl(self)
+
+    def adjacency(self, *, layout="coo", edge_type=None):
+        from vgl.sparse import SparseLayout, from_edge_index
+
+        if edge_type is None:
+            edge_type = self._default_edge_type()
+        if isinstance(layout, str):
+            layout = SparseLayout(layout.lower())
+        store = self.edges[tuple(edge_type)]
+        cache_key = layout.value
+        cached = store.adjacency_cache.get(cache_key)
+        if cached is not None:
+            return cached
+        src_type, _, dst_type = tuple(edge_type)
+        adjacency = from_edge_index(
+            store.edge_index,
+            shape=(self._node_count(src_type), self._node_count(dst_type)),
+            layout=layout,
+        )
+        store.adjacency_cache[cache_key] = adjacency
+        return adjacency
+
+    def add_self_loops(self, *, edge_type=None):
+        from vgl.ops import add_self_loops
+
+        return add_self_loops(self, edge_type=edge_type)
+
+    def remove_self_loops(self, *, edge_type=None):
+        from vgl.ops import remove_self_loops
+
+        return remove_self_loops(self, edge_type=edge_type)
+
+    def to_bidirected(self, *, edge_type=None):
+        from vgl.ops import to_bidirected
+
+        return to_bidirected(self, edge_type=edge_type)
+
+    def node_subgraph(self, node_ids, *, edge_type=None):
+        from vgl.ops import node_subgraph
+
+        return node_subgraph(self, node_ids, edge_type=edge_type)
+
+    def edge_subgraph(self, edge_ids, *, edge_type=None):
+        from vgl.ops import edge_subgraph
+
+        return edge_subgraph(self, edge_ids, edge_type=edge_type)
+
+    def khop_nodes(self, seeds, *, num_hops: int, direction: str = "out", edge_type=None):
+        from vgl.ops import khop_nodes
+
+        return khop_nodes(self, seeds, num_hops=num_hops, direction=direction, edge_type=edge_type)
+
+    def khop_subgraph(self, seeds, *, num_hops: int, direction: str = "out", edge_type=None):
+        from vgl.ops import khop_subgraph
+
+        return khop_subgraph(self, seeds, num_hops=num_hops, direction=direction, edge_type=edge_type)
+
+    def compact_nodes(self, node_ids, *, edge_type=None):
+        from vgl.ops import compact_nodes
+
+        return compact_nodes(self, node_ids, edge_type=edge_type)
 
     def snapshot(self, t):
         if self.schema.time_attr is None:

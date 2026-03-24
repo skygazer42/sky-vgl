@@ -50,6 +50,9 @@ from vgl.dataloading import SampleRecord as SampleRecord
 from vgl.dataloading import TemporalEventRecord as TemporalEventRecord
 from vgl.dataloading import TemporalNeighborSampler as TemporalNeighborSampler
 from vgl.dataloading import UniformNegativeLinkSampler as UniformNegativeLinkSampler
+from vgl.data import DatasetManifest as DatasetManifest
+from vgl.data import DatasetSplit as DatasetSplit
+from vgl.data import OnDiskGraphDataset as OnDiskGraphDataset
 from vgl.engine import Trainer as Trainer
 from vgl.graph import Graph as Graph
 from vgl.graph import GraphBatch as GraphBatch
@@ -181,6 +184,8 @@ __all__ = [
     "CSVLogger",
     "ConsoleLogger",
     "DataLoader",
+    "DatasetManifest",
+    "DatasetSplit",
     "DeferredReweighting",
     "EarlyStopping",
     "ExponentialMovingAverage",
@@ -213,6 +218,7 @@ __all__ = [
     "LinkNeighborSampler",
     "NodeNeighborSampler",
     "NodeSeedSubgraphSampler",
+    "OnDiskGraphDataset",
     "TemporalNeighborSampler",
     "UniformNegativeLinkSampler",
     "LinkPredictionRecord",

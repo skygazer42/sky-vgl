@@ -266,3 +266,43 @@ def test_legacy_core_package_reexports_graph_support_types():
     assert LegacyEdgeStore is EdgeStore
     assert LegacyGNNError is GNNError
     assert LegacySchemaError is SchemaError
+
+
+def test_foundation_packages_expose_namespace_exports():
+    from vgl.ops import GraphTransform, TransformPipeline
+    from vgl.ops import add_self_loops, compact_nodes, edge_subgraph, khop_nodes, khop_subgraph, node_subgraph, remove_self_loops, to_bidirected
+    from vgl.ops import __all__ as ops_all
+    from vgl.sparse import SparseLayout, SparseTensor
+    from vgl.sparse import __all__ as sparse_all
+    from vgl.sparse import degree, from_edge_index, select_rows, spmm, to_coo, to_csr
+    from vgl.storage import FeatureStore, GraphStore, InMemoryGraphStore, InMemoryTensorStore, MmapTensorStore, TensorSlice, TensorStore
+    from vgl.storage import __all__ as storage_all
+
+    assert ops_all == ["GraphTransform", "TransformPipeline", "add_self_loops", "remove_self_loops", "to_bidirected", "node_subgraph", "edge_subgraph", "khop_nodes", "khop_subgraph", "compact_nodes"]
+    assert sparse_all == ["SparseLayout", "SparseTensor", "from_edge_index", "to_coo", "to_csr", "degree", "select_rows", "spmm"]
+    assert storage_all == ["TensorSlice", "TensorStore", "InMemoryTensorStore", "MmapTensorStore", "FeatureStore", "GraphStore", "InMemoryGraphStore"]
+    assert SparseLayout.__name__ == "SparseLayout"
+    assert SparseTensor.__name__ == "SparseTensor"
+    assert callable(from_edge_index)
+    assert callable(to_coo)
+    assert callable(to_csr)
+    assert GraphTransform.__name__ == "GraphTransform"
+    assert TransformPipeline.__name__ == "TransformPipeline"
+    assert callable(add_self_loops)
+    assert callable(remove_self_loops)
+    assert callable(to_bidirected)
+    assert callable(node_subgraph)
+    assert callable(edge_subgraph)
+    assert callable(khop_nodes)
+    assert callable(khop_subgraph)
+    assert callable(compact_nodes)
+    assert TensorSlice.__name__ == "TensorSlice"
+    assert TensorStore.__name__ == "TensorStore"
+    assert InMemoryTensorStore.__name__ == "InMemoryTensorStore"
+    assert MmapTensorStore.__name__ == "MmapTensorStore"
+    assert FeatureStore.__name__ == "FeatureStore"
+    assert GraphStore.__name__ == "GraphStore"
+    assert InMemoryGraphStore.__name__ == "InMemoryGraphStore"
+    assert callable(degree)
+    assert callable(select_rows)
+    assert callable(spmm)

@@ -6,6 +6,14 @@
 
 Homogeneous graphs can carry edge-level tensors through `Graph.homo(edge_data={...})`. These tensors are exposed through `graph.edata` and are what edge-aware operators consume.
 
+`Graph` also has a storage-backed construction path. `Graph.from_storage(schema=..., feature_store=..., graph_store=...)` materializes one graph view from feature / graph stores without changing the public graph contract.
+
+## SparseTensor and Adjacency Caches
+
+`vgl.sparse` is the low-level sparse execution layer. It provides `SparseTensor`, layout conversion helpers, and sparse ops such as degree, row selection, and sparse-dense matmul.
+
+`Graph.adjacency(layout=...)` is the main bridge back into user code. It builds sparse adjacency views through `vgl.sparse` and caches them on each edge store so repeated structural operations do not need to rebuild the same layout.
+
 ## GraphView
 
 `GraphView` is a lightweight projection over an existing graph, used for operations such as `snapshot()` and `window()`.
@@ -53,6 +61,12 @@ These modules keep the same lightweight graph contract and can be dropped into n
 - optional source graph information
 
 This is what makes many-small-graph and sampled-subgraph inputs converge on the same batch contract.
+
+## Sampling Plans and Materialization
+
+Neighbor sampling now routes through explicit `SamplingPlan` stages inside `vgl.dataloading`. The public samplers still look like `NodeNeighborSampler`, `LinkNeighborSampler`, and `TemporalNeighborSampler`, but internally they can build plans, execute expansion / feature-fetch stages, and materialize the result back into the same batch contracts.
+
+This keeps the user-facing API stable while opening a path toward larger-graph runtimes, feature stores, and shard-aware coordination.
 
 ## LinkPredictionRecord and LinkPredictionBatch
 
@@ -150,3 +164,10 @@ The current training layer supports:
 - graph classification with labels from sample metadata
 - link prediction from explicit candidate-edge samples
 - temporal event prediction from explicit candidate-event samples
+
+
+## Dataset and Distributed Foundations
+
+`vgl.data` now includes `DatasetManifest`, `DatasetSplit`, `DatasetCatalog`, `DataCache`, fixture-backed built-in datasets, and an `OnDiskGraphDataset` format. These pieces let dataset metadata, cache paths, and serialized graph collections share one vocabulary.
+
+`vgl.distributed` builds on that with `PartitionManifest`, deterministic local partition writing, `LocalGraphShard`, local passthrough store adapters, and a `LocalSamplingCoordinator` for shard-local routing and feature gathering. The current implementation is intentionally local-first, but the contracts are shaped so the runtime can grow without changing model code.

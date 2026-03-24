@@ -28,6 +28,7 @@
 - **Unified `Graph` object** — a single data structure for homogeneous, heterogeneous, and temporal graphs with schema validation, lightweight views, and batching.
 - **Dataset-style link prediction splits** — `RandomLinkSplit` creates train/val/test `LinkPredictionRecord` datasets that plug directly into the existing loader, sampler, and trainer stack.
 - **Mini-batch neighbor sampling** — `NodeNeighborSampler`, `LinkNeighborSampler`, and `TemporalNeighborSampler` provide PyG/DGL-style local subgraph training for homogeneous, heterogeneous, and temporal node/link workloads.
+- **Foundation layers for scale** — `vgl.sparse`, `vgl.storage`, `vgl.ops`, `vgl.data`, and `vgl.distributed` provide sparse adjacency views, storage-backed graphs, graph transforms, dataset catalogs / on-disk formats, and local partition primitives while keeping `Graph`, `Loader`, and `Trainer` as the public entry points.
 - **50+ GNN convolution layers** — all built on a clean `MessagePassing` interface: `GCNConv`, `GATConv`, `SAGEConv`, `GINConv`, `TransformerConv`, and [many more](#supported-convolution-layers).
 - **Graph transformer encoders** — reusable encoder blocks such as `GraphTransformerEncoder`, `GraphormerEncoder`, `GPSLayer`, `NAGphormerEncoder`, and `SGFormerEncoder`.
 - **Temporal encoders & memory** — temporal modules such as `TimeEncoder`, `TGATLayer`, `TGATEncoder`, `IdentityTemporalMessage`, and `TGNMemory` plug into event prediction without changing the training loop.
@@ -49,16 +50,31 @@
 
 | Package | Description |
 |:--|:--|
-| `vgl.graph` | `Graph`, `GraphBatch`, `GraphSchema`, `GraphView`, stores |
+| `vgl.graph` | `Graph`, `GraphBatch`, `GraphSchema`, `GraphView`, node / edge stores |
+| `vgl.sparse` | `SparseTensor`, sparse layouts, conversion helpers, sparse graph ops |
+| `vgl.storage` | tensor stores, `FeatureStore`, `GraphStore`, storage-backed graph assembly |
+| `vgl.ops` | structure transforms, subgraph extraction, k-hop expansion, compaction |
+| `vgl.data` | dataset catalog models, cache helpers, built-in datasets, on-disk datasets |
+| `vgl.dataloading` | `DataLoader`, `SamplingPlan`, plan executor, samplers, sample records |
+| `vgl.distributed` | partition metadata, local shard loading, store adapters, sampling coordination |
 | `vgl.nn` | `MessagePassing`, 50+ convolution layers, graph/temporal encoders, `HeteroConv`, readout, `GroupRevRes` |
 | `vgl.tasks` | `NodeClassificationTask`, `GraphClassificationTask`, `LinkPredictionTask`, `TemporalEventPredictionTask` |
 | `vgl.engine` | `Trainer`, callbacks, checkpoints, `TrainingHistory`, evaluator, training strategies |
 | `vgl.metrics` | `Accuracy`, `Metric` base, `build_metric` |
-| `vgl.dataloading` | `DataLoader`, `ListDataset`, graph and link samplers, sample records |
 | `vgl.transforms` | Graph transforms (identity, extensible) |
 | `vgl.compat` | PyG and DGL bidirectional converters |
 
 > Legacy imports (`vgl.core`, `vgl.data`, `vgl.train`) remain as compatibility layers but new code should use the layout above.
+
+### Foundation Layers
+
+- `vgl.sparse` is where adjacency layouts and sparse execution helpers live. `Graph.adjacency(...)` uses this layer and caches sparse views per edge type / layout.
+- `vgl.storage` turns tensor stores plus graph stores into materialized `Graph` objects through `Graph.from_storage(...)`, which is the main path for large-graph and feature-store-backed workflows.
+- `vgl.ops` centralizes reusable graph transforms such as self-loop rewrites, bidirection conversion, induced subgraphs, k-hop expansion, and compaction.
+- `vgl.data` now includes dataset manifests, local cache helpers, fixture-backed datasets, and an on-disk graph dataset format for reproducible pipelines.
+- `vgl.distributed` starts the shard-aware surface with partition manifests, deterministic local partition writing, local shard loading, and single-process coordination contracts.
+
+These layers are intentionally underneath the user-facing API: models still consume `Graph` / batch objects, loaders still start at `Loader`, and training still starts at `Trainer`.
 
 ---
 

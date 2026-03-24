@@ -1,6 +1,8 @@
 import torch
 
 from vgl import Graph
+from vgl.data.dataset import ListDataset
+from vgl.data.loader import Loader
 from vgl.data.sample import LinkPredictionRecord
 from vgl.data.sampler import LinkNeighborSampler, UniformNegativeLinkSampler
 
@@ -126,3 +128,34 @@ def test_link_neighbor_sampler_supports_mixed_hetero_edge_types_from_base_sample
     assert records[1].edge_type == cites
     assert all(int(record.src_index) >= 0 for record in records)
     assert all(int(record.dst_index) >= 0 for record in records)
+
+
+def test_loader_routes_link_neighbor_sampler_through_plan_execution():
+    graph = Graph.homo(
+        edge_index=torch.tensor([[0, 1, 2], [1, 2, 3]]),
+        x=torch.randn(5, 4),
+    )
+    dataset = ListDataset(
+        [
+            LinkPredictionRecord(graph=graph, src_index=0, dst_index=1, label=1),
+        ]
+    )
+
+    class PlanOnlyLinkNeighborSampler(LinkNeighborSampler):
+        def sample(self, item):
+            raise AssertionError("loader should use build_plan instead of the legacy sample path")
+
+    loader = Loader(
+        dataset=dataset,
+        sampler=PlanOnlyLinkNeighborSampler(
+            num_neighbors=[-1],
+            base_sampler=UniformNegativeLinkSampler(num_negatives=1),
+        ),
+        batch_size=1,
+    )
+
+    batch = next(iter(loader))
+
+    assert torch.equal(batch.labels, torch.tensor([1.0, 0.0]))
+    assert torch.equal(batch.query_index, torch.tensor([0, 0]))
+    assert batch.graph.x.size(0) == 4
