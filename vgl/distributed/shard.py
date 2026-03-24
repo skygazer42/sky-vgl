@@ -44,8 +44,8 @@ class LocalGraphShard:
         payload = torch.load(root / partition.path, weights_only=True)
         graph_payload = payload["graph"]
         graph = deserialize_graph(graph_payload)
-        if set(graph.nodes) != {"node"} or len(graph.edges) != 1 or graph.schema.time_attr is not None:
-            raise ValueError("LocalGraphShard currently supports homogeneous non-temporal partitions only")
+        if set(graph.nodes) != {"node"} or len(graph.edges) != 1:
+            raise ValueError("LocalGraphShard currently supports homogeneous partitions only")
         edge_type = graph._default_edge_type()
         node_data = dict(graph.nodes["node"].data)
         edge_store = graph.edges[edge_type]
@@ -83,6 +83,7 @@ class LocalGraphShard:
             edge_types=(EDGE_TYPE,),
             node_features={"node": tuple(node_data.keys())},
             edge_features={EDGE_TYPE: ("edge_index",) + tuple(edge_data.keys())},
+            time_attr=graph.schema.time_attr,
         )
         graph = Graph.from_storage(schema=schema, feature_store=feature_store, graph_store=graph_store)
         return cls(

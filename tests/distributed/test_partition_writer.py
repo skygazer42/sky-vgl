@@ -27,3 +27,32 @@ def test_partition_writer_splits_graph_into_local_files(tmp_path):
     assert torch.equal(part1["node_ids"], torch.tensor([2, 3]))
     assert torch.equal(part0_graph.edge_index, torch.tensor([[0], [1]]))
     assert torch.equal(part1_graph.edge_index, torch.tensor([[0], [1]]))
+
+
+def test_partition_writer_preserves_temporal_graph_payloads(tmp_path):
+    graph = Graph.temporal(
+        nodes={"node": {"x": torch.arange(8, dtype=torch.float32).view(4, 2)}},
+        edges={
+            ("node", "to", "node"): {
+                "edge_index": torch.tensor([[0, 1, 2, 3], [1, 2, 3, 0]]),
+                "timestamp": torch.tensor([3, 5, 7, 11]),
+            }
+        },
+        time_attr="timestamp",
+    )
+
+    manifest = write_partitioned_graph(graph, tmp_path, num_partitions=2)
+    part0 = torch.load(tmp_path / "part-0.pt", weights_only=True)
+    part1 = torch.load(tmp_path / "part-1.pt", weights_only=True)
+
+    assert manifest.num_partitions == 2
+    assert torch.equal(part0["node_ids"], torch.tensor([0, 1]))
+    assert torch.equal(part1["node_ids"], torch.tensor([2, 3]))
+
+    part0_graph = deserialize_graph(part0["graph"])
+    part1_graph = deserialize_graph(part1["graph"])
+
+    assert part0_graph.schema.time_attr == "timestamp"
+    assert part1_graph.schema.time_attr == "timestamp"
+    assert torch.equal(part0_graph.edata["timestamp"], torch.tensor([3]))
+    assert torch.equal(part1_graph.edata["timestamp"], torch.tensor([7]))

@@ -35,3 +35,26 @@ def test_local_graph_shard_maps_local_ids_and_edges_back_to_global_space(tmp_pat
 
     assert torch.equal(shard.local_to_global(torch.tensor([0, 1])), torch.tensor([2, 3]))
     assert torch.equal(shard.global_edge_index(), torch.tensor([[2], [3]]))
+
+
+def test_local_graph_shard_loads_temporal_partition_graph(tmp_path):
+    graph = Graph.temporal(
+        nodes={"node": {"x": torch.arange(8, dtype=torch.float32).view(4, 2)}},
+        edges={
+            ("node", "to", "node"): {
+                "edge_index": torch.tensor([[0, 1, 2, 3], [1, 2, 3, 0]]),
+                "timestamp": torch.tensor([3, 5, 7, 11]),
+            }
+        },
+        time_attr="timestamp",
+    )
+    write_partitioned_graph(graph, tmp_path, num_partitions=2)
+
+    shard = LocalGraphShard.from_partition_dir(tmp_path, partition_id=1)
+
+    assert shard.partition.partition_id == 1
+    assert shard.graph.schema.time_attr == "timestamp"
+    assert torch.equal(shard.node_ids, torch.tensor([2, 3]))
+    assert torch.equal(shard.graph.edge_index, torch.tensor([[0], [1]]))
+    assert torch.equal(shard.graph.edata["timestamp"], torch.tensor([7]))
+    assert torch.equal(shard.local_to_global(torch.tensor([0, 1])), torch.tensor([2, 3]))

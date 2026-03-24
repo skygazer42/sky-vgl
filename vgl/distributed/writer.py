@@ -40,14 +40,20 @@ def _partition_subgraph(graph: Graph, start: int, end: int) -> Graph:
         "e_id",
         torch.arange(edge_count, dtype=torch.long, device=edge_index.device)[edge_mask],
     )
+    if graph.schema.time_attr is not None:
+        return Graph.temporal(
+            nodes={"node": node_data},
+            edges={edge_type: {"edge_index": local_edge_index, **edge_data}},
+            time_attr=graph.schema.time_attr,
+        )
     return Graph.homo(edge_index=local_edge_index, edge_data=edge_data, **node_data)
 
 
 def write_partitioned_graph(graph: Graph, root, *, num_partitions: int) -> PartitionManifest:
     if num_partitions < 1:
         raise ValueError("num_partitions must be >= 1")
-    if set(graph.nodes) != {"node"} or len(graph.edges) != 1 or graph.schema.time_attr is not None:
-        raise ValueError("write_partitioned_graph currently supports homogeneous non-temporal graphs only")
+    if set(graph.nodes) != {"node"} or len(graph.edges) != 1:
+        raise ValueError("write_partitioned_graph currently supports homogeneous graphs only")
 
     num_nodes = graph._node_count("node")
     if num_partitions > num_nodes:

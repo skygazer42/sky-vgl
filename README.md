@@ -72,7 +72,7 @@
 - `vgl.storage` turns in-memory or mmap-backed tensor stores plus graph stores into lazily feature-backed `Graph` objects through `Graph.from_storage(...)`, which is the main path for large-graph and feature-store-backed workflows.
 - `vgl.ops` centralizes reusable graph transforms such as self-loop rewrites, bidirection conversion, induced subgraphs, relation-local hetero subgraphs, k-hop expansion, and compaction.
 - `vgl.data` now includes dataset manifests, local cache helpers, fixture-backed datasets, and an on-disk graph dataset format that writes one payload per graph under `graphs/`, loads items lazily, exposes manifest-backed split views, keeps legacy `graphs.pt` artifacts readable, and round-trips homogeneous, heterogeneous, and temporal graphs for reproducible pipelines.
-- `vgl.distributed` starts the shard-aware surface with partition manifests, deterministic local partition writing, local shard loading, shard/global id remapping, partition edge and adjacency queries, and single-process coordination contracts.
+- `vgl.distributed` starts the shard-aware surface with partition manifests, deterministic local partition writing, local shard loading, shard/global id remapping, partition edge and adjacency queries, and single-process coordination contracts. The current local partition path now handles homogeneous and temporal homogeneous graphs without changing the manifest format.
 
 These layers are intentionally underneath the user-facing API: models still consume `Graph` / batch objects, loaders still start at `Loader`, and training still starts at `Trainer`.
 
