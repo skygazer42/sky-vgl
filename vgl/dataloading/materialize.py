@@ -6,7 +6,31 @@ from vgl.graph.batch import GraphBatch, LinkPredictionBatch, NodeBatch, Temporal
 from vgl.graph.graph import Graph
 
 
-def _subgraph(graph: Graph, node_ids: torch.Tensor):
+def _align_tensor_slice(index: torch.Tensor, tensor_slice) -> torch.Tensor:
+    index = torch.as_tensor(index, dtype=torch.long).view(-1)
+    slice_index = tensor_slice.index.to(dtype=torch.long).view(-1)
+    if index.numel() == 0:
+        return tensor_slice.values.new_empty((0,) + tuple(tensor_slice.values.shape[1:]))
+    if torch.equal(index, slice_index):
+        return tensor_slice.values
+    positions = {int(value): current for current, value in enumerate(slice_index.tolist())}
+    order = []
+    for value in index.tolist():
+        value = int(value)
+        if value not in positions:
+            raise KeyError(f"fetched feature slice is missing id {value}")
+        order.append(positions[value])
+    order_index = torch.tensor(order, dtype=torch.long, device=tensor_slice.values.device)
+    return tensor_slice.values[order_index]
+
+
+def _subgraph(
+    graph: Graph,
+    node_ids: torch.Tensor,
+    *,
+    fetched_node_features: dict[str, dict[str, object]] | None = None,
+    fetched_edge_features: dict[object, dict[str, object]] | None = None,
+):
     node_ids = node_ids.to(dtype=torch.long)
     num_nodes = int(graph.x.size(0))
     edge_index = graph.edge_index
@@ -26,8 +50,11 @@ def _subgraph(graph: Graph, node_ids: torch.Tensor):
             node_data[key] = value
     if "n_id" not in node_data:
         node_data["n_id"] = node_ids
+    for feature_name, tensor_slice in (fetched_node_features or {}).get("node", {}).items():
+        node_data[feature_name] = _align_tensor_slice(node_ids, tensor_slice)
 
-    edge_store = graph.edges[graph._default_edge_type()]
+    edge_type = graph._default_edge_type()
+    edge_store = graph.edges[edge_type]
     edge_count = int(edge_store.edge_index.size(1))
     edge_data = {}
     edge_ids = torch.arange(edge_count, dtype=torch.long, device=edge_index.device)[edge_mask]
@@ -40,10 +67,18 @@ def _subgraph(graph: Graph, node_ids: torch.Tensor):
             edge_data[key] = value
     if "e_id" not in edge_data:
         edge_data["e_id"] = edge_ids
+    for feature_name, tensor_slice in (fetched_edge_features or {}).get(edge_type, {}).items():
+        edge_data[feature_name] = _align_tensor_slice(edge_ids, tensor_slice)
     return Graph.homo(edge_index=subgraph_edge_index, edge_data=edge_data, **node_data), node_mapping
 
 
-def _hetero_subgraph(graph: Graph, node_ids_by_type: dict[str, torch.Tensor]):
+def _hetero_subgraph(
+    graph: Graph,
+    node_ids_by_type: dict[str, torch.Tensor],
+    *,
+    fetched_node_features: dict[str, dict[str, object]] | None = None,
+    fetched_edge_features: dict[object, dict[str, object]] | None = None,
+):
     node_masks = {}
     node_mappings = {}
     nodes = {}
@@ -66,6 +101,8 @@ def _hetero_subgraph(graph: Graph, node_ids_by_type: dict[str, torch.Tensor]):
                 node_data[key] = value
         if "n_id" not in node_data:
             node_data["n_id"] = node_ids
+        for feature_name, tensor_slice in (fetched_node_features or {}).get(node_type, {}).items():
+            node_data[feature_name] = _align_tensor_slice(node_ids, tensor_slice)
         nodes[node_type] = node_data
 
     edges = {}
@@ -92,6 +129,8 @@ def _hetero_subgraph(graph: Graph, node_ids_by_type: dict[str, torch.Tensor]):
                 edge_data[key] = value
         if "e_id" not in edge_data:
             edge_data["e_id"] = edge_ids
+        for feature_name, tensor_slice in (fetched_edge_features or {}).get(edge_type, {}).items():
+            edge_data[feature_name] = _align_tensor_slice(edge_ids, tensor_slice)
         edges[edge_type] = edge_data
     return Graph.hetero(nodes=nodes, edges=edges, time_attr=graph.schema.time_attr), node_mappings
 
@@ -109,12 +148,25 @@ def _node_context_to_sample(context: MaterializationContext) -> SampleRecord:
         raise ValueError("node context materialization currently supports one seed per context")
     seed = int(request.node_ids.reshape(-1)[0].item())
 
+    fetched_node_features = context.state.get("_materialized_node_features")
+    fetched_edge_features = context.state.get("_materialized_edge_features")
+
     if "node_ids" in context.state:
-        subgraph, node_mapping = _subgraph(context.graph, context.state["node_ids"])
+        subgraph, node_mapping = _subgraph(
+            context.graph,
+            context.state["node_ids"],
+            fetched_node_features=fetched_node_features,
+            fetched_edge_features=fetched_edge_features,
+        )
         subgraph_seed = int(node_mapping[seed].item())
     elif "node_ids_by_type" in context.state:
         node_type = request.node_type
-        subgraph, node_mapping = _hetero_subgraph(context.graph, context.state["node_ids_by_type"])
+        subgraph, node_mapping = _hetero_subgraph(
+            context.graph,
+            context.state["node_ids_by_type"],
+            fetched_node_features=fetched_node_features,
+            fetched_edge_features=fetched_edge_features,
+        )
         subgraph_seed = int(node_mapping[node_type][seed].item())
     else:
         raise ValueError("node context must contain expanded node ids for materialization")

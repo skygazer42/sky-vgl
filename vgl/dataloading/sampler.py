@@ -718,8 +718,54 @@ class TemporalNeighborSampler(LinkNeighborSampler):
 
 
 class NodeNeighborSampler(LinkNeighborSampler):
-    def __init__(self, num_neighbors, *, seed=None):
+    def __init__(self, num_neighbors, *, seed=None, node_feature_names=None, edge_feature_names=None):
         super().__init__(num_neighbors=num_neighbors, base_sampler=None, seed=seed)
+        self.node_feature_names = node_feature_names
+        self.edge_feature_names = edge_feature_names
+
+    @staticmethod
+    def _normalize_feature_names(feature_names):
+        return tuple(str(name) for name in feature_names)
+
+    def _resolved_node_feature_names(self, graph):
+        if self.node_feature_names is None:
+            return ()
+        if isinstance(self.node_feature_names, dict):
+            resolved = []
+            for node_type, feature_names in self.node_feature_names.items():
+                node_type = str(node_type)
+                if node_type not in graph.nodes:
+                    raise ValueError(f"unknown node_type for feature prefetch: {node_type!r}")
+                names = self._normalize_feature_names(feature_names)
+                if names:
+                    resolved.append((node_type, names))
+            return tuple(resolved)
+        if set(graph.nodes) != {"node"} or len(graph.edges) != 1:
+            raise ValueError("heterogeneous NodeNeighborSampler requires node_feature_names keyed by node type")
+        names = self._normalize_feature_names(self.node_feature_names)
+        if not names:
+            return ()
+        return (("node", names),)
+
+    def _resolved_edge_feature_names(self, graph):
+        if self.edge_feature_names is None:
+            return ()
+        if isinstance(self.edge_feature_names, dict):
+            resolved = []
+            for edge_type, feature_names in self.edge_feature_names.items():
+                edge_type = tuple(edge_type)
+                if edge_type not in graph.edges:
+                    raise ValueError(f"unknown edge_type for feature prefetch: {edge_type!r}")
+                names = self._normalize_feature_names(feature_names)
+                if names:
+                    resolved.append((edge_type, names))
+            return tuple(resolved)
+        if set(graph.nodes) != {"node"} or len(graph.edges) != 1:
+            raise ValueError("heterogeneous NodeNeighborSampler requires edge_feature_names keyed by edge type")
+        names = self._normalize_feature_names(self.edge_feature_names)
+        if not names:
+            return ()
+        return ((graph._default_edge_type(), names),)
 
     def _seed_item(self, item):
         if isinstance(item, SampleRecord):
@@ -762,7 +808,7 @@ class NodeNeighborSampler(LinkNeighborSampler):
             plan_metadata["sample_id"] = sample_id
         if source_graph_id is not None:
             plan_metadata["source_graph_id"] = source_graph_id
-        return SamplingPlan(
+        plan = SamplingPlan(
             request=NodeSeedRequest(
                 node_ids=torch.tensor([seed], dtype=torch.long),
                 node_type=node_type,
@@ -772,6 +818,37 @@ class NodeNeighborSampler(LinkNeighborSampler):
             metadata=plan_metadata,
             graph=graph,
         )
+
+        additional_stages = []
+        node_index_key = "node_ids" if set(graph.nodes) == {"node"} and len(graph.edges) == 1 else "node_ids_by_type"
+        edge_index_key = "edge_ids" if set(graph.nodes) == {"node"} and len(graph.edges) == 1 else "edge_ids_by_type"
+        for current_node_type, feature_names in self._resolved_node_feature_names(graph):
+            additional_stages.append(
+                PlanStage(
+                    "fetch_node_features",
+                    params={
+                        "node_type": current_node_type,
+                        "feature_names": feature_names,
+                        "index_key": node_index_key,
+                        "output_key": f"node_features:{current_node_type}",
+                    },
+                )
+            )
+        for edge_type, feature_names in self._resolved_edge_feature_names(graph):
+            additional_stages.append(
+                PlanStage(
+                    "fetch_edge_features",
+                    params={
+                        "edge_type": edge_type,
+                        "feature_names": feature_names,
+                        "index_key": edge_index_key,
+                        "output_key": f"edge_features:{edge_type}",
+                    },
+                )
+            )
+        if additional_stages:
+            return plan.append(*additional_stages)
+        return plan
 
     def sample(self, item):
         plan = self.build_plan(item)

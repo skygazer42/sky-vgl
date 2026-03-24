@@ -19,6 +19,7 @@ def test_executor_expands_homo_node_seeds_across_neighbor_stages():
     context = PlanExecutor().execute(plan, graph=graph)
 
     assert torch.equal(context.state["node_ids"], torch.tensor([0, 1, 2, 3]))
+    assert torch.equal(context.state["edge_ids"], torch.tensor([0, 1, 2]))
 
 
 def test_executor_expands_hetero_node_seeds_by_type():
@@ -45,3 +46,11 @@ def test_executor_expands_hetero_node_seeds_by_type():
 
     assert torch.equal(context.state["node_ids_by_type"]["paper"], torch.tensor([1]))
     assert torch.equal(context.state["node_ids_by_type"]["author"], torch.tensor([0]))
+    assert torch.equal(
+        context.state["edge_ids_by_type"][("author", "writes", "paper")],
+        torch.tensor([0]),
+    )
+    assert torch.equal(
+        context.state["edge_ids_by_type"][("paper", "written_by", "author")],
+        torch.tensor([0]),
+    )
