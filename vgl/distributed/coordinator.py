@@ -34,13 +34,20 @@ class SamplingCoordinator(Protocol):
     def partition_node_ids(self, partition_id: int) -> torch.Tensor:
         ...
 
-    def fetch_partition_edge_index(self, partition_id: int, *, global_ids: bool = False) -> torch.Tensor:
+    def fetch_partition_edge_index(
+        self,
+        partition_id: int,
+        *,
+        edge_type=None,
+        global_ids: bool = False,
+    ) -> torch.Tensor:
         ...
 
     def fetch_partition_adjacency(
         self,
         partition_id: int,
         *,
+        edge_type=None,
         layout: SparseLayout | str = SparseLayout.COO,
     ) -> SparseTensor:
         ...
@@ -67,19 +74,26 @@ class LocalSamplingCoordinator:
     def partition_node_ids(self, partition_id: int) -> torch.Tensor:
         return self._shard(partition_id).node_ids
 
-    def fetch_partition_edge_index(self, partition_id: int, *, global_ids: bool = False) -> torch.Tensor:
+    def fetch_partition_edge_index(
+        self,
+        partition_id: int,
+        *,
+        edge_type=None,
+        global_ids: bool = False,
+    ) -> torch.Tensor:
         shard = self._shard(partition_id)
         if global_ids:
-            return shard.global_edge_index()
-        return shard.graph_store.edge_index()
+            return shard.global_edge_index(edge_type=edge_type)
+        return shard.graph_store.edge_index(edge_type)
 
     def fetch_partition_adjacency(
         self,
         partition_id: int,
         *,
+        edge_type=None,
         layout: SparseLayout | str = SparseLayout.COO,
     ) -> SparseTensor:
-        return self._shard(partition_id).graph_store.adjacency(layout=layout)
+        return self._shard(partition_id).graph_store.adjacency(edge_type=edge_type, layout=layout)
 
     def route_node_ids(self, node_ids: torch.Tensor) -> tuple[ShardRoute, ...]:
         node_ids = torch.as_tensor(node_ids, dtype=torch.long)

@@ -32,7 +32,7 @@ For advanced systems work, the new foundation layers sit underneath the same sur
 - `vgl.storage` for feature / graph stores, mmap-backed feature tensors, and `Graph.from_storage(...)`
 - `vgl.ops` for reusable graph transforms, homogeneous/heterogeneous relation-local subgraph extraction, and compaction
 - `vgl.data` for dataset manifests, cache helpers, built-in datasets, and manifest-backed homo/hetero/temporal on-disk datasets with lazy per-item payloads and split views
-- `vgl.distributed` for partition metadata, local shard loading, partition graph queries, and sampling coordination contracts across homogeneous and temporal homogeneous graphs
+- `vgl.distributed` for partition metadata, local shard loading, partition graph queries, and sampling coordination contracts across homogeneous, temporal homogeneous, and single-node-type multi-relation graphs
 
 The smallest workflow is:
 
@@ -289,15 +289,15 @@ first_graph = train_dataset[0]
 ```python
 from vgl.distributed import LocalGraphShard, LocalSamplingCoordinator, write_partitioned_graph
 
-# graph can be Graph.homo(...) or Graph.temporal(...) with one node type and one edge type
+# graph can be Graph.homo(...), Graph.temporal(...), or Graph.hetero(...) with one node type and multiple relations
 manifest = write_partitioned_graph(graph, "artifacts/partitions", num_partitions=2)
 shard = LocalGraphShard.from_partition_dir("artifacts/partitions", partition_id=0)
 coordinator = LocalSamplingCoordinator({0: shard})
 
 local_graph = shard.graph
-global_edge_index = shard.global_edge_index()
+global_edge_index = shard.global_edge_index(edge_type=("node", "follows", "node"))
 partition_node_ids = coordinator.partition_node_ids(0)
-partition_adjacency = coordinator.fetch_partition_adjacency(0, layout="csr")
+partition_adjacency = coordinator.fetch_partition_adjacency(0, edge_type=("node", "follows", "node"), layout="csr")
 ```
 
 These advanced paths are still designed to terminate in the same public training contracts: `Graph`, batch objects from `Loader`, and `Trainer.fit/evaluate/test`.

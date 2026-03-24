@@ -7,53 +7,63 @@ from vgl.distributed.partition import PartitionManifest, PartitionShard, save_pa
 from vgl.graph.graph import Graph
 
 
+DEFAULT_EDGE_TYPE = ("node", "to", "node")
+
+
+def _build_partition_graph(graph: Graph, node_data: dict, edges: dict) -> Graph:
+    if graph.schema.time_attr is not None:
+        return Graph.temporal(nodes={"node": node_data}, edges=edges, time_attr=graph.schema.time_attr)
+    if set(edges) == {DEFAULT_EDGE_TYPE}:
+        edge_payload = dict(edges[DEFAULT_EDGE_TYPE])
+        edge_index = edge_payload.pop("edge_index")
+        return Graph.homo(edge_index=edge_index, edge_data=edge_payload, **node_data)
+    return Graph.hetero(nodes={"node": node_data}, edges=edges)
+
+
 def _partition_subgraph(graph: Graph, start: int, end: int) -> Graph:
-    edge_type = graph._default_edge_type()
-    edge_store = graph.edges[edge_type]
-    edge_index = edge_store.edge_index
-    edge_mask = (
-        (edge_index[0] >= start)
-        & (edge_index[0] < end)
-        & (edge_index[1] >= start)
-        & (edge_index[1] < end)
-    )
-    local_edge_index = edge_index[:, edge_mask] - start
     node_count = graph._node_count("node")
+    reference_edge_index = next(iter(graph.edges.values())).edge_index
     node_data = {}
     for key, value in graph.nodes["node"].data.items():
         if isinstance(value, torch.Tensor) and value.ndim > 0 and value.size(0) == node_count:
             node_data[key] = value[start:end]
         else:
             node_data[key] = value
-    node_data.setdefault("n_id", torch.arange(start, end, dtype=torch.long, device=edge_index.device))
+    node_data.setdefault("n_id", torch.arange(start, end, dtype=torch.long, device=reference_edge_index.device))
 
-    edge_count = int(edge_index.size(1))
-    edge_data = {}
-    for key, value in edge_store.data.items():
-        if key == "edge_index":
-            continue
-        if isinstance(value, torch.Tensor) and value.ndim > 0 and value.size(0) == edge_count:
-            edge_data[key] = value[edge_mask]
-        else:
-            edge_data[key] = value
-    edge_data.setdefault(
-        "e_id",
-        torch.arange(edge_count, dtype=torch.long, device=edge_index.device)[edge_mask],
-    )
-    if graph.schema.time_attr is not None:
-        return Graph.temporal(
-            nodes={"node": node_data},
-            edges={edge_type: {"edge_index": local_edge_index, **edge_data}},
-            time_attr=graph.schema.time_attr,
+    partition_edges = {}
+    for edge_type, edge_store in graph.edges.items():
+        edge_index = edge_store.edge_index
+        edge_mask = (
+            (edge_index[0] >= start)
+            & (edge_index[0] < end)
+            & (edge_index[1] >= start)
+            & (edge_index[1] < end)
         )
-    return Graph.homo(edge_index=local_edge_index, edge_data=edge_data, **node_data)
+        local_edge_index = edge_index[:, edge_mask] - start
+        edge_count = int(edge_index.size(1))
+        edge_data = {"edge_index": local_edge_index}
+        for key, value in edge_store.data.items():
+            if key == "edge_index":
+                continue
+            if isinstance(value, torch.Tensor) and value.ndim > 0 and value.size(0) == edge_count:
+                edge_data[key] = value[edge_mask]
+            else:
+                edge_data[key] = value
+        edge_data.setdefault(
+            "e_id",
+            torch.arange(edge_count, dtype=torch.long, device=edge_index.device)[edge_mask],
+        )
+        partition_edges[edge_type] = edge_data
+
+    return _build_partition_graph(graph, node_data, partition_edges)
 
 
 def write_partitioned_graph(graph: Graph, root, *, num_partitions: int) -> PartitionManifest:
     if num_partitions < 1:
         raise ValueError("num_partitions must be >= 1")
-    if set(graph.nodes) != {"node"} or len(graph.edges) != 1:
-        raise ValueError("write_partitioned_graph currently supports homogeneous graphs only")
+    if set(graph.nodes) != {"node"}:
+        raise ValueError("write_partitioned_graph currently supports single-node-type graphs only")
 
     num_nodes = graph._node_count("node")
     if num_partitions > num_nodes:
@@ -89,7 +99,7 @@ def write_partitioned_graph(graph: Graph, root, *, num_partitions: int) -> Parti
     manifest = PartitionManifest(
         num_nodes=num_nodes,
         partitions=tuple(partitions),
-        metadata={"num_edges": int(graph.edge_index.size(1))},
+        metadata={"num_edges": sum(int(store.edge_index.size(1)) for store in graph.edges.values())},
     )
     save_partition_manifest(root / "manifest.json", manifest)
     return manifest

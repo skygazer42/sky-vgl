@@ -10,7 +10,7 @@ from vgl.graph.schema import GraphSchema
 from vgl.storage import FeatureStore, InMemoryGraphStore, InMemoryTensorStore
 
 
-EDGE_TYPE = ("node", "to", "node")
+DEFAULT_EDGE_TYPE = ("node", "to", "node")
 
 
 @dataclass(slots=True)
@@ -44,15 +44,17 @@ class LocalGraphShard:
         payload = torch.load(root / partition.path, weights_only=True)
         graph_payload = payload["graph"]
         graph = deserialize_graph(graph_payload)
-        if set(graph.nodes) != {"node"} or len(graph.edges) != 1:
-            raise ValueError("LocalGraphShard currently supports homogeneous partitions only")
-        edge_type = graph._default_edge_type()
+        if set(graph.nodes) != {"node"}:
+            raise ValueError("LocalGraphShard currently supports single-node-type partitions only")
         node_data = dict(graph.nodes["node"].data)
-        edge_store = graph.edges[edge_type]
-        edge_data = {
-            key: value
-            for key, value in edge_store.data.items()
-            if key != "edge_index"
+        edge_types = tuple(graph.edges)
+        edge_feature_data = {
+            edge_type: {
+                key: value
+                for key, value in edge_store.data.items()
+                if key != "edge_index"
+            }
+            for edge_type, edge_store in graph.edges.items()
         }
         node_ids = payload.get("node_ids", node_data.get("n_id"))
         if node_ids is None:
@@ -68,21 +70,25 @@ class LocalGraphShard:
                     if isinstance(value, torch.Tensor)
                 },
                 **{
-                    ("edge", EDGE_TYPE, name): InMemoryTensorStore(value)
+                    ("edge", edge_type, name): InMemoryTensorStore(value)
+                    for edge_type, edge_data in edge_feature_data.items()
                     for name, value in edge_data.items()
                     if isinstance(value, torch.Tensor)
                 },
             }
         )
         graph_store = InMemoryGraphStore(
-            edges={EDGE_TYPE: edge_store.edge_index},
+            edges={edge_type: graph.edges[edge_type].edge_index for edge_type in edge_types},
             num_nodes={"node": int(node_ids.numel())},
         )
         schema = GraphSchema(
             node_types=("node",),
-            edge_types=(EDGE_TYPE,),
+            edge_types=edge_types,
             node_features={"node": tuple(node_data.keys())},
-            edge_features={EDGE_TYPE: ("edge_index",) + tuple(edge_data.keys())},
+            edge_features={
+                edge_type: ("edge_index",) + tuple(edge_feature_data[edge_type].keys())
+                for edge_type in edge_types
+            },
             time_attr=graph.schema.time_attr,
         )
         graph = Graph.from_storage(schema=schema, feature_store=feature_store, graph_store=graph_store)
@@ -111,8 +117,8 @@ class LocalGraphShard:
             raise IndexError(f"local node ids are out of range for partition {self.partition.partition_id}")
         return self.node_ids[local_ids]
 
-    def global_edge_index(self) -> torch.Tensor:
-        return self.local_to_global(self.graph_store.edge_index())
+    def global_edge_index(self, *, edge_type=None) -> torch.Tensor:
+        return self.local_to_global(self.graph_store.edge_index(edge_type))
 
 
 __all__ = ["LocalGraphShard"]

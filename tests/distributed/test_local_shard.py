@@ -58,3 +58,32 @@ def test_local_graph_shard_loads_temporal_partition_graph(tmp_path):
     assert torch.equal(shard.graph.edge_index, torch.tensor([[0], [1]]))
     assert torch.equal(shard.graph.edata["timestamp"], torch.tensor([7]))
     assert torch.equal(shard.local_to_global(torch.tensor([0, 1])), torch.tensor([2, 3]))
+
+
+def test_local_graph_shard_reconstructs_multi_relation_partition_graph(tmp_path):
+    follows = ("node", "follows", "node")
+    likes = ("node", "likes", "node")
+    graph = Graph.hetero(
+        nodes={"node": {"x": torch.arange(8, dtype=torch.float32).view(4, 2)}},
+        edges={
+            follows: {
+                "edge_index": torch.tensor([[0, 1, 2, 3], [1, 2, 3, 2]]),
+                "weight": torch.tensor([1.0, 2.0, 3.0, 4.0]),
+            },
+            likes: {
+                "edge_index": torch.tensor([[1, 0, 3], [0, 1, 2]]),
+                "score": torch.tensor([0.5, 0.6, 0.7]),
+            },
+        },
+    )
+    write_partitioned_graph(graph, tmp_path, num_partitions=2)
+
+    shard = LocalGraphShard.from_partition_dir(tmp_path, partition_id=1)
+
+    assert set(shard.graph.edges) == {follows, likes}
+    assert torch.equal(shard.graph.edges[follows].edge_index, torch.tensor([[0, 1], [1, 0]]))
+    assert torch.equal(shard.graph.edges[likes].edge_index, torch.tensor([[1], [0]]))
+    assert torch.equal(shard.graph.edges[follows].weight, torch.tensor([3.0, 4.0]))
+    assert torch.equal(shard.graph.edges[likes].score, torch.tensor([0.7]))
+    assert torch.equal(shard.global_edge_index(edge_type=follows), torch.tensor([[2, 3], [3, 2]]))
+    assert torch.equal(shard.global_edge_index(edge_type=likes), torch.tensor([[3], [2]]))

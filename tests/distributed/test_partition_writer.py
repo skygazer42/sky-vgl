@@ -56,3 +56,41 @@ def test_partition_writer_preserves_temporal_graph_payloads(tmp_path):
     assert part1_graph.schema.time_attr == "timestamp"
     assert torch.equal(part0_graph.edata["timestamp"], torch.tensor([3]))
     assert torch.equal(part1_graph.edata["timestamp"], torch.tensor([7]))
+
+
+def test_partition_writer_preserves_multi_relation_graph_payloads(tmp_path):
+    follows = ("node", "follows", "node")
+    likes = ("node", "likes", "node")
+    graph = Graph.hetero(
+        nodes={"node": {"x": torch.arange(8, dtype=torch.float32).view(4, 2)}},
+        edges={
+            follows: {
+                "edge_index": torch.tensor([[0, 1, 2, 3], [1, 2, 3, 2]]),
+                "weight": torch.tensor([1.0, 2.0, 3.0, 4.0]),
+            },
+            likes: {
+                "edge_index": torch.tensor([[1, 0, 3], [0, 1, 2]]),
+                "score": torch.tensor([0.5, 0.6, 0.7]),
+            },
+        },
+    )
+
+    manifest = write_partitioned_graph(graph, tmp_path, num_partitions=2)
+    part0 = torch.load(tmp_path / "part-0.pt", weights_only=True)
+    part1 = torch.load(tmp_path / "part-1.pt", weights_only=True)
+
+    assert manifest.num_partitions == 2
+
+    part0_graph = deserialize_graph(part0["graph"])
+    part1_graph = deserialize_graph(part1["graph"])
+
+    assert set(part0_graph.edges) == {follows, likes}
+    assert set(part1_graph.edges) == {follows, likes}
+    assert torch.equal(part0_graph.edges[follows].edge_index, torch.tensor([[0], [1]]))
+    assert torch.equal(part0_graph.edges[follows].weight, torch.tensor([1.0]))
+    assert torch.equal(part0_graph.edges[likes].edge_index, torch.tensor([[1, 0], [0, 1]]))
+    assert torch.equal(part0_graph.edges[likes].score, torch.tensor([0.5, 0.6]))
+    assert torch.equal(part1_graph.edges[follows].edge_index, torch.tensor([[0, 1], [1, 0]]))
+    assert torch.equal(part1_graph.edges[follows].weight, torch.tensor([3.0, 4.0]))
+    assert torch.equal(part1_graph.edges[likes].edge_index, torch.tensor([[1], [0]]))
+    assert torch.equal(part1_graph.edges[likes].score, torch.tensor([0.7]))
