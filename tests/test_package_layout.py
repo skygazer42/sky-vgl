@@ -274,18 +274,19 @@ def test_foundation_packages_expose_namespace_exports():
     from vgl.ops import __all__ as ops_all
     from vgl.sparse import SparseLayout, SparseTensor
     from vgl.sparse import __all__ as sparse_all
-    from vgl.sparse import degree, from_edge_index, select_rows, spmm, to_coo, to_csr
+    from vgl.sparse import degree, from_edge_index, select_cols, select_rows, spmm, sum as sparse_sum, to_coo, to_csc, to_csr, transpose
     from vgl.storage import FeatureStore, GraphStore, InMemoryGraphStore, InMemoryTensorStore, MmapTensorStore, TensorSlice, TensorStore
     from vgl.storage import __all__ as storage_all
 
     assert ops_all == ["GraphTransform", "TransformPipeline", "add_self_loops", "remove_self_loops", "to_bidirected", "node_subgraph", "edge_subgraph", "khop_nodes", "khop_subgraph", "compact_nodes"]
-    assert sparse_all == ["SparseLayout", "SparseTensor", "from_edge_index", "to_coo", "to_csr", "degree", "select_rows", "spmm"]
+    assert sparse_all == ["SparseLayout", "SparseTensor", "from_edge_index", "to_coo", "to_csr", "to_csc", "degree", "select_rows", "select_cols", "transpose", "sum", "spmm"]
     assert storage_all == ["TensorSlice", "TensorStore", "InMemoryTensorStore", "MmapTensorStore", "FeatureStore", "GraphStore", "InMemoryGraphStore"]
     assert SparseLayout.__name__ == "SparseLayout"
     assert SparseTensor.__name__ == "SparseTensor"
     assert callable(from_edge_index)
     assert callable(to_coo)
     assert callable(to_csr)
+    assert callable(to_csc)
     assert GraphTransform.__name__ == "GraphTransform"
     assert TransformPipeline.__name__ == "TransformPipeline"
     assert callable(add_self_loops)
@@ -305,4 +306,7 @@ def test_foundation_packages_expose_namespace_exports():
     assert InMemoryGraphStore.__name__ == "InMemoryGraphStore"
     assert callable(degree)
     assert callable(select_rows)
+    assert callable(select_cols)
+    assert callable(transpose)
+    assert callable(sparse_sum)
     assert callable(spmm)

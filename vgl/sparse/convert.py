@@ -20,7 +20,7 @@ def from_edge_index(
     if layout is SparseLayout.CSR:
         return to_csr(coo)
     if layout is SparseLayout.CSC:
-        return _to_csc(coo)
+        return to_csc(coo)
     raise ValueError(f"Unsupported sparse layout: {layout}")
 
 
@@ -77,7 +77,7 @@ def to_csr(sparse: SparseTensor) -> SparseTensor:
     )
 
 
-def _to_csc(sparse: SparseTensor) -> SparseTensor:
+def to_csc(sparse: SparseTensor) -> SparseTensor:
     if sparse.layout is SparseLayout.CSC:
         return sparse
     coo = to_coo(sparse)

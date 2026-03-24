@@ -28,7 +28,7 @@ Legacy `vgl.data` and `vgl.train` paths still work, but new code should prefer t
 
 For advanced systems work, the new foundation layers sit underneath the same surface API:
 
-- `vgl.sparse` for cached adjacency layouts and sparse operators
+- `vgl.sparse` for cached COO/CSR/CSC adjacency layouts, transpose/reduction helpers, and sparse operators
 - `vgl.storage` for feature / graph stores and `Graph.from_storage(...)`
 - `vgl.ops` for reusable graph transforms and subgraph extraction
 - `vgl.data` for dataset manifests, cache helpers, built-in datasets, and on-disk datasets

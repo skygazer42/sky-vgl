@@ -10,9 +10,9 @@ Homogeneous graphs can carry edge-level tensors through `Graph.homo(edge_data={.
 
 ## SparseTensor and Adjacency Caches
 
-`vgl.sparse` is the low-level sparse execution layer. It provides `SparseTensor`, layout conversion helpers, and sparse ops such as degree, row selection, and sparse-dense matmul.
+`vgl.sparse` is the low-level sparse execution layer. It provides `SparseTensor`, COO/CSR/CSC conversion helpers, transpose, additive reductions, row/column structural selection, and sparse ops such as degree and sparse-dense matmul.
 
-`Graph.adjacency(layout=...)` is the main bridge back into user code. It builds sparse adjacency views through `vgl.sparse` and caches them on each edge store so repeated structural operations do not need to rebuild the same layout.
+`Graph.adjacency(layout=...)` is the main bridge back into user code. It builds sparse adjacency views through `vgl.sparse`, including CSC layouts for column-oriented traversals, and caches them on each edge store so repeated structural operations do not need to rebuild the same layout.
 
 ## GraphView
 
