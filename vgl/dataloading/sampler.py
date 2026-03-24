@@ -269,7 +269,7 @@ class CandidateLinkSampler(UniformNegativeLinkSampler):
 
 
 class LinkNeighborSampler(Sampler):
-    def __init__(self, num_neighbors, *, base_sampler=None, seed=None):
+    def __init__(self, num_neighbors, *, base_sampler=None, seed=None, node_feature_names=None, edge_feature_names=None):
         if isinstance(num_neighbors, int):
             num_neighbors = [num_neighbors]
         self.num_neighbors = [int(value) for value in num_neighbors]
@@ -278,10 +278,56 @@ class LinkNeighborSampler(Sampler):
         if any(value < -1 or value == 0 for value in self.num_neighbors):
             raise ValueError("num_neighbors entries must be positive integers or -1")
         self.base_sampler = base_sampler
+        self.node_feature_names = node_feature_names
+        self.edge_feature_names = edge_feature_names
         self._generator = None
         if seed is not None:
             self._generator = torch.Generator()
             self._generator.manual_seed(int(seed))
+
+    @staticmethod
+    def _normalize_feature_names(feature_names):
+        return tuple(str(name) for name in feature_names)
+
+    def _resolved_node_feature_names(self, graph):
+        if self.node_feature_names is None:
+            return ()
+        if isinstance(self.node_feature_names, dict):
+            resolved = []
+            for node_type, feature_names in self.node_feature_names.items():
+                node_type = str(node_type)
+                if node_type not in graph.nodes:
+                    raise ValueError(f"unknown node_type for feature prefetch: {node_type!r}")
+                names = self._normalize_feature_names(feature_names)
+                if names:
+                    resolved.append((node_type, names))
+            return tuple(resolved)
+        if set(graph.nodes) != {"node"} or len(graph.edges) != 1:
+            raise ValueError("heterogeneous LinkNeighborSampler requires node_feature_names keyed by node type")
+        names = self._normalize_feature_names(self.node_feature_names)
+        if not names:
+            return ()
+        return (("node", names),)
+
+    def _resolved_edge_feature_names(self, graph):
+        if self.edge_feature_names is None:
+            return ()
+        if isinstance(self.edge_feature_names, dict):
+            resolved = []
+            for edge_type, feature_names in self.edge_feature_names.items():
+                edge_type = tuple(edge_type)
+                if edge_type not in graph.edges:
+                    raise ValueError(f"unknown edge_type for feature prefetch: {edge_type!r}")
+                names = self._normalize_feature_names(feature_names)
+                if names:
+                    resolved.append((edge_type, names))
+            return tuple(resolved)
+        if set(graph.nodes) != {"node"} or len(graph.edges) != 1:
+            raise ValueError("heterogeneous LinkNeighborSampler requires edge_feature_names keyed by edge type")
+        names = self._normalize_feature_names(self.edge_feature_names)
+        if not names:
+            return ()
+        return ((graph._default_edge_type(), names),)
 
     def _seed_records(self, item):
         sampled = self.base_sampler.sample(item) if self.base_sampler is not None else item
@@ -528,7 +574,8 @@ class LinkNeighborSampler(Sampler):
 
     def build_plan(self, item) -> SamplingPlan:
         records, is_sequence = self._seed_records(item)
-        return SamplingPlan(
+        graph = records[0].graph
+        plan = SamplingPlan(
             request=LinkSeedRequest(
                 src_ids=torch.tensor([int(record.src_index) for record in records], dtype=torch.long),
                 dst_ids=torch.tensor([int(record.dst_index) for record in records], dtype=torch.long),
@@ -546,8 +593,39 @@ class LinkNeighborSampler(Sampler):
                     },
                 ),
             ),
-            graph=records[0].graph,
+            graph=graph,
         )
+
+        additional_stages = []
+        node_index_key = "node_ids" if set(graph.nodes) == {"node"} and len(graph.edges) == 1 else "node_ids_by_type"
+        edge_index_key = "edge_ids" if set(graph.nodes) == {"node"} and len(graph.edges) == 1 else "edge_ids_by_type"
+        for node_type, feature_names in self._resolved_node_feature_names(graph):
+            additional_stages.append(
+                PlanStage(
+                    "fetch_node_features",
+                    params={
+                        "node_type": node_type,
+                        "feature_names": feature_names,
+                        "index_key": node_index_key,
+                        "output_key": f"node_features:{node_type}",
+                    },
+                )
+            )
+        for edge_type, feature_names in self._resolved_edge_feature_names(graph):
+            additional_stages.append(
+                PlanStage(
+                    "fetch_edge_features",
+                    params={
+                        "edge_type": edge_type,
+                        "feature_names": feature_names,
+                        "index_key": edge_index_key,
+                        "output_key": f"edge_features:{edge_type}",
+                    },
+                )
+            )
+        if additional_stages:
+            return plan.append(*additional_stages)
+        return plan
 
     def sample(self, item):
         plan = self.build_plan(item)
@@ -564,8 +642,16 @@ class TemporalNeighborSampler(LinkNeighborSampler):
         max_events=None,
         strict_history=True,
         seed=None,
+        node_feature_names=None,
+        edge_feature_names=None,
     ):
-        super().__init__(num_neighbors=num_neighbors, base_sampler=None, seed=seed)
+        super().__init__(
+            num_neighbors=num_neighbors,
+            base_sampler=None,
+            seed=seed,
+            node_feature_names=node_feature_names,
+            edge_feature_names=edge_feature_names,
+        )
         if time_window is not None and int(time_window) < 0:
             raise ValueError("time_window must be >= 0")
         if max_events is not None and int(max_events) < 1:
@@ -694,7 +780,8 @@ class TemporalNeighborSampler(LinkNeighborSampler):
         plan_metadata = {}
         if item.sample_id is not None:
             plan_metadata["sample_id"] = item.sample_id
-        return SamplingPlan(
+        graph = item.graph
+        plan = SamplingPlan(
             request=TemporalSeedRequest(
                 src_ids=torch.tensor([int(item.src_index)], dtype=torch.long),
                 dst_ids=torch.tensor([int(item.dst_index)], dtype=torch.long),
@@ -708,8 +795,37 @@ class TemporalNeighborSampler(LinkNeighborSampler):
                 ),
             ),
             metadata=plan_metadata,
-            graph=item.graph,
+            graph=graph,
         )
+
+        additional_stages = []
+        for node_type, feature_names in self._resolved_node_feature_names(graph):
+            additional_stages.append(
+                PlanStage(
+                    "fetch_node_features",
+                    params={
+                        "node_type": node_type,
+                        "feature_names": feature_names,
+                        "index_key": "node_ids",
+                        "output_key": f"node_features:{node_type}",
+                    },
+                )
+            )
+        for edge_type, feature_names in self._resolved_edge_feature_names(graph):
+            additional_stages.append(
+                PlanStage(
+                    "fetch_edge_features",
+                    params={
+                        "edge_type": edge_type,
+                        "feature_names": feature_names,
+                        "index_key": "edge_ids",
+                        "output_key": f"edge_features:{edge_type}",
+                    },
+                )
+            )
+        if additional_stages:
+            return plan.append(*additional_stages)
+        return plan
 
     def sample(self, item):
         plan = self.build_plan(item)

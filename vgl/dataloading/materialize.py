@@ -1,3 +1,5 @@
+from dataclasses import replace
+
 import torch
 
 from vgl.dataloading.executor import MaterializationContext
@@ -135,6 +137,99 @@ def _hetero_subgraph(
     return Graph.hetero(nodes=nodes, edges=edges, time_attr=graph.schema.time_attr), node_mappings
 
 
+def _node_store_shape(store) -> tuple[int, torch.device]:
+    for value in store.data.values():
+        if isinstance(value, torch.Tensor) and value.ndim > 0:
+            return int(value.size(0)), value.device
+    raise ValueError(f"cannot infer node shape for node type {store.type_name!r}")
+
+
+def _graph_with_materialized_features(
+    graph: Graph,
+    *,
+    fetched_node_features: dict[str, dict[str, object]] | None = None,
+    fetched_edge_features: dict[object, dict[str, object]] | None = None,
+) -> Graph:
+    if not fetched_node_features and not fetched_edge_features:
+        return graph
+
+    if graph.schema.time_attr is None and set(graph.nodes) == {"node"} and len(graph.edges) == 1:
+        node_store = graph.nodes["node"]
+        node_data = dict(node_store.data)
+        node_ids = node_data.get("n_id")
+        if node_ids is None:
+            node_ids = torch.arange(graph.x.size(0), dtype=torch.long, device=graph.x.device)
+            node_data["n_id"] = node_ids
+        for feature_name, tensor_slice in (fetched_node_features or {}).get("node", {}).items():
+            node_data[feature_name] = _align_tensor_slice(node_ids, tensor_slice)
+
+        edge_type = graph._default_edge_type()
+        edge_store = graph.edges[edge_type]
+        edge_data = {key: value for key, value in edge_store.data.items() if key != "edge_index"}
+        edge_ids = edge_data.get("e_id")
+        if edge_ids is None:
+            edge_ids = torch.arange(edge_store.edge_index.size(1), dtype=torch.long, device=edge_store.edge_index.device)
+            edge_data["e_id"] = edge_ids
+        for feature_name, tensor_slice in (fetched_edge_features or {}).get(edge_type, {}).items():
+            edge_data[feature_name] = _align_tensor_slice(edge_ids, tensor_slice)
+        materialized = Graph.homo(edge_index=edge_store.edge_index, edge_data=edge_data, **node_data)
+    else:
+        nodes = {}
+        for node_type, store in graph.nodes.items():
+            node_data = dict(store.data)
+            node_ids = node_data.get("n_id")
+            if node_ids is None:
+                node_count, device = _node_store_shape(store)
+                node_ids = torch.arange(node_count, dtype=torch.long, device=device)
+                node_data["n_id"] = node_ids
+            for feature_name, tensor_slice in (fetched_node_features or {}).get(node_type, {}).items():
+                node_data[feature_name] = _align_tensor_slice(node_ids, tensor_slice)
+            nodes[node_type] = node_data
+
+        edges = {}
+        for edge_type, store in graph.edges.items():
+            edge_data = dict(store.data)
+            edge_ids = edge_data.get("e_id")
+            if edge_ids is None:
+                edge_ids = torch.arange(store.edge_index.size(1), dtype=torch.long, device=store.edge_index.device)
+                edge_data["e_id"] = edge_ids
+            for feature_name, tensor_slice in (fetched_edge_features or {}).get(edge_type, {}).items():
+                edge_data[feature_name] = _align_tensor_slice(edge_ids, tensor_slice)
+            edges[edge_type] = edge_data
+        if graph.schema.time_attr is not None:
+            materialized = Graph.temporal(nodes=nodes, edges=edges, time_attr=graph.schema.time_attr)
+        else:
+            materialized = Graph.hetero(nodes=nodes, edges=edges, time_attr=graph.schema.time_attr)
+
+    materialized.feature_store = graph.feature_store
+    return materialized
+
+
+def _materialize_record_payload(context: MaterializationContext, payload):
+    fetched_node_features = context.state.get("_materialized_node_features")
+    fetched_edge_features = context.state.get("_materialized_edge_features")
+    if not fetched_node_features and not fetched_edge_features:
+        return payload
+
+    graph_cache = {}
+
+    def _materialized_graph(graph):
+        graph_id = id(graph)
+        materialized = graph_cache.get(graph_id)
+        if materialized is None:
+            materialized = _graph_with_materialized_features(
+                graph,
+                fetched_node_features=fetched_node_features,
+                fetched_edge_features=fetched_edge_features,
+            )
+            graph_cache[graph_id] = materialized
+        return materialized
+
+    if isinstance(payload, list):
+        return [replace(record, graph=_materialized_graph(record.graph)) for record in payload]
+    return replace(payload, graph=_materialized_graph(payload.graph))
+
+
 def _node_context_to_sample(context: MaterializationContext) -> SampleRecord:
     if "sample" in context.state:
         return context.state["sample"]
@@ -211,7 +306,7 @@ def materialize_context(context: MaterializationContext):
     if kind == "graph":
         return _graph_context_to_sample(context)
     if kind in {"link", "temporal"}:
-        return _record_from_context(context)
+        return _materialize_record_payload(context, _record_from_context(context))
     raise ValueError(f"unsupported context request kind: {kind}")
 
 
@@ -232,7 +327,7 @@ def materialize_batch(items, *, label_source=None, label_key=None):
         if kind == "link":
             records = []
             for context in items:
-                record = _record_from_context(context)
+                record = _materialize_record_payload(context, _record_from_context(context))
                 if isinstance(record, list):
                     records.extend(record)
                 else:
@@ -241,7 +336,7 @@ def materialize_batch(items, *, label_source=None, label_key=None):
         if kind == "temporal":
             records = []
             for context in items:
-                record = _record_from_context(context)
+                record = _materialize_record_payload(context, _record_from_context(context))
                 if isinstance(record, list):
                     records.extend(record)
                 else:

@@ -27,7 +27,7 @@
 
 - **Unified `Graph` object** — a single data structure for homogeneous, heterogeneous, and temporal graphs with schema validation, lightweight views, and batching.
 - **Dataset-style link prediction splits** — `RandomLinkSplit` creates train/val/test `LinkPredictionRecord` datasets that plug directly into the existing loader, sampler, and trainer stack.
-- **Mini-batch neighbor sampling** — `NodeNeighborSampler`, `LinkNeighborSampler`, and `TemporalNeighborSampler` provide PyG/DGL-style local subgraph training for homogeneous, heterogeneous, and temporal node/link workloads, with opt-in plan-backed node/edge feature materialization for sampled node batches.
+- **Mini-batch neighbor sampling** — `NodeNeighborSampler`, `LinkNeighborSampler`, and `TemporalNeighborSampler` provide PyG/DGL-style local subgraph training for homogeneous, heterogeneous, and temporal node/link workloads, with opt-in plan-backed node/edge feature materialization for sampled node, link, and temporal batches.
 - **Foundation layers for scale** — `vgl.sparse`, `vgl.storage`, `vgl.ops`, `vgl.data`, and `vgl.distributed` provide sparse adjacency views, storage-backed graphs, graph transforms including relation-local hetero subgraphs/compaction, dataset catalogs / lazy on-disk formats, and local partition primitives plus typed node / edge routing, relation-scoped edge feature fetches, and partition-scoped graph queries while keeping `Graph`, `Loader`, and `Trainer` as the public entry points.
 - **50+ GNN convolution layers** — all built on a clean `MessagePassing` interface: `GCNConv`, `GATConv`, `SAGEConv`, `GINConv`, `TransformerConv`, and [many more](#supported-convolution-layers).
 - **Graph transformer encoders** — reusable encoder blocks such as `GraphTransformerEncoder`, `GraphormerEncoder`, `GPSLayer`, `NAGphormerEncoder`, and `SGFormerEncoder`.
@@ -72,7 +72,7 @@
 - `vgl.storage` turns in-memory or mmap-backed tensor stores plus graph stores into lazily feature-backed `Graph` objects through `Graph.from_storage(...)`, which is the main path for large-graph and feature-store-backed workflows. Storage-backed graphs retain their originating feature source so later plan execution can reuse it without extra wiring.
 - `vgl.ops` centralizes reusable graph transforms such as self-loop rewrites, bidirection conversion, induced subgraphs, relation-local hetero subgraphs, k-hop expansion, and compaction.
 - `vgl.data` now includes dataset manifests, local cache helpers, fixture-backed datasets, and an on-disk graph dataset format that writes one payload per graph under `graphs/`, loads items lazily, exposes manifest-backed split views, keeps legacy `graphs.pt` artifacts readable, and round-trips homogeneous, heterogeneous, and temporal graphs for reproducible pipelines.
-- `vgl.distributed` starts the shard-aware surface with partition manifests, deterministic local partition writing, local shard loading, shard/global id remapping, partition edge and adjacency queries, and single-process coordination contracts. The current local partition path now handles homogeneous, temporal homogeneous, single-node-type multi-relation, and true multi-node-type heterogeneous graphs without changing the overall manifest/payload workflow. Typed partition ownership flows through `PartitionManifest`, `LocalGraphShard`, and `LocalSamplingCoordinator`, so node routing can be scoped by `node_type`, relation-scoped edge ids can be routed by `edge_type`, edge features can be fetched through keys such as `('edge', edge_type, 'weight')`, and plan-backed feature fetch stages can route through the same coordinator when `Loader` or `PlanExecutor` receives it as the feature source or falls back to a graph-retained source. When those stages run during node sampling, the fetched slices are now materialized back into the sampled subgraph instead of staying stranded in executor state.
+- `vgl.distributed` starts the shard-aware surface with partition manifests, deterministic local partition writing, local shard loading, shard/global id remapping, partition edge and adjacency queries, and single-process coordination contracts. The current local partition path now handles homogeneous, temporal homogeneous, single-node-type multi-relation, and true multi-node-type heterogeneous graphs without changing the overall manifest/payload workflow. Typed partition ownership flows through `PartitionManifest`, `LocalGraphShard`, and `LocalSamplingCoordinator`, so node routing can be scoped by `node_type`, relation-scoped edge ids can be routed by `edge_type`, edge features can be fetched through keys such as `('edge', edge_type, 'weight')`, and plan-backed feature fetch stages can route through the same coordinator when `Loader` or `PlanExecutor` receives it as the feature source or falls back to a graph-retained source. When those stages run during node, link, or temporal sampling, the fetched slices are now materialized back into the sampled subgraph instead of staying stranded in executor state.
 
 These layers are intentionally underneath the user-facing API: models still consume `Graph` / batch objects, loaders still start at `Loader`, and training still starts at `Trainer`.
 
@@ -289,6 +289,8 @@ history = trainer.evaluate(eval_loader)
 
 Use `UniformNegativeLinkSampler` or `HardNegativeLinkSampler` for training-time sampled negatives, `CandidateLinkSampler` for validation/test-time ranking over all destinations or an explicit `candidate_dst` set, and wrap either one with `LinkNeighborSampler` when you want mini-batch message passing on local subgraphs instead of full-graph propagation.
 
+Pass `node_feature_names=...` and `edge_feature_names=...` to `LinkNeighborSampler` when those sampled link subgraphs should rehydrate node/edge tensors from an external feature store. For heterogeneous graphs, provide dictionaries keyed by node type and edge type.
+
 For heterogeneous link prediction, pass edge types explicitly:
 
 ```python
@@ -338,6 +340,8 @@ task = TemporalEventPredictionTask(target="label")
 ```
 
 Use `FullGraphSampler` when the model should see the full temporal graph for each event, or switch to `TemporalNeighborSampler` to build strict-history local subgraphs with optional hop fanout, rolling time windows, and `max_events` caps.
+
+`TemporalNeighborSampler(node_feature_names=..., edge_feature_names=...)` can append plan-backed fetch stages as well, so strict-history event batches can overlay sampled `x` / edge features from a retained graph feature store or an explicit `feature_store=` source.
 
 ---
 

@@ -55,6 +55,51 @@ def _record_materialized_features(context: "MaterializationContext", *, entity_k
     type_bucket.update(fetched)
 
 
+def _infer_data_device(data: dict[str, Any], *, fallback=None):
+    for value in data.values():
+        if isinstance(value, torch.Tensor):
+            return value.device
+    if fallback is not None:
+        return fallback
+    return torch.device("cpu")
+
+
+def _store_sampled_graph_indices(context: "MaterializationContext", graph) -> None:
+    if set(graph.nodes) == {"node"} and len(graph.edges) == 1:
+        node_store = graph.nodes["node"]
+        node_ids = node_store.data.get("n_id")
+        if node_ids is None:
+            node_ids = torch.arange(
+                graph._node_count("node"),
+                dtype=torch.long,
+                device=_infer_data_device(node_store.data, fallback=graph.edge_index.device),
+            )
+        edge_type = graph._default_edge_type()
+        edge_store = graph.edges[edge_type]
+        edge_ids = edge_store.data.get("e_id")
+        if edge_ids is None:
+            edge_ids = torch.arange(edge_store.edge_index.size(1), dtype=torch.long, device=edge_store.edge_index.device)
+        context.state["node_ids"] = node_ids
+        context.state["edge_ids"] = edge_ids
+        return
+
+    context.state["node_ids_by_type"] = {
+        node_type: store.data.get("n_id", torch.arange(
+            graph._node_count(node_type),
+            dtype=torch.long,
+            device=_infer_data_device(store.data),
+        ))
+        for node_type, store in graph.nodes.items()
+    }
+    context.state["edge_ids_by_type"] = {
+        edge_type: store.data.get(
+            "e_id",
+            torch.arange(store.edge_index.size(1), dtype=torch.long, device=store.edge_index.device),
+        )
+        for edge_type, store in graph.edges.items()
+    }
+
+
 @dataclass(slots=True)
 class MaterializationContext:
     request: Any
@@ -133,15 +178,21 @@ class PlanExecutor:
         records = list(stage.params["records"])
         sampled = sampler._sample_from_seed_records(records, is_sequence=bool(stage.params["is_sequence"]))
         if isinstance(sampled, (list, tuple)):
-            context.state["records"] = list(sampled)
+            sampled_records = list(sampled)
+            context.state["records"] = sampled_records
+            sampled_graph = sampled_records[0].graph
         else:
             context.state["record"] = sampled
+            sampled_graph = sampled.graph
+        _store_sampled_graph_indices(context, sampled_graph)
         return context
 
     @staticmethod
     def _sample_temporal_neighbors(stage: PlanStage, context: MaterializationContext) -> MaterializationContext:
         sampler = stage.params["sampler"]
-        context.state["record"] = sampler._sample_event(stage.params["record"])
+        record = sampler._sample_event(stage.params["record"])
+        context.state["record"] = record
+        _store_sampled_graph_indices(context, record.graph)
         return context
 
     @staticmethod

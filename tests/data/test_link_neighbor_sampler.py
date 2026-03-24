@@ -5,6 +5,12 @@ from vgl.data.dataset import ListDataset
 from vgl.data.loader import Loader
 from vgl.data.sample import LinkPredictionRecord
 from vgl.data.sampler import LinkNeighborSampler, UniformNegativeLinkSampler
+from vgl.storage import FeatureStore, InMemoryTensorStore
+
+
+HOMO_EDGE = ("node", "to", "node")
+WRITES = ("author", "writes", "paper")
+WRITTEN_BY = ("paper", "written_by", "author")
 
 
 def test_link_neighbor_sampler_extracts_local_subgraph_with_global_node_ids():
@@ -159,3 +165,80 @@ def test_loader_routes_link_neighbor_sampler_through_plan_execution():
     assert torch.equal(batch.labels, torch.tensor([1.0, 0.0]))
     assert torch.equal(batch.query_index, torch.tensor([0, 0]))
     assert batch.graph.x.size(0) == 4
+
+def test_link_neighbor_sampler_prefetch_option_materializes_homo_features_into_record_graph():
+    graph = Graph.homo(
+        edge_index=torch.tensor([[0, 1, 3], [1, 2, 1]]),
+        x=torch.zeros(4, 2),
+        edge_data={"edge_weight": torch.zeros(3)},
+    )
+    feature_store = FeatureStore(
+        {
+            ("node", "node", "x"): InMemoryTensorStore(torch.tensor([[1.0, 0.0], [2.0, 0.0], [3.0, 0.0], [4.0, 0.0]])),
+            ("edge", HOMO_EDGE, "edge_weight"): InMemoryTensorStore(torch.tensor([10.0, 20.0, 30.0])),
+        }
+    )
+    graph.feature_store = feature_store
+    sampler = LinkNeighborSampler(
+        num_neighbors=[-1],
+        node_feature_names=("x",),
+        edge_feature_names=("edge_weight",),
+    )
+
+    record = sampler.sample(LinkPredictionRecord(graph=graph, src_index=0, dst_index=1, label=1))
+
+    assert torch.equal(record.graph.n_id, torch.tensor([0, 1, 2, 3]))
+    assert torch.equal(record.graph.x, torch.tensor([[1.0, 0.0], [2.0, 0.0], [3.0, 0.0], [4.0, 0.0]]))
+    assert torch.equal(record.graph.edata["edge_weight"], torch.tensor([10.0, 20.0, 30.0]))
+
+
+def test_link_neighbor_sampler_prefetch_option_materializes_hetero_features_into_batch_graph():
+    graph = Graph.hetero(
+        nodes={
+            "author": {"x": torch.zeros(2, 2)},
+            "paper": {"x": torch.zeros(3, 2)},
+        },
+        edges={
+            WRITES: {
+                "edge_index": torch.tensor([[0, 1], [1, 2]]),
+                "edge_weight": torch.zeros(2),
+            },
+            WRITTEN_BY: {
+                "edge_index": torch.tensor([[1, 2], [0, 1]]),
+                "edge_weight": torch.zeros(2),
+            },
+        },
+    )
+    feature_store = FeatureStore(
+        {
+            ("node", "paper", "x"): InMemoryTensorStore(torch.tensor([[5.0, 0.0], [6.0, 0.0], [7.0, 0.0]])),
+            ("edge", WRITES, "edge_weight"): InMemoryTensorStore(torch.tensor([11.0, 13.0])),
+        }
+    )
+    loader = Loader(
+        dataset=ListDataset(
+            [
+                LinkPredictionRecord(
+                    graph=graph,
+                    src_index=0,
+                    dst_index=1,
+                    label=1,
+                    edge_type=WRITES,
+                )
+            ]
+        ),
+        sampler=LinkNeighborSampler(
+            num_neighbors=[-1],
+            node_feature_names={"paper": ("x",)},
+            edge_feature_names={WRITES: ("edge_weight",)},
+        ),
+        batch_size=1,
+        feature_store=feature_store,
+    )
+
+    batch = next(iter(loader))
+
+    assert torch.equal(batch.graph.nodes["paper"].n_id, torch.tensor([1]))
+    assert torch.equal(batch.graph.nodes["paper"].x, torch.tensor([[6.0, 0.0]]))
+    assert torch.equal(batch.graph.edges[WRITES].edge_weight, torch.tensor([11.0]))
+
