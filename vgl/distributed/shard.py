@@ -20,12 +20,20 @@ class LocalGraphShard:
     graph_store: InMemoryGraphStore
     graph: Graph
     _global_to_local_by_type: dict[str, dict[int, int]] = field(default_factory=dict, repr=False)
+    _global_to_local_edge_by_type: dict[tuple[str, str, str], dict[int, int]] = field(default_factory=dict, repr=False)
 
     def __post_init__(self) -> None:
         self.root = Path(self.root)
         self._global_to_local_by_type = {
             node_type: {int(node_id): index for index, node_id in enumerate(node_ids.tolist())}
             for node_type, node_ids in self.node_ids_by_type.items()
+        }
+        self._global_to_local_edge_by_type = {
+            edge_type: {
+                int(edge_id): index
+                for index, edge_id in enumerate(self.edge_ids(edge_type=edge_type).tolist())
+            }
+            for edge_type in self.graph.edges
         }
 
     @property
@@ -151,6 +159,42 @@ class LocalGraphShard:
         if local_ids.numel() > 0 and ((local_ids < 0).any() or (local_ids >= global_ids.numel()).any()):
             raise IndexError(
                 f"local node ids are out of range for partition {self.partition.partition_id} and node type {node_type!r}"
+            )
+        return global_ids[local_ids]
+
+    def edge_ids(self, *, edge_type=None) -> torch.Tensor:
+        if edge_type is None:
+            edge_type = self.graph._default_edge_type()
+        edge_type = tuple(edge_type)
+        return torch.as_tensor(self.graph.edges[edge_type].data["e_id"], dtype=torch.long)
+
+    def global_to_local_edge(self, edge_ids: torch.Tensor, *, edge_type=None) -> torch.Tensor:
+        if edge_type is None:
+            edge_type = self.graph._default_edge_type()
+        edge_type = tuple(edge_type)
+        try:
+            index = self._global_to_local_edge_by_type[edge_type]
+        except KeyError as exc:
+            raise KeyError(edge_type) from exc
+        values = []
+        for edge_id in torch.as_tensor(edge_ids, dtype=torch.long).tolist():
+            try:
+                values.append(index[int(edge_id)])
+            except KeyError as exc:
+                raise KeyError(
+                    f"edge {edge_id} is not present in partition {self.partition.partition_id} for edge type {edge_type!r}"
+                ) from exc
+        return torch.tensor(values, dtype=torch.long)
+
+    def local_to_global_edge(self, edge_ids: torch.Tensor, *, edge_type=None) -> torch.Tensor:
+        if edge_type is None:
+            edge_type = self.graph._default_edge_type()
+        edge_type = tuple(edge_type)
+        global_ids = self.edge_ids(edge_type=edge_type)
+        local_ids = torch.as_tensor(edge_ids, dtype=torch.long)
+        if local_ids.numel() > 0 and ((local_ids < 0).any() or (local_ids >= global_ids.numel()).any()):
+            raise IndexError(
+                f"local edge ids are out of range for partition {self.partition.partition_id} and edge type {edge_type!r}"
             )
         return global_ids[local_ids]
 

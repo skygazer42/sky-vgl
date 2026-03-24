@@ -32,7 +32,7 @@ For advanced systems work, the new foundation layers sit underneath the same sur
 - `vgl.storage` for feature / graph stores, mmap-backed feature tensors, and `Graph.from_storage(...)`
 - `vgl.ops` for reusable graph transforms, homogeneous/heterogeneous relation-local subgraph extraction, and compaction
 - `vgl.data` for dataset manifests, cache helpers, built-in datasets, and manifest-backed homo/hetero/temporal on-disk datasets with lazy per-item payloads and split views
-- `vgl.distributed` for partition metadata, local shard loading, typed node routing, partition graph queries, and sampling coordination contracts across homogeneous, temporal homogeneous, single-node-type multi-relation, and multi-node-type heterogeneous graphs
+- `vgl.distributed` for partition metadata, local shard loading, typed node routing, relation-scoped edge routing, edge feature fetches, partition graph queries, and sampling coordination contracts across homogeneous, temporal homogeneous, single-node-type multi-relation, and multi-node-type heterogeneous graphs
 
 The smallest workflow is:
 
@@ -297,6 +297,11 @@ coordinator = LocalSamplingCoordinator({0: shard})
 local_graph = shard.graph
 global_edge_index = shard.global_edge_index(edge_type=("node", "follows", "node"))
 partition_node_ids = coordinator.partition_node_ids(0, node_type="paper")
+partition_edge_ids = coordinator.partition_edge_ids(0, edge_type=("author", "writes", "paper"))
+edge_weights = coordinator.fetch_edge_features(
+    ("edge", ("author", "writes", "paper"), "weight"),
+    partition_edge_ids,
+).values
 partition_adjacency = coordinator.fetch_partition_adjacency(0, edge_type=("node", "follows", "node"), layout="csr")
 ```
 

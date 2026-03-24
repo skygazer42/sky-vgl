@@ -60,7 +60,7 @@ def test_local_graph_shard_loads_temporal_partition_graph(tmp_path):
     assert torch.equal(shard.local_to_global(torch.tensor([0, 1])), torch.tensor([2, 3]))
 
 
-def test_local_graph_shard_reconstructs_multi_relation_partition_graph(tmp_path):
+def test_local_graph_shard_reconstructs_multi_relation_partition_graph_edge_ids(tmp_path):
     follows = ("node", "follows", "node")
     likes = ("node", "likes", "node")
     graph = Graph.hetero(
@@ -87,9 +87,12 @@ def test_local_graph_shard_reconstructs_multi_relation_partition_graph(tmp_path)
     assert torch.equal(shard.graph.edges[likes].score, torch.tensor([0.7]))
     assert torch.equal(shard.global_edge_index(edge_type=follows), torch.tensor([[2, 3], [3, 2]]))
     assert torch.equal(shard.global_edge_index(edge_type=likes), torch.tensor([[3], [2]]))
+    assert torch.equal(shard.edge_ids(edge_type=follows), torch.tensor([2, 3]))
+    assert torch.equal(shard.global_to_local_edge(torch.tensor([3, 2]), edge_type=follows), torch.tensor([1, 0]))
+    assert torch.equal(shard.local_to_global_edge(torch.tensor([0, 1]), edge_type=follows), torch.tensor([2, 3]))
 
 
-def test_local_graph_shard_reconstructs_heterogeneous_partition_graph(tmp_path):
+def test_local_graph_shard_reconstructs_heterogeneous_partition_graph_edge_ids(tmp_path):
     writes = ("author", "writes", "paper")
     cites = ("paper", "cites", "paper")
     graph = Graph.hetero(
@@ -124,3 +127,6 @@ def test_local_graph_shard_reconstructs_heterogeneous_partition_graph(tmp_path):
     assert torch.equal(shard.graph.edges[cites].score, torch.tensor([0.3, 0.4]))
     assert torch.equal(shard.global_edge_index(edge_type=writes), torch.tensor([[2, 3], [3, 2]]))
     assert torch.equal(shard.global_edge_index(edge_type=cites), torch.tensor([[2, 3], [3, 2]]))
+    assert torch.equal(shard.edge_ids(edge_type=writes), torch.tensor([2, 3]))
+    assert torch.equal(shard.global_to_local_edge(torch.tensor([3, 2]), edge_type=writes), torch.tensor([1, 0]))
+    assert torch.equal(shard.local_to_global_edge(torch.tensor([0, 1]), edge_type=cites), torch.tensor([2, 3]))
