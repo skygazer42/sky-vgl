@@ -1,8 +1,10 @@
+import json
+
 import torch
 
 from vgl import Graph
 from vgl.data.catalog import DatasetManifest, DatasetSplit
-from vgl.data.ondisk import OnDiskGraphDataset
+from vgl.data.ondisk import OnDiskGraphDataset, serialize_graph
 
 
 def _graphs():
@@ -32,7 +34,9 @@ def test_ondisk_graph_dataset_round_trips_manifest_and_graphs(tmp_path):
     dataset = OnDiskGraphDataset(tmp_path)
 
     assert (tmp_path / "manifest.json").exists()
-    assert (tmp_path / "graphs.pt").exists()
+    assert (tmp_path / "graphs").is_dir()
+    assert (tmp_path / "graphs" / "graph-000000.pt").exists()
+    assert (tmp_path / "graphs" / "graph-000001.pt").exists()
     assert dataset.manifest.name == "toy-graph"
     assert dataset.manifest.split("train").size == 2
     assert len(dataset) == 2
@@ -100,3 +104,59 @@ def test_ondisk_graph_dataset_round_trips_temporal_graphs(tmp_path):
     assert restored.schema.time_attr == "timestamp"
     assert torch.equal(restored.edge_index, torch.tensor([[0, 1], [1, 0]]))
     assert torch.equal(restored.edata["timestamp"], torch.tensor([3, 5]))
+
+
+def test_ondisk_graph_dataset_writes_lazy_graph_layout(tmp_path):
+    manifest = DatasetManifest(
+        name="toy-graph",
+        version="1.0",
+        splits=(DatasetSplit("train", size=2),),
+    )
+
+    OnDiskGraphDataset.write(tmp_path, manifest, _graphs())
+    dataset = OnDiskGraphDataset(tmp_path)
+
+    assert (tmp_path / "graphs").is_dir()
+    assert (tmp_path / "graphs" / "graph-000000.pt").exists()
+    assert (tmp_path / "graphs" / "graph-000001.pt").exists()
+    assert torch.equal(dataset[0].edge_index, torch.tensor([[0], [1]]))
+    assert torch.equal(dataset[1].x, torch.tensor([[0.0], [1.0], [0.0]]))
+
+
+def test_ondisk_graph_dataset_exposes_contiguous_split_views(tmp_path):
+    manifest = DatasetManifest(
+        name="toy-splits",
+        version="1.0",
+        splits=(
+            DatasetSplit("train", size=1),
+            DatasetSplit("test", size=1),
+        ),
+    )
+
+    OnDiskGraphDataset.write(tmp_path, manifest, _graphs())
+    dataset = OnDiskGraphDataset(tmp_path)
+
+    train = dataset.split("train")
+    test = dataset.split("test")
+
+    assert len(train) == 1
+    assert len(test) == 1
+    assert torch.equal(train[0].x, torch.tensor([[1.0], [0.0]]))
+    assert torch.equal(test[0].x, torch.tensor([[0.0], [1.0], [0.0]]))
+
+
+def test_ondisk_graph_dataset_loads_legacy_graphs_file(tmp_path):
+    manifest = DatasetManifest(
+        name="toy-legacy",
+        version="1.0",
+        splits=(DatasetSplit("train", size=2),),
+    )
+
+    (tmp_path / "manifest.json").write_text(json.dumps(manifest.to_dict(), sort_keys=True, indent=2))
+    torch.save([serialize_graph(graph) for graph in _graphs()], tmp_path / "graphs.pt")
+
+    dataset = OnDiskGraphDataset(tmp_path)
+
+    assert len(dataset) == 2
+    assert torch.equal(dataset[0].edge_index, torch.tensor([[0], [1]]))
+    assert torch.equal(dataset[1].x, torch.tensor([[0.0], [1.0], [0.0]]))

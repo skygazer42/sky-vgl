@@ -4,7 +4,6 @@ from pathlib import Path
 import torch
 
 from vgl.data.catalog import DatasetManifest, DatasetSplit
-from vgl.dataloading.dataset import ListDataset
 from vgl.graph.graph import Graph
 
 
@@ -61,20 +60,64 @@ def manifest_from_dict(payload: dict) -> DatasetManifest:
     )
 
 
-class OnDiskGraphDataset(ListDataset):
-    def __init__(self, root):
+class OnDiskGraphDataset:
+    def __init__(self, root, *, manifest=None, entries=None):
         self.root = Path(root)
-        self.manifest = manifest_from_dict(json.loads((self.root / "manifest.json").read_text()))
-        payload = torch.load(self.root / "graphs.pt", weights_only=True)
-        super().__init__([deserialize_graph(graph_payload) for graph_payload in payload])
+        self.manifest = manifest_from_dict(json.loads((self.root / "manifest.json").read_text())) if manifest is None else manifest
+        self._entries = tuple(self._load_entries() if entries is None else entries)
+
+    def _load_entries(self):
+        graphs_root = self.root / "graphs"
+        if graphs_root.is_dir():
+            graph_paths = tuple(sorted(graphs_root.glob("graph-*.pt")))
+            legacy_path = self.root / "graphs.pt"
+            if graph_paths or not legacy_path.exists():
+                return graph_paths
+        legacy_path = self.root / "graphs.pt"
+        if legacy_path.exists():
+            return tuple(torch.load(legacy_path, weights_only=True))
+        return ()
+
+    @staticmethod
+    def _deserialize_entry(entry):
+        if isinstance(entry, Path):
+            return deserialize_graph(torch.load(entry, weights_only=True))
+        return deserialize_graph(entry)
+
+    def __len__(self):
+        return len(self._entries)
+
+    def __getitem__(self, index):
+        if isinstance(index, slice):
+            return [self[position] for position in range(*index.indices(len(self)))]
+        return self._deserialize_entry(self._entries[index])
+
+    def split(self, name):
+        start = 0
+        for split in self.manifest.splits:
+            stop = start + split.size
+            if split.name == name:
+                if stop > len(self):
+                    raise ValueError(f'manifest split {name!r} exceeds dataset size')
+                return type(self)(self.root, manifest=self.manifest, entries=self._entries[start:stop])
+            start = stop
+        raise KeyError(name)
 
     @classmethod
     def write(cls, root, manifest: DatasetManifest, graphs) -> Path:
         root = Path(root)
         root.mkdir(parents=True, exist_ok=True)
-        graph_payload = [serialize_graph(graph) for graph in graphs]
+        graphs_root = root / "graphs"
+        graphs_root.mkdir(exist_ok=True)
+        for existing in graphs_root.glob("graph-*.pt"):
+            existing.unlink()
         (root / "manifest.json").write_text(json.dumps(manifest.to_dict(), sort_keys=True, indent=2))
-        torch.save(graph_payload, root / "graphs.pt")
+        legacy_path = root / "graphs.pt"
+        if legacy_path.exists():
+            legacy_path.unlink()
+        for index, graph in enumerate(graphs):
+            graph_path = graphs_root / f"graph-{index:06d}.pt"
+            torch.save(serialize_graph(graph), graph_path)
         return root
 
 

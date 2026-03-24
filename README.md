@@ -28,7 +28,7 @@
 - **Unified `Graph` object** — a single data structure for homogeneous, heterogeneous, and temporal graphs with schema validation, lightweight views, and batching.
 - **Dataset-style link prediction splits** — `RandomLinkSplit` creates train/val/test `LinkPredictionRecord` datasets that plug directly into the existing loader, sampler, and trainer stack.
 - **Mini-batch neighbor sampling** — `NodeNeighborSampler`, `LinkNeighborSampler`, and `TemporalNeighborSampler` provide PyG/DGL-style local subgraph training for homogeneous, heterogeneous, and temporal node/link workloads.
-- **Foundation layers for scale** — `vgl.sparse`, `vgl.storage`, `vgl.ops`, `vgl.data`, and `vgl.distributed` provide sparse adjacency views, storage-backed graphs, graph transforms including relation-local hetero subgraphs/compaction, dataset catalogs / on-disk formats, and local partition primitives plus partition-scoped graph queries while keeping `Graph`, `Loader`, and `Trainer` as the public entry points.
+- **Foundation layers for scale** — `vgl.sparse`, `vgl.storage`, `vgl.ops`, `vgl.data`, and `vgl.distributed` provide sparse adjacency views, storage-backed graphs, graph transforms including relation-local hetero subgraphs/compaction, dataset catalogs / lazy on-disk formats, and local partition primitives plus partition-scoped graph queries while keeping `Graph`, `Loader`, and `Trainer` as the public entry points.
 - **50+ GNN convolution layers** — all built on a clean `MessagePassing` interface: `GCNConv`, `GATConv`, `SAGEConv`, `GINConv`, `TransformerConv`, and [many more](#supported-convolution-layers).
 - **Graph transformer encoders** — reusable encoder blocks such as `GraphTransformerEncoder`, `GraphormerEncoder`, `GPSLayer`, `NAGphormerEncoder`, and `SGFormerEncoder`.
 - **Temporal encoders & memory** — temporal modules such as `TimeEncoder`, `TGATLayer`, `TGATEncoder`, `IdentityTemporalMessage`, and `TGNMemory` plug into event prediction without changing the training loop.
@@ -54,7 +54,7 @@
 | `vgl.sparse` | `SparseTensor`, COO/CSR/CSC conversion helpers, transpose/reduction utilities, sparse graph ops |
 | `vgl.storage` | tensor stores including mmap-backed tensors, `FeatureStore`, `GraphStore`, storage-backed graph assembly |
 | `vgl.ops` | structure transforms, homo/hetero relation-local subgraph extraction, k-hop expansion, compaction |
-| `vgl.data` | dataset catalog models, cache helpers, built-in datasets, homo/hetero/temporal on-disk datasets |
+| `vgl.data` | dataset catalog models, cache helpers, built-in datasets, lazy homo/hetero/temporal on-disk datasets |
 | `vgl.dataloading` | `DataLoader`, `SamplingPlan`, plan executor, samplers, sample records |
 | `vgl.distributed` | partition metadata, local shard loading, store adapters, partition graph queries, sampling coordination |
 | `vgl.nn` | `MessagePassing`, 50+ convolution layers, graph/temporal encoders, `HeteroConv`, readout, `GroupRevRes` |
@@ -71,7 +71,7 @@
 - `vgl.sparse` is where adjacency layouts and sparse execution helpers live. It now exposes COO/CSR/CSC conversion, transpose, row/column structural selection, additive reductions, and cached adjacency views through `Graph.adjacency(...)`.
 - `vgl.storage` turns in-memory or mmap-backed tensor stores plus graph stores into lazily feature-backed `Graph` objects through `Graph.from_storage(...)`, which is the main path for large-graph and feature-store-backed workflows.
 - `vgl.ops` centralizes reusable graph transforms such as self-loop rewrites, bidirection conversion, induced subgraphs, relation-local hetero subgraphs, k-hop expansion, and compaction.
-- `vgl.data` now includes dataset manifests, local cache helpers, fixture-backed datasets, and an on-disk graph dataset format that round-trips homogeneous, heterogeneous, and temporal graphs for reproducible pipelines.
+- `vgl.data` now includes dataset manifests, local cache helpers, fixture-backed datasets, and an on-disk graph dataset format that writes one payload per graph under `graphs/`, loads items lazily, exposes manifest-backed split views, keeps legacy `graphs.pt` artifacts readable, and round-trips homogeneous, heterogeneous, and temporal graphs for reproducible pipelines.
 - `vgl.distributed` starts the shard-aware surface with partition manifests, deterministic local partition writing, local shard loading, shard/global id remapping, partition edge and adjacency queries, and single-process coordination contracts.
 
 These layers are intentionally underneath the user-facing API: models still consume `Graph` / batch objects, loaders still start at `Loader`, and training still starts at `Trainer`.

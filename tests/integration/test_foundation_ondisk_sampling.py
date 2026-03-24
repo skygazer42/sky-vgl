@@ -33,7 +33,7 @@ def test_ondisk_graph_dataset_flows_into_loader_and_trainer(tmp_path):
         splits=(DatasetSplit("train", size=len(graphs)),),
     )
     OnDiskGraphDataset.write(tmp_path, manifest, graphs)
-    dataset = OnDiskGraphDataset(tmp_path)
+    dataset = OnDiskGraphDataset(tmp_path).split("train")
     loader = DataLoader(
         dataset=[SampleRecord(graph=dataset[index], metadata={}, sample_id=str(index)) for index in range(len(dataset))],
         sampler=FullGraphSampler(),
