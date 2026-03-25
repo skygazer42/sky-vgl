@@ -51,7 +51,7 @@
 | Package | Description |
 |:--|:--|
 | `vgl.graph` | `Graph`, `GraphBatch`, `GraphSchema`, `GraphView`, node / edge stores |
-| `vgl.sparse` | `SparseTensor`, COO/CSR/CSC conversion helpers, transpose/reduction utilities, sparse graph ops |
+| `vgl.sparse` | `SparseTensor`, COO/CSR/CSC conversion helpers, transpose/reduction utilities, SPMM/SDDMM, edge softmax, sparse graph ops |
 | `vgl.storage` | tensor stores including mmap-backed tensors, `FeatureStore`, `GraphStore`, storage-backed graph assembly with retained feature-source context |
 | `vgl.ops` | structure transforms, line graphs, metapath reachability, homo/hetero relation-local subgraph extraction, k-hop expansion, compaction |
 | `vgl.data` | dataset catalog models, cache helpers, built-in datasets, lazy homo/hetero/temporal on-disk datasets |
@@ -68,7 +68,7 @@
 
 ### Foundation Layers
 
-- `vgl.sparse` is where adjacency layouts and sparse execution helpers live. It now exposes COO/CSR/CSC conversion, transpose, row/column structural selection, additive reductions, and cached adjacency views through `Graph.adjacency(...)`.
+- `vgl.sparse` is where adjacency layouts and sparse execution helpers live. It now exposes COO/CSR/CSC conversion, transpose, row/column structural selection, additive reductions, sampled dense-dense matmul through `sddmm(...)`, edge-wise normalization through `edge_softmax(...)`, and cached adjacency views through `Graph.adjacency(...)`.
 - `vgl.storage` turns in-memory or mmap-backed tensor stores plus graph stores into lazily feature-backed `Graph` objects through `Graph.from_storage(...)`, which is the main path for large-graph and feature-store-backed workflows. Storage-backed graphs retain their originating feature source so later plan execution can reuse it without extra wiring.
 - `vgl.ops` centralizes reusable graph transforms such as self-loop rewrites, bidirection conversion, line-graph construction, metapath reachability, induced subgraphs, relation-local hetero subgraphs, relation-local hetero k-hop expansion, and compaction. For bipartite heterogeneous relations, `khop_nodes(...)` expects seeds keyed by node type and returns per-type node ids when an `edge_type` is selected, while `metapath_reachable_graph(...)` composes a typed metapath into one derived reachable relation.
 - `vgl.data` now includes dataset manifests, local cache helpers, fixture-backed datasets, and an on-disk graph dataset format that writes one payload per graph under `graphs/`, loads items lazily, exposes manifest-backed split views, keeps legacy `graphs.pt` artifacts readable, and round-trips homogeneous, heterogeneous, and temporal graphs for reproducible pipelines.

@@ -1,5 +1,8 @@
 import torch
 
+from vgl.sparse import edge_softmax as sparse_edge_softmax
+from vgl.sparse import from_edge_index
+
 
 def coerce_homo_inputs(graph_or_x, edge_index, layer_name):
     if edge_index is None:
@@ -40,11 +43,11 @@ def symmetric_propagate(x, edge_index):
 
 
 def edge_softmax(scores, edge_index, num_nodes):
-    _, col = edge_index
-    weights = torch.exp(scores - scores.max())
-    normalizer = torch.zeros(num_nodes, dtype=weights.dtype, device=weights.device)
-    normalizer.index_add_(0, col, weights)
-    return weights / normalizer[col].clamp_min(1e-12)
+    num_rows = 0
+    if edge_index.numel() > 0:
+        num_rows = int(edge_index[0].max().item()) + 1
+    sparse = from_edge_index(edge_index, shape=(num_rows, num_nodes))
+    return sparse_edge_softmax(sparse, scores)
 
 
 def propagate_steps(x, edge_index, steps):

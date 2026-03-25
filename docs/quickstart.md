@@ -28,7 +28,7 @@ Legacy `vgl.data` and `vgl.train` paths still work, but new code should prefer t
 
 For advanced systems work, the new foundation layers sit underneath the same surface API:
 
-- `vgl.sparse` for cached COO/CSR/CSC adjacency layouts, transpose/reduction helpers, and sparse operators
+- `vgl.sparse` for cached COO/CSR/CSC adjacency layouts, transpose/reduction helpers, and sparse operators such as `spmm(...)`, `sddmm(...)`, and `edge_softmax(...)`
 - `vgl.storage` for feature / graph stores, mmap-backed feature tensors, and `Graph.from_storage(...)` with retained feature-source context
 - `vgl.ops` for reusable graph transforms, line graphs, metapath reachability, homogeneous/heterogeneous relation-local subgraph extraction, relation-local k-hop expansion, and compaction
 - `vgl.data` for dataset manifests, cache helpers, built-in datasets, and manifest-backed homo/hetero/temporal on-disk datasets with lazy per-item payloads and split views

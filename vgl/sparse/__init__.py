@@ -5,6 +5,8 @@ from vgl.sparse.convert import to_coo as to_coo
 from vgl.sparse.convert import to_csc as to_csc
 from vgl.sparse.convert import to_csr as to_csr
 from vgl.sparse.ops import degree as degree
+from vgl.sparse.ops import edge_softmax as edge_softmax
+from vgl.sparse.ops import sddmm as sddmm
 from vgl.sparse.ops import select_cols as select_cols
 from vgl.sparse.ops import select_rows as select_rows
 from vgl.sparse.ops import spmm as spmm
@@ -24,4 +26,6 @@ __all__ = [
     "transpose",
     "sum",
     "spmm",
+    "sddmm",
+    "edge_softmax",
 ]

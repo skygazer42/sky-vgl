@@ -1,7 +1,7 @@
 import pytest
 import torch
 
-from vgl.sparse import SparseLayout, from_edge_index
+from vgl.sparse import SparseLayout, edge_softmax, from_edge_index, sddmm
 from vgl.sparse.ops import degree, select_cols, select_rows, spmm, sum as sparse_sum, transpose
 
 
@@ -146,3 +146,70 @@ def test_degree_uses_values_when_present():
 
     assert torch.equal(degree(sparse, dim=0), torch.tensor([1.0, 0.0, 2.0]))
     assert torch.equal(degree(sparse, dim=1), torch.tensor([2.0, 0.25, 0.75]))
+
+
+def test_sddmm_computes_sampled_dot_products_on_sparse_structure():
+    sparse = from_edge_index(
+        torch.tensor([[0, 0, 2], [1, 2, 0]]),
+        shape=(3, 3),
+    )
+    lhs = torch.tensor([[1.0, 2.0], [0.0, 1.0], [3.0, 4.0]])
+    rhs = torch.tensor([[2.0, 0.0], [1.0, 1.0], [0.0, 2.0]])
+
+    result = sddmm(sparse, lhs, rhs)
+
+    assert result.layout is SparseLayout.COO
+    assert result.shape == sparse.shape
+    assert torch.equal(torch.stack((result.row, result.col)), torch.tensor([[0, 0, 2], [1, 2, 0]]))
+    assert torch.equal(result.values, torch.tensor([3.0, 4.0, 6.0]))
+
+
+def test_sddmm_preserves_sparse_layout_and_shape_for_compressed_inputs():
+    sparse = from_edge_index(
+        torch.tensor([[0, 1, 1], [1, 0, 2]]),
+        shape=(2, 3),
+        layout=SparseLayout.CSR,
+    )
+    lhs = torch.tensor([[1.0, 0.0], [2.0, 1.0]])
+    rhs = torch.tensor([[1.0, 1.0], [0.0, 2.0], [3.0, 1.0]])
+
+    result = sddmm(sparse, lhs, rhs)
+
+    assert result.layout is SparseLayout.CSR
+    assert result.shape == (2, 3)
+    assert torch.equal(result.crow_indices, sparse.crow_indices)
+    assert torch.equal(result.col_indices, sparse.col_indices)
+    assert torch.equal(result.values, torch.tensor([0.0, 3.0, 7.0]))
+
+
+def test_edge_softmax_normalizes_scores_by_destination_dimension():
+    sparse = from_edge_index(
+        torch.tensor([[0, 1, 2, 0], [1, 1, 1, 2]]),
+        shape=(3, 3),
+    )
+    scores = torch.tensor([0.0, 1.0, 2.0, 3.0])
+
+    weights = edge_softmax(sparse, scores)
+
+    assert torch.allclose(weights[:3], torch.softmax(scores[:3], dim=0))
+    assert torch.allclose(weights[3:], torch.tensor([1.0]))
+
+
+def test_edge_softmax_handles_empty_sparse_tensor():
+    sparse = from_edge_index(torch.empty((2, 0), dtype=torch.long), shape=(3, 3))
+    scores = torch.empty(0)
+
+    weights = edge_softmax(sparse, scores)
+
+    assert weights.shape == (0,)
+    assert weights.dtype == scores.dtype
+
+
+def test_edge_softmax_rejects_score_length_mismatch():
+    sparse = from_edge_index(
+        torch.tensor([[0, 0, 2], [1, 2, 0]]),
+        shape=(3, 3),
+    )
+
+    with pytest.raises(ValueError, match="scores length must match sparse nnz"):
+        edge_softmax(sparse, torch.tensor([0.0, 1.0]))
