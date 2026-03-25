@@ -19,6 +19,7 @@ class LocalGraphShard:
     feature_store: FeatureStore
     graph_store: InMemoryGraphStore
     graph: Graph
+    boundary_edge_data_by_type: dict[tuple[str, str, str], dict] = field(default_factory=dict, repr=False)
     _global_to_local_by_type: dict[str, dict[int, int]] = field(default_factory=dict, repr=False)
     _global_to_local_edge_by_type: dict[tuple[str, str, str], dict[int, int]] = field(default_factory=dict, repr=False)
 
@@ -126,6 +127,29 @@ class LocalGraphShard:
             },
             time_attr=graph.schema.time_attr,
         )
+        boundary_edge_data_by_type = {}
+        raw_boundary_edges = payload.get("boundary_edges", {})
+        for edge_type in edge_types:
+            edge_type = tuple(edge_type)
+            edge_index = graph.edges[edge_type].edge_index
+            raw_edge_data = raw_boundary_edges.get(edge_type)
+            if raw_edge_data is None:
+                raw_edge_data = {
+                    "edge_index": torch.empty((2, 0), dtype=torch.long, device=edge_index.device),
+                    "e_id": torch.empty((0,), dtype=torch.long, device=edge_index.device),
+                }
+            boundary_edge_data_by_type[edge_type] = {
+                key: value.clone() if isinstance(value, torch.Tensor) else value
+                for key, value in dict(raw_edge_data).items()
+            }
+            boundary_edge_data_by_type[edge_type].setdefault(
+                "edge_index",
+                torch.empty((2, 0), dtype=torch.long, device=edge_index.device),
+            )
+            boundary_edge_data_by_type[edge_type].setdefault(
+                "e_id",
+                torch.empty((0,), dtype=torch.long, device=edge_index.device),
+            )
         graph = Graph.from_storage(schema=schema, feature_store=feature_store, graph_store=graph_store)
         return cls(
             manifest=manifest,
@@ -135,6 +159,7 @@ class LocalGraphShard:
             feature_store=feature_store,
             graph_store=graph_store,
             graph=graph,
+            boundary_edge_data_by_type=boundary_edge_data_by_type,
         )
 
     def global_to_local(self, node_ids: torch.Tensor, *, node_type: str = "node") -> torch.Tensor:
@@ -167,6 +192,15 @@ class LocalGraphShard:
             edge_type = self.graph._default_edge_type()
         edge_type = tuple(edge_type)
         return torch.as_tensor(self.graph.edges[edge_type].data["e_id"], dtype=torch.long)
+
+    def boundary_edge_ids(self, *, edge_type=None) -> torch.Tensor:
+        if edge_type is None:
+            edge_type = self.graph._default_edge_type()
+        edge_type = tuple(edge_type)
+        return torch.as_tensor(self.boundary_edge_data_by_type[edge_type]["e_id"], dtype=torch.long)
+
+    def incident_edge_ids(self, *, edge_type=None) -> torch.Tensor:
+        return torch.cat((self.edge_ids(edge_type=edge_type), self.boundary_edge_ids(edge_type=edge_type)))
 
     def global_to_local_edge(self, edge_ids: torch.Tensor, *, edge_type=None) -> torch.Tensor:
         if edge_type is None:
@@ -210,6 +244,15 @@ class LocalGraphShard:
                 self.local_to_global(local_edge_index[1], node_type=dst_type),
             )
         )
+
+    def boundary_edge_index(self, *, edge_type=None) -> torch.Tensor:
+        if edge_type is None:
+            edge_type = self.graph._default_edge_type()
+        edge_type = tuple(edge_type)
+        return torch.as_tensor(self.boundary_edge_data_by_type[edge_type]["edge_index"], dtype=torch.long)
+
+    def incident_edge_index(self, *, edge_type=None) -> torch.Tensor:
+        return torch.cat((self.global_edge_index(edge_type=edge_type), self.boundary_edge_index(edge_type=edge_type)), dim=1)
 
 
 __all__ = ["LocalGraphShard"]

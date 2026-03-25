@@ -32,7 +32,7 @@ For advanced systems work, the new foundation layers sit underneath the same sur
 - `vgl.storage` for feature / graph stores, mmap-backed feature tensors, and `Graph.from_storage(...)` with retained feature-source context
 - `vgl.ops` for reusable graph transforms, homogeneous/heterogeneous relation-local subgraph extraction, relation-local k-hop expansion, and compaction
 - `vgl.data` for dataset manifests, cache helpers, built-in datasets, and manifest-backed homo/hetero/temporal on-disk datasets with lazy per-item payloads and split views
-- `vgl.distributed` for partition metadata, local shard loading, typed node routing, relation-scoped edge routing, edge feature fetches, partition graph queries, sampling coordination contracts, and routed plan feature sources across homogeneous, temporal homogeneous, single-node-type multi-relation, and multi-node-type heterogeneous graphs
+- `vgl.distributed` for partition metadata, local shard loading, typed node routing, relation-scoped edge routing, edge feature fetches, owned-local plus boundary/incident partition queries, sampling coordination contracts, and routed plan feature sources across homogeneous, temporal homogeneous, single-node-type multi-relation, and multi-node-type heterogeneous graphs
 
 For relation-local heterogeneous graph ops, pass `edge_type=...` and provide bipartite `khop_nodes(...)` seeds as `{node_type: ids}` so the returned node ids stay partitioned by node type and can flow directly into `khop_subgraph(...)`.
 
@@ -306,12 +306,15 @@ coordinator = LocalSamplingCoordinator({0: shard})
 
 local_graph = shard.graph
 global_edge_index = shard.global_edge_index(edge_type=("node", "follows", "node"))
+boundary_edge_index = shard.boundary_edge_index(edge_type=("node", "follows", "node"))
 partition_node_ids = coordinator.partition_node_ids(0, node_type="paper")
 partition_edge_ids = coordinator.partition_edge_ids(0, edge_type=("author", "writes", "paper"))
+partition_boundary_edge_ids = coordinator.partition_boundary_edge_ids(0, edge_type=("author", "writes", "paper"))
 edge_weights = coordinator.fetch_edge_features(
     ("edge", ("author", "writes", "paper"), "weight"),
     partition_edge_ids,
 ).values
+incident_edge_index = coordinator.fetch_partition_incident_edge_index(0, edge_type=("node", "follows", "node"))
 partition_adjacency = coordinator.fetch_partition_adjacency(0, edge_type=("node", "follows", "node"), layout="csr")
 ```
 

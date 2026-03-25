@@ -23,6 +23,23 @@ def _slice_node_data(graph: Graph, node_type: str, start: int, end: int, *, devi
     return node_data, node_ids
 
 
+def _slice_edge_data(edge_store, edge_mask: torch.Tensor, *, edge_index: torch.Tensor) -> dict:
+    edge_count = int(edge_store.edge_index.size(1))
+    edge_data = {"edge_index": edge_index}
+    for key, value in edge_store.data.items():
+        if key == "edge_index":
+            continue
+        if isinstance(value, torch.Tensor) and value.ndim > 0 and value.size(0) == edge_count:
+            edge_data[key] = value[edge_mask]
+        else:
+            edge_data[key] = value
+    edge_data.setdefault(
+        "e_id",
+        torch.arange(edge_count, dtype=torch.long, device=edge_store.edge_index.device)[edge_mask],
+    )
+    return edge_data
+
+
 def _build_partition_graph(graph: Graph, node_payloads: dict, edges: dict) -> Graph:
     if graph.schema.time_attr is not None:
         return Graph.temporal(nodes=node_payloads, edges=edges, time_attr=graph.schema.time_attr)
@@ -59,7 +76,7 @@ def _partition_ranges(graph: Graph, num_partitions: int) -> tuple[dict[str, int]
     return num_nodes_by_type, partition_ranges
 
 
-def _partition_subgraph(graph: Graph, node_ranges: dict[str, tuple[int, int]]) -> tuple[Graph, dict[str, torch.Tensor]]:
+def _partition_subgraph(graph: Graph, node_ranges: dict[str, tuple[int, int]]) -> tuple[Graph, dict[str, torch.Tensor], dict]:
     first_edge_store = next(iter(graph.edges.values()), None)
     reference_device = first_edge_store.edge_index.device if first_edge_store is not None else torch.device("cpu")
 
@@ -72,36 +89,28 @@ def _partition_subgraph(graph: Graph, node_ranges: dict[str, tuple[int, int]]) -
         node_ids_by_type[node_type] = node_ids
 
     partition_edges = {}
+    boundary_edges = {}
     for edge_type, edge_store in graph.edges.items():
         src_type, _, dst_type = edge_type
         src_start, src_end = node_ranges[src_type]
         dst_start, dst_end = node_ranges[dst_type]
         edge_index = edge_store.edge_index
-        edge_mask = (
-            (edge_index[0] >= src_start)
-            & (edge_index[0] < src_end)
-            & (edge_index[1] >= dst_start)
-            & (edge_index[1] < dst_end)
-        )
-        local_edge_index = edge_index[:, edge_mask].clone()
+        src_mask = (edge_index[0] >= src_start) & (edge_index[0] < src_end)
+        dst_mask = (edge_index[1] >= dst_start) & (edge_index[1] < dst_end)
+        local_mask = src_mask & dst_mask
+        boundary_mask = src_mask ^ dst_mask
+
+        local_edge_index = edge_index[:, local_mask].clone()
         local_edge_index[0] -= src_start
         local_edge_index[1] -= dst_start
-        edge_count = int(edge_index.size(1))
-        edge_data = {"edge_index": local_edge_index}
-        for key, value in edge_store.data.items():
-            if key == "edge_index":
-                continue
-            if isinstance(value, torch.Tensor) and value.ndim > 0 and value.size(0) == edge_count:
-                edge_data[key] = value[edge_mask]
-            else:
-                edge_data[key] = value
-        edge_data.setdefault(
-            "e_id",
-            torch.arange(edge_count, dtype=torch.long, device=edge_index.device)[edge_mask],
+        partition_edges[edge_type] = _slice_edge_data(edge_store, local_mask, edge_index=local_edge_index)
+        boundary_edges[edge_type] = _slice_edge_data(
+            edge_store,
+            boundary_mask,
+            edge_index=edge_index[:, boundary_mask].clone(),
         )
-        partition_edges[edge_type] = edge_data
 
-    return _build_partition_graph(graph, partition_nodes, partition_edges), node_ids_by_type
+    return _build_partition_graph(graph, partition_nodes, partition_edges), node_ids_by_type, boundary_edges
 
 
 def write_partitioned_graph(graph: Graph, root, *, num_partitions: int) -> PartitionManifest:
@@ -115,7 +124,7 @@ def write_partitioned_graph(graph: Graph, root, *, num_partitions: int) -> Parti
     partitions = []
     single_node_type = len(graph.schema.node_types) == 1 and graph.schema.node_types == ("node",)
     for partition_id, node_ranges in enumerate(partition_ranges):
-        shard_graph, node_ids_by_type = _partition_subgraph(graph, node_ranges)
+        shard_graph, node_ids_by_type, boundary_edges = _partition_subgraph(graph, node_ranges)
         filename = f"part-{partition_id}.pt"
         payload_node_ids = node_ids_by_type["node"] if single_node_type else node_ids_by_type
         torch.save(
@@ -123,6 +132,7 @@ def write_partitioned_graph(graph: Graph, root, *, num_partitions: int) -> Parti
                 "partition_id": partition_id,
                 "node_ids": payload_node_ids,
                 "graph": serialize_graph(shard_graph),
+                "boundary_edges": boundary_edges,
             },
             root / filename,
         )

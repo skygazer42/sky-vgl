@@ -191,3 +191,68 @@ def test_local_sampling_coordinator_routes_typed_node_ids_and_features(tmp_path)
     assert torch.equal(global_writes, torch.tensor([[2, 3], [3, 2]]))
     assert adjacency.layout.value == "csc"
     assert adjacency.shape == (2, 2)
+
+
+
+def test_local_sampling_coordinator_exposes_boundary_and_incident_partition_queries(tmp_path):
+    graph = Graph.homo(
+        edge_index=torch.tensor([[0, 1, 2, 3], [1, 2, 3, 0]]),
+        x=torch.arange(8, dtype=torch.float32).view(4, 2),
+    )
+    write_partitioned_graph(graph, tmp_path, num_partitions=2)
+    shards = {
+        0: LocalGraphShard.from_partition_dir(tmp_path, partition_id=0),
+        1: LocalGraphShard.from_partition_dir(tmp_path, partition_id=1),
+    }
+    coordinator = LocalSamplingCoordinator(shards)
+
+    boundary_ids = coordinator.partition_boundary_edge_ids(0)
+    boundary_edge_index = coordinator.fetch_partition_boundary_edge_index(0)
+    incident_ids = coordinator.partition_incident_edge_ids(0)
+    incident_edge_index = coordinator.fetch_partition_incident_edge_index(0)
+
+    assert torch.equal(boundary_ids, torch.tensor([1, 3]))
+    assert torch.equal(boundary_edge_index, torch.tensor([[1, 3], [2, 0]]))
+    assert torch.equal(incident_ids, torch.tensor([0, 1, 3]))
+    assert torch.equal(incident_edge_index, torch.tensor([[0, 1, 3], [1, 2, 0]]))
+
+
+def test_local_sampling_coordinator_exposes_typed_boundary_and_incident_partition_queries(tmp_path):
+    writes = ("author", "writes", "paper")
+    cites = ("paper", "cites", "paper")
+    graph = Graph.hetero(
+        nodes={
+            "author": {"x": torch.arange(8, dtype=torch.float32).view(4, 2)},
+            "paper": {"x": torch.arange(10, 18, dtype=torch.float32).view(4, 2)},
+        },
+        edges={
+            writes: {
+                "edge_index": torch.tensor([[0, 1, 2, 3, 0], [1, 0, 3, 2, 2]]),
+                "weight": torch.tensor([1.0, 2.0, 3.0, 4.0, 9.0]),
+            },
+            cites: {
+                "edge_index": torch.tensor([[0, 1, 2, 3, 1], [1, 0, 3, 2, 2]]),
+                "score": torch.tensor([0.1, 0.2, 0.3, 0.4, 0.9]),
+            },
+        },
+    )
+    write_partitioned_graph(graph, tmp_path, num_partitions=2)
+    shards = {
+        0: LocalGraphShard.from_partition_dir(tmp_path, partition_id=0),
+        1: LocalGraphShard.from_partition_dir(tmp_path, partition_id=1),
+    }
+    coordinator = LocalSamplingCoordinator(shards)
+
+    writes_boundary_ids = coordinator.partition_boundary_edge_ids(0, edge_type=writes)
+    writes_boundary_edge_index = coordinator.fetch_partition_boundary_edge_index(0, edge_type=writes)
+    writes_incident_ids = coordinator.partition_incident_edge_ids(0, edge_type=writes)
+    writes_incident_edge_index = coordinator.fetch_partition_incident_edge_index(0, edge_type=writes)
+    cites_boundary_ids = coordinator.partition_boundary_edge_ids(0, edge_type=cites)
+    cites_boundary_edge_index = coordinator.fetch_partition_boundary_edge_index(0, edge_type=cites)
+
+    assert torch.equal(writes_boundary_ids, torch.tensor([4]))
+    assert torch.equal(writes_boundary_edge_index, torch.tensor([[0], [2]]))
+    assert torch.equal(writes_incident_ids, torch.tensor([0, 1, 4]))
+    assert torch.equal(writes_incident_edge_index, torch.tensor([[0, 1, 0], [1, 0, 2]]))
+    assert torch.equal(cites_boundary_ids, torch.tensor([4]))
+    assert torch.equal(cites_boundary_edge_index, torch.tensor([[1], [2]]))

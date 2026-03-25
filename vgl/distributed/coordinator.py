@@ -43,12 +43,34 @@ class SamplingCoordinator(Protocol):
     def partition_edge_ids(self, partition_id: int, *, edge_type=None) -> torch.Tensor:
         ...
 
+    def partition_boundary_edge_ids(self, partition_id: int, *, edge_type=None) -> torch.Tensor:
+        ...
+
+    def partition_incident_edge_ids(self, partition_id: int, *, edge_type=None) -> torch.Tensor:
+        ...
+
     def fetch_partition_edge_index(
         self,
         partition_id: int,
         *,
         edge_type=None,
         global_ids: bool = False,
+    ) -> torch.Tensor:
+        ...
+
+    def fetch_partition_boundary_edge_index(
+        self,
+        partition_id: int,
+        *,
+        edge_type=None,
+    ) -> torch.Tensor:
+        ...
+
+    def fetch_partition_incident_edge_index(
+        self,
+        partition_id: int,
+        *,
+        edge_type=None,
     ) -> torch.Tensor:
         ...
 
@@ -95,6 +117,12 @@ class LocalSamplingCoordinator:
     def partition_edge_ids(self, partition_id: int, *, edge_type=None) -> torch.Tensor:
         return self._shard(partition_id).edge_ids(edge_type=edge_type)
 
+    def partition_boundary_edge_ids(self, partition_id: int, *, edge_type=None) -> torch.Tensor:
+        return self._shard(partition_id).boundary_edge_ids(edge_type=edge_type)
+
+    def partition_incident_edge_ids(self, partition_id: int, *, edge_type=None) -> torch.Tensor:
+        return self._shard(partition_id).incident_edge_ids(edge_type=edge_type)
+
     def fetch_partition_edge_index(
         self,
         partition_id: int,
@@ -106,6 +134,22 @@ class LocalSamplingCoordinator:
         if global_ids:
             return shard.global_edge_index(edge_type=edge_type)
         return shard.graph_store.edge_index(edge_type)
+
+    def fetch_partition_boundary_edge_index(
+        self,
+        partition_id: int,
+        *,
+        edge_type=None,
+    ) -> torch.Tensor:
+        return self._shard(partition_id).boundary_edge_index(edge_type=edge_type)
+
+    def fetch_partition_incident_edge_index(
+        self,
+        partition_id: int,
+        *,
+        edge_type=None,
+    ) -> torch.Tensor:
+        return self._shard(partition_id).incident_edge_index(edge_type=edge_type)
 
     def fetch_partition_adjacency(
         self,

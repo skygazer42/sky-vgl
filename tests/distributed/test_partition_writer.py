@@ -144,3 +144,58 @@ def test_partition_writer_preserves_heterogeneous_partition_payloads(tmp_path):
     assert torch.equal(part0_graph.edges[cites].score, torch.tensor([0.1, 0.2]))
     assert torch.equal(part1_graph.edges[cites].edge_index, torch.tensor([[0, 1], [1, 0]]))
     assert torch.equal(part1_graph.edges[cites].score, torch.tensor([0.3, 0.4]))
+
+
+
+def test_partition_writer_persists_boundary_edges_in_global_id_space(tmp_path):
+    edge_type = ("node", "to", "node")
+    graph = Graph.homo(
+        edge_index=torch.tensor([[0, 1, 2, 3], [1, 2, 3, 0]]),
+        x=torch.arange(8, dtype=torch.float32).view(4, 2),
+    )
+
+    write_partitioned_graph(graph, tmp_path, num_partitions=2)
+    part0 = torch.load(tmp_path / "part-0.pt", weights_only=True)
+    part1 = torch.load(tmp_path / "part-1.pt", weights_only=True)
+
+    boundary0 = part0["boundary_edges"][edge_type]
+    boundary1 = part1["boundary_edges"][edge_type]
+
+    assert torch.equal(boundary0["e_id"], torch.tensor([1, 3]))
+    assert torch.equal(boundary0["edge_index"], torch.tensor([[1, 3], [2, 0]]))
+    assert torch.equal(boundary1["e_id"], torch.tensor([1, 3]))
+    assert torch.equal(boundary1["edge_index"], torch.tensor([[1, 3], [2, 0]]))
+
+
+def test_partition_writer_persists_typed_boundary_edges_in_global_id_space(tmp_path):
+    writes = ("author", "writes", "paper")
+    cites = ("paper", "cites", "paper")
+    graph = Graph.hetero(
+        nodes={
+            "author": {"x": torch.arange(8, dtype=torch.float32).view(4, 2)},
+            "paper": {"x": torch.arange(10, 18, dtype=torch.float32).view(4, 2)},
+        },
+        edges={
+            writes: {
+                "edge_index": torch.tensor([[0, 1, 2, 3, 0], [1, 0, 3, 2, 2]]),
+                "weight": torch.tensor([1.0, 2.0, 3.0, 4.0, 9.0]),
+            },
+            cites: {
+                "edge_index": torch.tensor([[0, 1, 2, 3, 1], [1, 0, 3, 2, 2]]),
+                "score": torch.tensor([0.1, 0.2, 0.3, 0.4, 0.9]),
+            },
+        },
+    )
+
+    write_partitioned_graph(graph, tmp_path, num_partitions=2)
+    part0 = torch.load(tmp_path / "part-0.pt", weights_only=True)
+    part1 = torch.load(tmp_path / "part-1.pt", weights_only=True)
+
+    assert torch.equal(part0["boundary_edges"][writes]["e_id"], torch.tensor([4]))
+    assert torch.equal(part0["boundary_edges"][writes]["edge_index"], torch.tensor([[0], [2]]))
+    assert torch.equal(part0["boundary_edges"][cites]["e_id"], torch.tensor([4]))
+    assert torch.equal(part0["boundary_edges"][cites]["edge_index"], torch.tensor([[1], [2]]))
+    assert torch.equal(part1["boundary_edges"][writes]["e_id"], torch.tensor([4]))
+    assert torch.equal(part1["boundary_edges"][writes]["edge_index"], torch.tensor([[0], [2]]))
+    assert torch.equal(part1["boundary_edges"][cites]["e_id"], torch.tensor([4]))
+    assert torch.equal(part1["boundary_edges"][cites]["edge_index"], torch.tensor([[1], [2]]))
