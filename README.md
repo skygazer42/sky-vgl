@@ -37,7 +37,7 @@
 - **Two-layer training logs** — default console progress plus pluggable structured loggers such as `JSONLinesLogger` and `TensorBoardLogger` make experiments easier to monitor and replay.
 - **End-to-end training** — `Trainer` handles the full loop including `fit()`, `evaluate()`, `test()`, early stopping, best-checkpoint saving, full training-state checkpoint/resume, epoch history tracking, gradient accumulation, scheduled gradient accumulation, gradient clipping, gradient value clipping, adaptive gradient clipping, gradient centralization, gradient noise injection, layer-wise learning-rate strategies, classification label smoothing, label smoothing scheduling, focal loss, focal-gamma scheduling, generalized cross entropy, generalized-cross-entropy scheduling, symmetric cross entropy, symmetric-cross-entropy beta scheduling, Poly-1 cross entropy, Poly-1 epsilon scheduling, soft/hard bootstrap loss correction, bootstrap-beta scheduling, confidence-penalty scheduling, flooding-level scheduling, `LDAM`, LDAM-margin scheduling, logit adjustment, logit-adjustment tau scheduling, balanced softmax, class weighting / `pos_weight`, `pos_weight` scheduling, weight-decay scheduling, loss flooding, confidence-penalty regularization, `R-Drop` regularization, sharpness-aware optimization with `SAM`, `ASAM`, and `GSAM`, link prediction uniform / hard-negative / candidate-set sampling, random edge splitting, and neighbor-subgraph sampling with optional seed-edge exclusion, raw and filtered ranking evaluation metrics such as `MRR` and `Hits@K`, epoch-wise or step-wise LR scheduling including built-in warmup/cosine support and schedulers such as `OneCycleLR`, mixed precision, and training callbacks such as model checkpointing (including optional exception checkpointing), gradual unfreezing, deferred reweighting (`DRW`), EMA, SWA, and Lookahead.
 - **Multiple graph tasks** — node classification, graph classification, link prediction, and temporal event prediction out of the box.
-- **PyG & DGL compatibility** — seamless conversion with `from_pyg()` / `to_pyg()` and `from_dgl()` / `to_dgl()` adapters.
+- **PyG & DGL compatibility** — bidirectional adapters for PyG data plus homogeneous, heterogeneous, and temporal DGL round-trips that preserve canonical edge types and temporal `time_attr` metadata.
 - **Clean, modular design** — domain-oriented package layout that separates concerns and stays easy to extend.
 
 ---
@@ -370,6 +370,8 @@ pip install -e .
 pip install -e ".[dev]"    # adds pytest, ruff, mypy
 ```
 
+Simple homogeneous graphs stay on DGL's lightweight `dgl.graph(...)` path. Typed or temporal VGL graphs export through `dgl.heterograph(...)` so canonical edge types survive, and temporal round-trips preserve `Graph.schema.time_attr` through the adapter-owned `vgl_time_attr` graph attribute.
+
 ---
 
 ## Supported Convolution Layers
@@ -424,9 +426,11 @@ from vgl.compat.dgl import from_dgl, to_dgl
 vgl_graph = from_pyg(pyg_data)       # PyG Data → VGL Graph
 pyg_data  = to_pyg(vgl_graph)        # VGL Graph → PyG Data
 
-vgl_graph = from_dgl(dgl_graph)      # DGL DGLGraph → VGL Graph
-dgl_graph = to_dgl(vgl_graph)        # VGL Graph → DGL DGLGraph
+vgl_graph = from_dgl(dgl_graph)      # DGL graph / heterograph → VGL Graph
+dgl_graph = to_dgl(vgl_graph)        # VGL Graph → DGL graph / heterograph
 ```
+
+Simple homogeneous graphs stay on `dgl.graph(...)`. Typed or temporal VGL graphs export through `dgl.heterograph(...)` so canonical edge types survive, and temporal round-trips preserve `Graph.schema.time_attr` through the adapter-owned `vgl_time_attr` graph attribute.
 
 ---
 

@@ -38,8 +38,10 @@ Common import rewrites:
 ## From DGL
 
 - `graph.ndata[...]` style access remains available on homogeneous graphs
-- `Graph.from_dgl(dgl_graph)` imports a DGL graph
-- `graph.to_dgl()` exports back to a DGL graph
+- `Graph.from_dgl(dgl_graph)` imports DGL homogeneous graphs and heterographs into the unified `Graph` model
+- `graph.to_dgl()` keeps simple homogeneous graphs on `dgl.graph(...)` and exports typed or temporal graphs through `dgl.heterograph(...)`
+- canonical edge types survive heterograph round-trips instead of collapsing to VGL's default relation
+- temporal graphs preserve `graph.schema.time_attr` through the adapter-owned `vgl_time_attr` DGL graph attribute
 - sampled graph-classification records can attach labels to sample metadata instead of mutating the graph object
 
 ## Mental Model Shift
