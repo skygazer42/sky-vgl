@@ -52,8 +52,12 @@ class SparseTensor:
         return value.to(dtype=torch.long)
 
     def _validate_values(self, nnz: int) -> None:
-        if self.values is not None and self.values.numel() != nnz:
-            raise ValueError("values must match sparse nnz")
+        if self.values is None:
+            return
+        if self.values.ndim == 0:
+            raise ValueError("values must have at least one dimension")
+        if int(self.values.shape[0]) != nnz:
+            raise ValueError("values leading dimension must match sparse nnz")
 
     def _validate_coo(self) -> None:
         row = self._validate_vector(self.row, name="row")

@@ -40,3 +40,27 @@ def test_csr_sparse_tensor_rejects_invalid_pointer_shape():
             crow_indices=torch.tensor([0, 1]),
             col_indices=torch.tensor([0]),
         )
+
+
+def test_sparse_tensor_accepts_multi_dimensional_values():
+    sparse = SparseTensor(
+        layout=SparseLayout.COO,
+        shape=(3, 4),
+        row=torch.tensor([0, 1, 2]),
+        col=torch.tensor([1, 2, 3]),
+        values=torch.tensor([[1.0, 10.0], [2.0, 20.0], [3.0, 30.0]]),
+    )
+
+    assert sparse.nnz == 3
+    assert sparse.values.shape == (3, 2)
+
+
+def test_sparse_tensor_rejects_values_with_wrong_leading_dimension():
+    with pytest.raises(ValueError, match="values"):
+        SparseTensor(
+            layout=SparseLayout.COO,
+            shape=(3, 4),
+            row=torch.tensor([0, 1, 2]),
+            col=torch.tensor([1, 2, 3]),
+            values=torch.tensor([[1.0, 10.0], [2.0, 20.0]]),
+        )

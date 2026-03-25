@@ -32,6 +32,12 @@ def _replace_values(sparse: SparseTensor, values: torch.Tensor) -> SparseTensor:
     raise ValueError(f"Unsupported sparse layout: {sparse.layout}")
 
 
+def _empty_values_like(values: torch.Tensor | None) -> torch.Tensor | None:
+    if values is None:
+        return None
+    return values.new_empty((0,) + tuple(values.shape[1:]))
+
+
 def sum(sparse: SparseTensor, *, dim: int = 0) -> torch.Tensor:
     coo = to_coo(sparse)
     if dim == 0:
@@ -46,12 +52,12 @@ def sum(sparse: SparseTensor, *, dim: int = 0) -> torch.Tensor:
     if coo.values is None:
         weights = torch.ones(coo.nnz, dtype=torch.long, device=index.device)
     else:
-        weights = coo.values.reshape(-1)
+        weights = coo.values
         if weights.dtype == torch.bool:
             weights = weights.to(dtype=torch.long)
 
-    result = torch.zeros(size, dtype=weights.dtype, device=weights.device)
-    if weights.numel() == 0:
+    result = torch.zeros((size,) + tuple(weights.shape[1:]), dtype=weights.dtype, device=weights.device)
+    if coo.nnz == 0:
         return result
     result.index_add_(0, index, weights)
     return result
@@ -69,10 +75,13 @@ def select_rows(sparse: SparseTensor, rows: torch.Tensor) -> SparseTensor:
     selected_index = torch.tensor(selected_positions, dtype=torch.long, device=coo.row.device)
     if selected_index.numel() == 0:
         empty = torch.empty(0, dtype=torch.long, device=coo.row.device)
-        empty_values = None
-        if coo.values is not None:
-            empty_values = coo.values.new_empty((0,))
-        return SparseTensor(layout=SparseLayout.COO, shape=(rows.numel(), coo.shape[1]), row=empty, col=empty, values=empty_values)
+        return SparseTensor(
+            layout=SparseLayout.COO,
+            shape=(rows.numel(), coo.shape[1]),
+            row=empty,
+            col=empty,
+            values=_empty_values_like(coo.values),
+        )
     selected_row = torch.tensor(
         [row_map[int(row)] for row in coo.row[selected_index].tolist()],
         dtype=torch.long,
@@ -97,10 +106,13 @@ def select_cols(sparse: SparseTensor, cols: torch.Tensor) -> SparseTensor:
     selected_index = torch.tensor(selected_positions, dtype=torch.long, device=coo.col.device)
     if selected_index.numel() == 0:
         empty = torch.empty(0, dtype=torch.long, device=coo.col.device)
-        empty_values = None
-        if coo.values is not None:
-            empty_values = coo.values.new_empty((0,))
-        return SparseTensor(layout=SparseLayout.COO, shape=(coo.shape[0], cols.numel()), row=empty, col=empty, values=empty_values)
+        return SparseTensor(
+            layout=SparseLayout.COO,
+            shape=(coo.shape[0], cols.numel()),
+            row=empty,
+            col=empty,
+            values=_empty_values_like(coo.values),
+        )
     selected_row = coo.row[selected_index]
     selected_col = torch.tensor(
         [col_map[int(col)] for col in coo.col[selected_index].tolist()],
@@ -157,6 +169,8 @@ def spmm(sparse: SparseTensor, dense: torch.Tensor) -> torch.Tensor:
     values = coo.values
     source = dense[coo.col]
     if values is not None:
+        if values.ndim != 1:
+            raise ValueError("spmm currently requires scalar sparse values")
         source = source * values.unsqueeze(-1).to(dtype=source.dtype)
     result.index_add_(0, coo.row, source)
     return result
@@ -175,9 +189,9 @@ def sddmm(sparse: SparseTensor, lhs: torch.Tensor, rhs: torch.Tensor) -> SparseT
     if lhs.ndim == 1:
         values = lhs[coo.row] * rhs[coo.col]
         return _replace_values(sparse, values)
-    if lhs.ndim != 2:
-        raise ValueError("lhs and rhs must be rank-1 or rank-2")
-    if lhs.size(1) != rhs.size(1):
+    if lhs.shape[1:-1] != rhs.shape[1:-1]:
+        raise ValueError("lhs and rhs payload dimensions must match")
+    if lhs.size(-1) != rhs.size(-1):
         raise ValueError("lhs and rhs feature dimensions must match")
     values = (lhs[coo.row] * rhs[coo.col]).sum(dim=-1)
     return _replace_values(sparse, values)
@@ -199,7 +213,7 @@ def edge_softmax(sparse: SparseTensor, scores: torch.Tensor, *, dim: int = 1) ->
         raise ValueError("scores length must match sparse nnz")
     if coo.nnz == 0:
         return scores.clone()
-    shifted = scores - scores.max()
+    shifted = scores - scores.amax(dim=0)
     weights = shifted.exp()
     normalizer = torch.zeros((size,) + tuple(weights.shape[1:]), dtype=weights.dtype, device=weights.device)
     normalizer.index_add_(0, index, weights)

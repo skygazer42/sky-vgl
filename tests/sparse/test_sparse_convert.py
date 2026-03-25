@@ -43,3 +43,26 @@ def test_to_csc_converts_coo_tensor_with_values():
     assert torch.equal(csc.ccol_indices, torch.tensor([0, 1, 1, 2, 3]))
     assert torch.equal(csc.row_indices, torch.tensor([1, 0, 1]))
     assert torch.equal(csc.values, torch.tensor([3.5, 2.0, 1.5]))
+
+
+def test_to_csr_preserves_multi_dimensional_values():
+    edge_index = torch.tensor([[1, 0, 1], [3, 2, 0]])
+    values = torch.tensor([[1.0, 10.0], [2.0, 20.0], [3.0, 30.0]])
+
+    csr = to_csr(from_edge_index(edge_index, shape=(2, 4), values=values))
+
+    assert csr.layout is SparseLayout.CSR
+    assert torch.equal(csr.crow_indices, torch.tensor([0, 1, 3]))
+    assert torch.equal(csr.col_indices, torch.tensor([2, 0, 3]))
+    assert torch.equal(csr.values, torch.tensor([[2.0, 20.0], [3.0, 30.0], [1.0, 10.0]]))
+
+
+def test_to_coo_round_trips_multi_dimensional_values_from_csc():
+    edge_index = torch.tensor([[1, 0, 1], [3, 2, 0]])
+    values = torch.tensor([[1.0, 10.0], [2.0, 20.0], [3.0, 30.0]])
+
+    csc = to_csc(from_edge_index(edge_index, shape=(2, 4), values=values))
+    coo = to_coo(csc)
+
+    assert torch.equal(torch.stack((coo.row, coo.col)), torch.tensor([[1, 0, 1], [0, 2, 3]]))
+    assert torch.equal(coo.values, torch.tensor([[3.0, 30.0], [2.0, 20.0], [1.0, 10.0]]))
