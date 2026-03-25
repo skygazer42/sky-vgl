@@ -142,3 +142,73 @@ def test_materialize_batch_builds_temporal_event_batch_from_temporal_contexts():
     assert isinstance(batch, TemporalEventBatch)
     assert torch.equal(batch.timestamp, torch.tensor([1, 4]))
     assert torch.equal(batch.labels, torch.tensor([1, 0]))
+
+
+
+def test_materialize_batch_builds_node_batch_from_multi_seed_node_contexts():
+    graph = Graph.homo(
+        edge_index=torch.tensor([[0, 2, 4], [2, 4, 0]]),
+        x=torch.randn(5, 4),
+        y=torch.tensor([0, 1, 0, 1, 0]),
+    )
+    context = MaterializationContext(
+        request=NodeSeedRequest(
+            node_ids=torch.tensor([2, 4]),
+            node_type="node",
+            metadata={"seed": [2, 4], "sample_id": "n24"},
+        ),
+        state={"node_ids": torch.tensor([0, 2, 4])},
+        metadata={"sample_id": "n24"},
+        graph=graph,
+    )
+
+    batch = materialize_batch([context])
+
+    assert isinstance(batch, NodeBatch)
+    assert torch.equal(batch.graph.n_id, torch.tensor([0, 2, 4]))
+    assert torch.equal(batch.seed_index, torch.tensor([1, 2]))
+    assert batch.metadata == [
+        {"seed": 2, "sample_id": "n24"},
+        {"seed": 4, "sample_id": "n24"},
+    ]
+
+
+def test_materialize_batch_builds_hetero_node_batch_from_multi_seed_node_contexts():
+    writes = ("author", "writes", "paper")
+    written_by = ("paper", "written_by", "author")
+    graph = Graph.hetero(
+        nodes={
+            "paper": {"x": torch.randn(3, 4), "y": torch.tensor([0, 1, 0])},
+            "author": {"x": torch.randn(2, 4)},
+        },
+        edges={
+            writes: {"edge_index": torch.tensor([[0, 1], [1, 2]])},
+            written_by: {"edge_index": torch.tensor([[1, 2], [0, 1]])},
+        },
+    )
+    context = MaterializationContext(
+        request=NodeSeedRequest(
+            node_ids=torch.tensor([1, 2]),
+            node_type="paper",
+            metadata={"seed": [1, 2], "node_type": "paper", "sample_id": "p12"},
+        ),
+        state={
+            "node_ids_by_type": {
+                "paper": torch.tensor([1, 2]),
+                "author": torch.tensor([0, 1]),
+            }
+        },
+        metadata={"sample_id": "p12"},
+        graph=graph,
+    )
+
+    batch = materialize_batch([context])
+
+    assert isinstance(batch, NodeBatch)
+    assert torch.equal(batch.graph.nodes["paper"].n_id, torch.tensor([1, 2]))
+    assert torch.equal(batch.graph.nodes["author"].n_id, torch.tensor([0, 1]))
+    assert torch.equal(batch.seed_index, torch.tensor([0, 1]))
+    assert batch.metadata == [
+        {"seed": 1, "node_type": "paper", "sample_id": "p12"},
+        {"seed": 2, "node_type": "paper", "sample_id": "p12"},
+    ]

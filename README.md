@@ -104,6 +104,8 @@ train_loader = DataLoader(train_ds, sampler=NodeNeighborSampler([15, 10]), batch
 val_loader   = DataLoader(val_ds, sampler=NodeNeighborSampler([15, 10]), batch_size=2048)
 test_loader  = DataLoader(test_ds, sampler=NodeNeighborSampler([15, 10]), batch_size=2048)
 
+Each node-sampling dataset item can carry one seed or a rank-1 seed collection in `metadata["seed"]`. `NodeNeighborSampler` will sample one union subgraph for that item and materialize one flat `NodeBatch.seed_index` entry per requested seed. For heterogeneous graphs, keep passing `metadata["node_type"]` for the supervised node type.
+
 task = NodeClassificationTask(target="y",
                               split=("train_mask", "val_mask", "test_mask"),
                               metrics=["accuracy"])

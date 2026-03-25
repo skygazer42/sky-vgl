@@ -230,7 +230,7 @@ def _materialize_record_payload(context: MaterializationContext, payload):
     return replace(payload, graph=_materialized_graph(payload.graph))
 
 
-def _node_context_to_sample(context: MaterializationContext) -> SampleRecord:
+def _node_context_to_sample(context: MaterializationContext) -> SampleRecord | list[SampleRecord]:
     if "sample" in context.state:
         return context.state["sample"]
     if context.graph is None:
@@ -239,9 +239,9 @@ def _node_context_to_sample(context: MaterializationContext) -> SampleRecord:
     metadata = dict(getattr(request, "metadata", {}))
     sample_id = context.metadata.get("sample_id", metadata.get("sample_id"))
     source_graph_id = context.metadata.get("source_graph_id", metadata.get("source_graph_id"))
-    if request.node_ids.numel() != 1:
-        raise ValueError("node context materialization currently supports one seed per context")
-    seed = int(request.node_ids.reshape(-1)[0].item())
+    seeds = [int(value) for value in request.node_ids.reshape(-1).tolist()]
+    if not seeds:
+        raise ValueError("node context requires at least one seed for materialization")
 
     fetched_node_features = context.state.get("_materialized_node_features")
     fetched_edge_features = context.state.get("_materialized_edge_features")
@@ -253,7 +253,8 @@ def _node_context_to_sample(context: MaterializationContext) -> SampleRecord:
             fetched_node_features=fetched_node_features,
             fetched_edge_features=fetched_edge_features,
         )
-        subgraph_seed = int(node_mapping[seed].item())
+        subgraph_seeds = [int(node_mapping[seed].item()) for seed in seeds]
+        node_type = "node"
     elif "node_ids_by_type" in context.state:
         node_type = request.node_type
         subgraph, node_mapping = _hetero_subgraph(
@@ -262,17 +263,28 @@ def _node_context_to_sample(context: MaterializationContext) -> SampleRecord:
             fetched_node_features=fetched_node_features,
             fetched_edge_features=fetched_edge_features,
         )
-        subgraph_seed = int(node_mapping[node_type][seed].item())
+        subgraph_seeds = [int(node_mapping[node_type][seed].item()) for seed in seeds]
     else:
         raise ValueError("node context must contain expanded node ids for materialization")
 
-    return SampleRecord(
-        graph=subgraph,
-        metadata=metadata,
-        sample_id=sample_id,
-        source_graph_id=source_graph_id,
-        subgraph_seed=subgraph_seed,
-    )
+    samples = []
+    for seed, subgraph_seed in zip(seeds, subgraph_seeds):
+        sample_metadata = dict(metadata)
+        sample_metadata["seed"] = seed
+        if node_type != "node":
+            sample_metadata.setdefault("node_type", node_type)
+        samples.append(
+            SampleRecord(
+                graph=subgraph,
+                metadata=sample_metadata,
+                sample_id=sample_id,
+                source_graph_id=source_graph_id,
+                subgraph_seed=subgraph_seed,
+            )
+        )
+    if len(samples) == 1:
+        return samples[0]
+    return samples
 
 
 def _graph_context_to_sample(context: MaterializationContext) -> SampleRecord:
@@ -318,7 +330,14 @@ def materialize_batch(items, *, label_source=None, label_key=None):
     if isinstance(first, MaterializationContext):
         kind = getattr(first.request, "kind", None)
         if kind == "node":
-            return NodeBatch.from_samples([_node_context_to_sample(context) for context in items])
+            samples = []
+            for context in items:
+                sample = _node_context_to_sample(context)
+                if isinstance(sample, list):
+                    samples.extend(sample)
+                else:
+                    samples.append(sample)
+            return NodeBatch.from_samples(samples)
         if kind == "graph":
             samples = [_graph_context_to_sample(context) for context in items]
             if label_source is not None and label_key is not None:

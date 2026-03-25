@@ -69,6 +69,8 @@ This is what makes many-small-graph and sampled-subgraph inputs converge on the 
 
 Neighbor sampling now routes through explicit `SamplingPlan` stages inside `vgl.dataloading`. The public samplers still look like `NodeNeighborSampler`, `LinkNeighborSampler`, and `TemporalNeighborSampler`, but internally they can build plans, execute expansion / feature-fetch stages, and materialize the result back into the same batch contracts. Feature-fetch stages can resolve against an explicit feature source passed into `Loader` or `PlanExecutor`, fall back to a storage-backed graph's retained `feature_store`, or use a coordinator-backed routed source such as `LocalSamplingCoordinator` via `fetch_node_features(...)` / `fetch_edge_features(...)`, so the executor stays agnostic to whether tensors come from one local store or a partitioned runtime. During node, link, and temporal sample materialization, fetched node and edge slices are aligned to each sampled subgraph's `n_id` / `e_id` order and overlaid onto the resulting graph. `NodeNeighborSampler(node_feature_names=..., edge_feature_names=...)`, `LinkNeighborSampler(...)`, and `TemporalNeighborSampler(...)` are the opt-in public shortcuts for appending those fetch stages automatically.
 
+For node sampling, one plan context can now carry one seed or a rank-1 seed collection. Materialization keeps the sampled graph shared per context, then expands the supervision side into the existing flat `NodeBatch.seed_index` contract so models and tasks do not need a separate multi-seed batch type.
+
 This keeps the user-facing API stable while opening a path toward larger-graph runtimes, feature stores, and shard-aware coordination.
 
 ## LinkPredictionRecord and LinkPredictionBatch

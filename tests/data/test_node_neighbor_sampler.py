@@ -309,3 +309,75 @@ def test_node_neighbor_sampler_prefetch_option_appends_hetero_feature_stages():
     assert torch.equal(batch.graph.nodes["paper"].x, torch.tensor([[6.0, 0.0]]))
     assert torch.equal(batch.graph.edges[WRITES].edge_weight, torch.tensor([11.0]))
 
+
+
+
+def test_node_neighbor_sampler_extracts_shared_subgraph_for_multiple_homo_multi_seed_contexts():
+    graph = Graph.homo(
+        edge_index=torch.tensor([[0, 1, 3], [1, 2, 1]]),
+        x=torch.arange(12, dtype=torch.float32).view(4, 3),
+        y=torch.tensor([0, 1, 0, 1]),
+    )
+    sampler = NodeNeighborSampler(num_neighbors=[-1])
+
+    samples = sampler.sample((graph, {"seed": [1, 3], "sample_id": "n13"}))
+
+    assert isinstance(samples, list)
+    assert len(samples) == 2
+    assert samples[0].graph is samples[1].graph
+    assert torch.equal(samples[0].graph.n_id, torch.tensor([0, 1, 2, 3]))
+    assert [sample.sample_id for sample in samples] == ["n13", "n13"]
+    assert [sample.subgraph_seed for sample in samples] == [1, 3]
+    assert [sample.metadata["seed"] for sample in samples] == [1, 3]
+
+
+def test_loader_builds_node_batch_from_multi_seed_node_neighbor_context():
+    graph = Graph.homo(
+        edge_index=torch.tensor([[0, 1, 3], [1, 2, 1]]),
+        x=torch.randn(4, 4),
+        y=torch.tensor([0, 1, 0, 1]),
+    )
+    loader = Loader(
+        dataset=ListDataset([(graph, {"seed": [1, 3], "sample_id": "n13"})]),
+        sampler=NodeNeighborSampler(num_neighbors=[-1]),
+        batch_size=1,
+    )
+
+    batch = next(iter(loader))
+
+    assert isinstance(batch, NodeBatch)
+    assert batch.graph.x.size(0) == 4
+    assert torch.equal(batch.seed_index, torch.tensor([1, 3]))
+    assert batch.metadata == [
+        {"seed": 1, "sample_id": "n13"},
+        {"seed": 3, "sample_id": "n13"},
+    ]
+
+
+def test_loader_builds_hetero_node_batch_from_multi_seed_node_neighbor_context():
+    graph = Graph.hetero(
+        nodes={
+            "paper": {"x": torch.randn(3, 4), "y": torch.tensor([0, 1, 0])},
+            "author": {"x": torch.randn(2, 4)},
+        },
+        edges={
+            ("author", "writes", "paper"): {"edge_index": torch.tensor([[0, 1], [1, 2]])},
+            ("paper", "written_by", "author"): {"edge_index": torch.tensor([[1, 2], [0, 1]])},
+        },
+    )
+    loader = Loader(
+        dataset=ListDataset([(graph, {"seed": [1, 2], "node_type": "paper", "sample_id": "p12"})]),
+        sampler=NodeNeighborSampler(num_neighbors=[-1]),
+        batch_size=1,
+    )
+
+    batch = next(iter(loader))
+
+    assert isinstance(batch, NodeBatch)
+    assert torch.equal(batch.graph.nodes["paper"].n_id, torch.tensor([1, 2]))
+    assert torch.equal(batch.graph.nodes["author"].n_id, torch.tensor([0, 1]))
+    assert torch.equal(batch.seed_index, torch.tensor([0, 1]))
+    assert batch.metadata == [
+        {"seed": 1, "node_type": "paper", "sample_id": "p12"},
+        {"seed": 2, "node_type": "paper", "sample_id": "p12"},
+    ]

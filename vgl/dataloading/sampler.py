@@ -1065,6 +1065,17 @@ class NodeNeighborSampler(LinkNeighborSampler):
             return ()
         return ((graph._default_edge_type(), names),)
 
+    @staticmethod
+    def _normalize_seed_ids(seed) -> torch.Tensor:
+        seed_ids = torch.as_tensor(seed, dtype=torch.long)
+        if seed_ids.ndim == 0:
+            seed_ids = seed_ids.view(1)
+        elif seed_ids.ndim != 1:
+            raise ValueError("NodeNeighborSampler seed metadata must be a scalar or rank-1 collection")
+        if seed_ids.numel() == 0:
+            raise ValueError("NodeNeighborSampler requires at least one seed")
+        return seed_ids
+
     def _seed_item(self, item):
         if isinstance(item, SampleRecord):
             graph = item.graph
@@ -1091,16 +1102,16 @@ class NodeNeighborSampler(LinkNeighborSampler):
             raise ValueError("NodeNeighborSampler requires metadata['node_type'] for heterogeneous graphs")
         elif node_type not in graph.nodes:
             raise ValueError("NodeNeighborSampler metadata['node_type'] must exist in the source graph")
-        seed = int(seed)
+        seed_ids = self._normalize_seed_ids(seed)
         num_nodes = int(graph.x.size(0)) if node_type == "node" and hasattr(graph, "x") else int(graph.nodes[node_type].x.size(0))
-        if seed < 0 or seed >= num_nodes:
+        if torch.any((seed_ids < 0) | (seed_ids >= num_nodes)):
             raise ValueError("NodeNeighborSampler seed must fall within the source graph node range")
         if node_type != "node":
             metadata.setdefault("node_type", node_type)
-        return graph, metadata, sample_id, source_graph_id, seed, node_type
+        return graph, metadata, sample_id, source_graph_id, seed_ids, node_type
 
     def build_plan(self, item) -> SamplingPlan:
-        graph, metadata, sample_id, source_graph_id, seed, node_type = self._seed_item(item)
+        graph, metadata, sample_id, source_graph_id, seed_ids, node_type = self._seed_item(item)
         plan_metadata = {}
         if sample_id is not None:
             plan_metadata["sample_id"] = sample_id
@@ -1108,7 +1119,7 @@ class NodeNeighborSampler(LinkNeighborSampler):
             plan_metadata["source_graph_id"] = source_graph_id
         plan = SamplingPlan(
             request=NodeSeedRequest(
-                node_ids=torch.tensor([seed], dtype=torch.long),
+                node_ids=seed_ids.clone(),
                 node_type=node_type,
                 metadata=metadata,
             ),

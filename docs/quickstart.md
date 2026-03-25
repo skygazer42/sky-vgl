@@ -271,6 +271,8 @@ adjacency = graph.adjacency(layout="coo")
 
 When a later `SamplingPlan` includes feature-fetch stages, `PlanExecutor.execute(..., graph=graph)` and `Loader(..., sampler=...)` will reuse `graph.feature_store` automatically unless you pass an explicit `feature_store=` override. For sampled node, link, and temporal workloads, `NodeNeighborSampler(node_feature_names=..., edge_feature_names=...)`, `LinkNeighborSampler(...)`, and `TemporalNeighborSampler(...)` can append those fetch stages opt-in and materialize the fetched slices back into each sampled subgraph. Use dictionaries keyed by node type / edge type when the sampled graph is heterogeneous.
 
+For node sampling specifically, each dataset item may carry `metadata["seed"]` as one integer or a rank-1 seed collection. `NodeNeighborSampler` will sample one union subgraph for that item and materialize one flat `seed_index` entry per requested seed, so the downstream `NodeBatch` contract stays unchanged.
+
 ### On-disk Datasets
 
 ```python
