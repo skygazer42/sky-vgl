@@ -258,23 +258,84 @@ def _batch_hetero_graphs(graphs, *, context):
     return Graph.hetero(nodes=nodes, edges=edges, time_attr=time_attr), graph_offsets
 
 
+def _graph_membership_from_counts(counts: list[int]) -> tuple[torch.Tensor, torch.Tensor]:
+    count_tensor = torch.tensor(counts, dtype=torch.long)
+    graph_index = torch.repeat_interleave(
+        torch.arange(len(counts), dtype=torch.long),
+        count_tensor,
+    )
+    graph_ptr = torch.tensor([0, *torch.cumsum(count_tensor, dim=0).tolist()], dtype=torch.long)
+    return graph_index, graph_ptr
+
+
+def _graph_label_from_graph(graph: Graph, label_key: str) -> int:
+    if set(graph.nodes) == {"node"} and label_key in graph.nodes["node"].data:
+        value = graph.nodes["node"].data[label_key]
+        return int(torch.as_tensor(value).reshape(-1)[0].item())
+
+    candidates = []
+    for node_type, store in graph.nodes.items():
+        value = store.data.get(label_key)
+        if value is None:
+            continue
+        value = torch.as_tensor(value)
+        if value.numel() == 1:
+            candidates.append((node_type, int(value.reshape(-1)[0].item())))
+    if len(candidates) == 1:
+        return candidates[0][1]
+    if not candidates:
+        raise ValueError(f"GraphBatch could not find graph label {label_key!r} on the graph")
+    candidate_types = ", ".join(node_type for node_type, _ in candidates)
+    raise ValueError(
+        f"GraphBatch found ambiguous graph label {label_key!r} on multiple node types: {candidate_types}"
+    )
+
+
 @dataclass(slots=True)
 class GraphBatch:
     graphs: list[Graph]
-    graph_index: torch.Tensor
+    graph_index: torch.Tensor | None
     graph_ptr: torch.Tensor | None = None
     labels: torch.Tensor | None = None
     metadata: list[dict] | None = None
+    graph_index_by_type: dict[str, torch.Tensor] | None = None
+    graph_ptr_by_type: dict[str, torch.Tensor] | None = None
 
     @classmethod
     def from_graphs(cls, graphs: list[Graph]) -> "GraphBatch":
-        counts = [graph.x.size(0) for graph in graphs]
-        graph_index = torch.repeat_interleave(
-            torch.arange(len(graphs)),
-            torch.tensor(counts),
+        if not graphs:
+            raise ValueError("GraphBatch requires at least one graph")
+        first_graph = graphs[0]
+        first_is_homo = set(first_graph.nodes) == {"node"} and len(first_graph.edges) == 1
+        if any(((set(graph.nodes) == {"node"} and len(graph.edges) == 1) != first_is_homo) for graph in graphs[1:]):
+            raise ValueError("GraphBatch requires either all homogeneous or all heterogeneous graphs")
+
+        if first_is_homo:
+            counts = [graph.x.size(0) for graph in graphs]
+            graph_index, graph_ptr = _graph_membership_from_counts(counts)
+            return cls(graphs=graphs, graph_index=graph_index, graph_ptr=graph_ptr)
+
+        node_types = first_graph.schema.node_types
+        edge_types = first_graph.schema.edge_types
+        time_attr = first_graph.schema.time_attr
+        for graph in graphs[1:]:
+            if graph.schema.node_types != node_types or graph.schema.edge_types != edge_types:
+                raise ValueError("GraphBatch requires matching node and edge types for heterogeneous graphs")
+            if graph.schema.time_attr != time_attr:
+                raise ValueError("GraphBatch requires matching time_attr for heterogeneous graphs")
+
+        graph_index_by_type = {}
+        graph_ptr_by_type = {}
+        for node_type in node_types:
+            counts = [_node_count(graph.nodes[node_type]) for graph in graphs]
+            graph_index_by_type[node_type], graph_ptr_by_type[node_type] = _graph_membership_from_counts(counts)
+        return cls(
+            graphs=graphs,
+            graph_index=None,
+            graph_ptr=None,
+            graph_index_by_type=graph_index_by_type,
+            graph_ptr_by_type=graph_ptr_by_type,
         )
-        graph_ptr = torch.tensor([0, *torch.cumsum(torch.tensor(counts), dim=0).tolist()])
-        return cls(graphs=graphs, graph_index=graph_index, graph_ptr=graph_ptr)
 
     @classmethod
     def from_samples(
@@ -289,7 +350,7 @@ class GraphBatch:
         batch.metadata = [sample.metadata for sample in samples]
         if label_source == "graph":
             batch.labels = torch.tensor([
-                int(sample.graph.nodes["node"].data[label_key].reshape(-1)[0].item())
+                _graph_label_from_graph(sample.graph, label_key)
                 for sample in samples
             ])
         elif label_source == "metadata":
@@ -308,7 +369,9 @@ class GraphBatch:
                 graph.to(device=device, dtype=dtype, non_blocking=non_blocking)
                 for graph in self.graphs
             ],
-            graph_index=_transfer_tensor(
+            graph_index=None
+            if self.graph_index is None
+            else _transfer_tensor(
                 self.graph_index,
                 device=device,
                 dtype=dtype,
@@ -331,15 +394,43 @@ class GraphBatch:
                 non_blocking=non_blocking,
             ),
             metadata=self.metadata,
+            graph_index_by_type=None
+            if self.graph_index_by_type is None
+            else {
+                node_type: _transfer_tensor(
+                    value,
+                    device=device,
+                    dtype=dtype,
+                    non_blocking=non_blocking,
+                )
+                for node_type, value in self.graph_index_by_type.items()
+            },
+            graph_ptr_by_type=None
+            if self.graph_ptr_by_type is None
+            else {
+                node_type: _transfer_tensor(
+                    value,
+                    device=device,
+                    dtype=dtype,
+                    non_blocking=non_blocking,
+                )
+                for node_type, value in self.graph_ptr_by_type.items()
+            },
         )
 
     def pin_memory(self):
         return GraphBatch(
             graphs=[graph.pin_memory() for graph in self.graphs],
-            graph_index=self.graph_index.pin_memory(),
+            graph_index=None if self.graph_index is None else self.graph_index.pin_memory(),
             graph_ptr=None if self.graph_ptr is None else self.graph_ptr.pin_memory(),
             labels=None if self.labels is None else self.labels.pin_memory(),
             metadata=self.metadata,
+            graph_index_by_type=None
+            if self.graph_index_by_type is None
+            else {node_type: value.pin_memory() for node_type, value in self.graph_index_by_type.items()},
+            graph_ptr_by_type=None
+            if self.graph_ptr_by_type is None
+            else {node_type: value.pin_memory() for node_type, value in self.graph_ptr_by_type.items()},
         )
 
 

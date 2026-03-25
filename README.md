@@ -440,6 +440,8 @@ dgl_graph = to_dgl(vgl_graph)        # VGL Graph → DGL DGLGraph
 | Event Prediction (TGAT) | `examples/temporal/event_prediction.py` | Temporal |
 | Event Prediction (TGN Memory) | `examples/temporal/memory_event_prediction.py` | Temporal |
 
+Heterogeneous graph-classification batches keep `batch.graphs` intact and expose per-node-type membership through `graph_index_by_type` / `graph_ptr_by_type`, so models can pool `paper`, `author`, or other typed node representations without flattening the graph schema away.
+
 Run any example with:
 
 ```bash

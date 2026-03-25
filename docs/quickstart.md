@@ -177,6 +177,8 @@ trainer = Trainer(model=model, task=task, optimizer=torch.optim.Adam, lr=1e-3, m
 trainer.fit(loader)
 ```
 
+For heterogeneous graph classification, keep the same `batch.graphs` loop but pool with per-node-type membership such as `batch.graph_index_by_type["paper"]` or `batch.graph_index_by_type["author"]`.
+
 For graph classification from sampled subgraphs of a larger graph:
 
 ```python

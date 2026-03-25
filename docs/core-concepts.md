@@ -24,9 +24,10 @@ Homogeneous graphs can carry edge-level tensors through `Graph.homo(edge_data={.
 
 `GraphBatch` groups multiple graphs into one training input and tracks node-to-graph membership.
 
+For homogeneous graph batches, membership lives in `graph_index` and `graph_ptr`. For heterogeneous or temporal graph batches, membership is tracked per node type via `graph_index_by_type` and `graph_ptr_by_type`.
+
 For graph classification it also carries:
 
-- `graph_ptr`
 - `labels`
 - `metadata`
 

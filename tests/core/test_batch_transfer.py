@@ -82,6 +82,90 @@ def test_graph_batch_pin_memory_pins_graphs_and_batch_tensors():
     assert not batch.graph_index.is_pinned()
 
 
+def _hetero_graph():
+    return Graph.hetero(
+        nodes={
+            "paper": {"x": torch.randn(2, 4)},
+            "author": {"x": torch.randn(1, 4)},
+        },
+        edges={
+            ("author", "writes", "paper"): {
+                "edge_index": torch.tensor([[0, 0], [0, 1]], dtype=torch.long),
+            },
+            ("paper", "written_by", "author"): {
+                "edge_index": torch.tensor([[0, 1], [0, 0]], dtype=torch.long),
+            },
+        },
+    )
+
+
+def test_graph_batch_to_moves_typed_membership_tensors_for_hetero_batches():
+    graph_one = _hetero_graph()
+    graph_two = _hetero_graph()
+    metadata = [{"sample_id": "h0"}, {"sample_id": "h1"}]
+    batch = GraphBatch(
+        graphs=[graph_one, graph_two],
+        graph_index=None,
+        graph_ptr=None,
+        graph_index_by_type={
+            "paper": torch.tensor([0, 0, 1, 1], dtype=torch.long),
+            "author": torch.tensor([0, 1], dtype=torch.long),
+        },
+        graph_ptr_by_type={
+            "paper": torch.tensor([0, 2, 4], dtype=torch.long),
+            "author": torch.tensor([0, 1, 2], dtype=torch.long),
+        },
+        labels=torch.tensor([1.0, 0.0], dtype=torch.float32),
+        metadata=metadata,
+    )
+
+    moved = batch.to(device=_transfer_device(), dtype=torch.float64)
+
+    assert moved is not batch
+    assert moved.graphs[0] is not graph_one
+    assert moved.graphs[0].nodes["paper"].x.device.type == "meta"
+    assert moved.graph_index is None
+    assert moved.graph_ptr is None
+    assert moved.graph_index_by_type["paper"].device.type == "meta"
+    assert moved.graph_index_by_type["paper"].dtype == torch.long
+    assert moved.graph_ptr_by_type["author"].device.type == "meta"
+    assert moved.graph_ptr_by_type["author"].dtype == torch.long
+    assert moved.labels is not None
+    assert moved.labels.device.type == "meta"
+    assert moved.labels.dtype == torch.float64
+    assert moved.metadata is metadata
+
+
+def test_graph_batch_pin_memory_pins_typed_membership_tensors_for_hetero_batches():
+    batch = GraphBatch(
+        graphs=[_hetero_graph(), _hetero_graph()],
+        graph_index=None,
+        graph_ptr=None,
+        graph_index_by_type={
+            "paper": torch.tensor([0, 0, 1, 1], dtype=torch.long),
+            "author": torch.tensor([0, 1], dtype=torch.long),
+        },
+        graph_ptr_by_type={
+            "paper": torch.tensor([0, 2, 4], dtype=torch.long),
+            "author": torch.tensor([0, 1, 2], dtype=torch.long),
+        },
+        labels=torch.tensor([1.0, 0.0], dtype=torch.float32),
+        metadata=[{"sample_id": "h0"}, {"sample_id": "h1"}],
+    )
+
+    pinned = batch.pin_memory()
+
+    assert pinned is not batch
+    assert pinned.graphs[0].nodes["paper"].x.is_pinned()
+    assert pinned.graph_index is None
+    assert pinned.graph_ptr is None
+    assert pinned.graph_index_by_type["paper"].is_pinned()
+    assert pinned.graph_ptr_by_type["author"].is_pinned()
+    assert pinned.labels is not None
+    assert pinned.labels.is_pinned()
+    assert pinned.metadata is batch.metadata
+
+
 def test_node_batch_to_moves_graph_and_seed_index():
     graph = _homo_graph()
     metadata = [{"seed": 0}, {"seed": 1}]
