@@ -20,6 +20,36 @@ def _edge_ids(store) -> torch.Tensor:
     return torch.arange(edge_count, dtype=torch.long, device=store.edge_index.device)
 
 
+def _normalize_seed_nodes(seeds, *, count: int, device: torch.device) -> torch.Tensor:
+    seed_tensor = torch.as_tensor(seeds, dtype=torch.long, device=device).reshape(-1)
+    if seed_tensor.numel() > 0 and ((seed_tensor < 0).any() or (seed_tensor >= count).any()):
+        raise ValueError("seed nodes must fall within the start node type range")
+    return seed_tensor
+
+
+def _successor_map(edge_index: torch.Tensor) -> dict[int, torch.Tensor]:
+    successors: dict[int, list[int]] = {}
+    for src, dst in edge_index.t().tolist():
+        successors.setdefault(int(src), []).append(int(dst))
+    return {
+        src: torch.tensor(dst_list, dtype=torch.long, device=edge_index.device)
+        for src, dst_list in successors.items()
+    }
+
+
+def _sample_successors(current: torch.Tensor, successors: dict[int, torch.Tensor]) -> torch.Tensor:
+    next_nodes = torch.full_like(current, -1)
+    for index, node in enumerate(current.tolist()):
+        if node < 0:
+            continue
+        neighbors = successors.get(int(node))
+        if neighbors is None or neighbors.numel() == 0:
+            continue
+        choice = int(torch.randint(neighbors.numel(), (1,), device=neighbors.device).item())
+        next_nodes[index] = neighbors[choice]
+    return next_nodes
+
+
 def line_graph(graph: Graph, *, edge_type=None, backtracking: bool = True, copy_edata: bool = True) -> Graph:
     edge_type = _resolve_edge_type(graph, edge_type)
     src_type, _, dst_type = edge_type
@@ -57,6 +87,34 @@ def line_graph(graph: Graph, *, edge_type=None, backtracking: bool = True, copy_
         nodes={"node": node_data},
         edges={LINE_GRAPH_EDGE_TYPE: {"edge_index": line_edge_index}},
     )
+
+
+def random_walk(graph: Graph, seeds, *, length: int, edge_type=None) -> torch.Tensor:
+    if length < 0:
+        raise ValueError("length must be non-negative")
+
+    edge_type = _resolve_edge_type(graph, edge_type)
+    src_type, _, dst_type = edge_type
+    if length > 1 and src_type != dst_type:
+        raise ValueError("random_walk requires a relation that composes with itself for multi-step walks")
+
+    store = graph.edges[edge_type]
+    device = store.edge_index.device
+    seed_tensor = _normalize_seed_nodes(seeds, count=graph._node_count(src_type), device=device)
+    traces = torch.full((seed_tensor.numel(), length + 1), -1, dtype=torch.long, device=device)
+    if seed_tensor.numel() == 0:
+        return traces
+
+    traces[:, 0] = seed_tensor
+    if length == 0:
+        return traces
+
+    successors = _successor_map(store.edge_index)
+    current = seed_tensor
+    for step in range(length):
+        current = _sample_successors(current, successors)
+        traces[:, step + 1] = current
+    return traces
 
 
 def _normalize_metapath(graph: Graph, metapath) -> tuple[tuple[str, str, str], ...]:
@@ -115,3 +173,20 @@ def metapath_reachable_graph(graph: Graph, metapath, *, relation_name: str | Non
     if end_type != start_type:
         nodes[end_type] = dict(graph.nodes[end_type].data)
     return Graph.hetero(nodes=nodes, edges={derived_edge_type: {"edge_index": edge_index}})
+
+
+def metapath_random_walk(graph: Graph, seeds, metapath) -> torch.Tensor:
+    normalized = _normalize_metapath(graph, metapath)
+    start_type = normalized[0][0]
+    device = graph.edges[normalized[0]].edge_index.device
+    seed_tensor = _normalize_seed_nodes(seeds, count=graph._node_count(start_type), device=device)
+    traces = torch.full((seed_tensor.numel(), len(normalized) + 1), -1, dtype=torch.long, device=device)
+    if seed_tensor.numel() == 0:
+        return traces
+
+    traces[:, 0] = seed_tensor
+    current = seed_tensor
+    for step, edge_type in enumerate(normalized, start=1):
+        current = _sample_successors(current, _successor_map(graph.edges[edge_type].edge_index))
+        traces[:, step] = current
+    return traces

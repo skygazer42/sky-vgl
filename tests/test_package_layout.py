@@ -269,6 +269,7 @@ def test_legacy_core_package_reexports_graph_support_types():
 
 
 def test_foundation_packages_expose_namespace_exports():
+    import vgl.ops as ops_module
     from vgl.ops import GraphTransform, TransformPipeline
     from vgl.ops import add_self_loops, compact_nodes, edge_subgraph, khop_nodes, khop_subgraph, line_graph, metapath_reachable_graph, node_subgraph, remove_self_loops, to_bidirected
     from vgl.ops import __all__ as ops_all
@@ -278,7 +279,7 @@ def test_foundation_packages_expose_namespace_exports():
     from vgl.storage import FeatureStore, GraphStore, InMemoryGraphStore, InMemoryTensorStore, MmapTensorStore, TensorSlice, TensorStore
     from vgl.storage import __all__ as storage_all
 
-    assert ops_all == ["GraphTransform", "TransformPipeline", "add_self_loops", "remove_self_loops", "to_bidirected", "line_graph", "metapath_reachable_graph", "node_subgraph", "edge_subgraph", "khop_nodes", "khop_subgraph", "compact_nodes"]
+    assert ops_all == ["GraphTransform", "TransformPipeline", "add_self_loops", "remove_self_loops", "to_bidirected", "line_graph", "metapath_reachable_graph", "random_walk", "metapath_random_walk", "node_subgraph", "edge_subgraph", "khop_nodes", "khop_subgraph", "compact_nodes"]
     assert sparse_all == ["SparseLayout", "SparseTensor", "from_edge_index", "to_coo", "to_csr", "to_csc", "degree", "select_rows", "select_cols", "transpose", "sum", "spmm", "sddmm", "edge_softmax"]
     assert storage_all == ["TensorSlice", "TensorStore", "InMemoryTensorStore", "MmapTensorStore", "FeatureStore", "GraphStore", "InMemoryGraphStore"]
     assert SparseLayout.__name__ == "SparseLayout"
@@ -294,6 +295,8 @@ def test_foundation_packages_expose_namespace_exports():
     assert callable(to_bidirected)
     assert callable(line_graph)
     assert callable(metapath_reachable_graph)
+    assert callable(getattr(ops_module, "random_walk", None))
+    assert callable(getattr(ops_module, "metapath_random_walk", None))
     assert callable(node_subgraph)
     assert callable(edge_subgraph)
     assert callable(khop_nodes)

@@ -183,6 +183,16 @@ class Graph:
 
         return metapath_reachable_graph(self, metapath, relation_name=relation_name)
 
+    def random_walk(self, seeds, *, length: int, edge_type=None):
+        from vgl.ops import random_walk
+
+        return random_walk(self, seeds, length=length, edge_type=edge_type)
+
+    def metapath_random_walk(self, seeds, metapath):
+        from vgl.ops import metapath_random_walk
+
+        return metapath_random_walk(self, seeds, metapath)
+
     def node_subgraph(self, node_ids, *, edge_type=None):
         from vgl.ops import node_subgraph
 
@@ -246,6 +256,7 @@ class Graph:
                 for edge_type, store in self.edges.items()
             },
         )
+
 
     def pin_memory(self):
         return Graph(

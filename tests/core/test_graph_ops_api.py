@@ -43,3 +43,36 @@ def test_graph_metapath_reachable_graph_bridge_calls_ops_layer():
     assert set(metapath.nodes) == {"author", "venue"}
     assert set(metapath.edges) == {edge_type}
     assert torch.equal(metapath.edges[edge_type].edge_index, torch.tensor([[0, 1], [0, 0]]))
+
+
+def test_graph_random_walk_bridge_calls_ops_layer():
+    graph = Graph.homo(
+        edge_index=torch.tensor([[0, 1, 2], [1, 2, 0]]),
+        x=torch.tensor([[1.0], [2.0], [3.0]]),
+    )
+
+    assert hasattr(graph, "random_walk")
+    traces = graph.random_walk(torch.tensor([0, 2]), length=3)
+
+    assert torch.equal(traces, torch.tensor([[0, 1, 2, 0], [2, 0, 1, 2]]))
+
+
+def test_graph_metapath_random_walk_bridge_calls_ops_layer():
+    writes = ("author", "writes", "paper")
+    published_in = ("paper", "published_in", "venue")
+    graph = Graph.hetero(
+        nodes={
+            "author": {"x": torch.tensor([[1.0], [2.0]])},
+            "paper": {"x": torch.tensor([[10.0], [20.0]])},
+            "venue": {"x": torch.tensor([[100.0]])},
+        },
+        edges={
+            writes: {"edge_index": torch.tensor([[0, 1], [0, 1]])},
+            published_in: {"edge_index": torch.tensor([[0, 1], [0, 0]])},
+        },
+    )
+
+    assert hasattr(graph, "metapath_random_walk")
+    traces = graph.metapath_random_walk(torch.tensor([0, 1]), [writes, published_in])
+
+    assert torch.equal(traces, torch.tensor([[0, 0, 0], [1, 1, 0]]))
