@@ -54,6 +54,7 @@ from vgl.data import DatasetManifest as DatasetManifest
 from vgl.data import DatasetSplit as DatasetSplit
 from vgl.data import OnDiskGraphDataset as OnDiskGraphDataset
 from vgl.engine import Trainer as Trainer
+from vgl.graph import Block as Block
 from vgl.graph import Graph as Graph
 from vgl.graph import GraphBatch as GraphBatch
 from vgl.graph import GraphSchema as GraphSchema
@@ -169,6 +170,7 @@ __all__ = [
     "GeneralizedCrossEntropyScheduler",
     "SymmetricCrossEntropyBetaScheduler",
     "GradientAccumulationScheduler",
+    "Block",
     "Graph",
     "GraphBatch",
     "GraphSchema",

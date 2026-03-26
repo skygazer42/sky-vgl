@@ -1,3 +1,4 @@
+from vgl.ops.block import to_block as to_block
 from vgl.ops.compact import compact_nodes as compact_nodes
 from vgl.ops.khop import khop_nodes as khop_nodes
 from vgl.ops.khop import khop_subgraph as khop_subgraph
@@ -28,4 +29,5 @@ __all__ = [
     "khop_nodes",
     "khop_subgraph",
     "compact_nodes",
+    "to_block",
 ]

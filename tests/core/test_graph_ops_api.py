@@ -57,6 +57,19 @@ def test_graph_random_walk_bridge_calls_ops_layer():
     assert torch.equal(traces, torch.tensor([[0, 1, 2, 0], [2, 0, 1, 2]]))
 
 
+def test_graph_to_block_bridge_calls_ops_layer():
+    graph = Graph.homo(
+        edge_index=torch.tensor([[0, 1, 2], [1, 2, 1]]),
+        x=torch.tensor([[1.0], [2.0], [3.0]]),
+    )
+
+    block = graph.to_block(torch.tensor([1, 2]))
+
+    assert torch.equal(block.dst_n_id, torch.tensor([1, 2]))
+    assert torch.equal(block.src_n_id, torch.tensor([1, 2, 0]))
+    assert torch.equal(block.edge_index, torch.tensor([[2, 0, 1], [0, 1, 0]]))
+
+
 def test_graph_metapath_random_walk_bridge_calls_ops_layer():
     writes = ("author", "writes", "paper")
     published_in = ("paper", "published_in", "venue")

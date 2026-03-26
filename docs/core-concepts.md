@@ -14,11 +14,17 @@ Homogeneous graphs can carry edge-level tensors through `Graph.homo(edge_data={.
 
 `Graph.adjacency(layout=...)` is the main bridge back into user code. It builds sparse adjacency views through `vgl.sparse`, including CSC layouts for column-oriented traversals, and caches them on each edge store so repeated structural operations do not need to rebuild the same layout.
 
-`vgl.ops` sits one layer above that and now supports both homogeneous structure rewrites and relation-local heterogeneous `node_subgraph(...)`, `edge_subgraph(...)`, `khop_nodes(...)`, `khop_subgraph(...)`, and `compact_nodes(...)` flows when an `edge_type` is selected. It also exposes `line_graph(...)` for edge-centric homogeneous topology transforms, `random_walk(...)` for repeated relation-local path sampling, `metapath_random_walk(...)` for typed path sampling, and `metapath_reachable_graph(...)` for composing heterogeneous metapaths into one derived reachable relation. For bipartite relations, `khop_nodes(...)` consumes seeds keyed by node type and returns per-type node ids so the resulting `khop_subgraph(...)` can preserve the hetero schema, while `metapath_random_walk(...)` returns one node-id trace column per metapath step.
+`vgl.ops` sits one layer above that and now supports both homogeneous structure rewrites and relation-local heterogeneous `node_subgraph(...)`, `edge_subgraph(...)`, `khop_nodes(...)`, `khop_subgraph(...)`, and `compact_nodes(...)` flows when an `edge_type` is selected. It also exposes relation-local `to_block(...)` for message-flow rewrites, `line_graph(...)` for edge-centric homogeneous topology transforms, `random_walk(...)` for repeated relation-local path sampling, `metapath_random_walk(...)` for typed path sampling, and `metapath_reachable_graph(...)` for composing heterogeneous metapaths into one derived reachable relation. `to_block(...)` returns a lightweight `Block` container whose wrapped graph carries compacted source/destination frontiers plus `n_id` / `e_id` metadata in stable relation-local order. For bipartite relations, `khop_nodes(...)` consumes seeds keyed by node type and returns per-type node ids so the resulting `khop_subgraph(...)` can preserve the hetero schema, while `metapath_random_walk(...)` returns one node-id trace column per metapath step.
 
 ## GraphView
 
 `GraphView` is a lightweight projection over an existing graph, used for operations such as `snapshot()` and `window()`. Views continue to reference graph-level runtime context from the base graph, including retained storage-backed feature sources.
+
+## Block
+
+`Block` is the compact relation-local message-flow container returned by `to_block(...)` or `Graph.to_block(...)`. It wraps one bipartite `graph` plus explicit source/destination node id metadata through `src_n_id`, `dst_n_id`, and edge metadata through `edata["e_id"]`. This gives VGL a first-class bridge to DGL-style block workflows without changing the current sampler or loader contracts.
+
+For same-type relations, the wrapped graph uses deterministic internal source/destination node stores while `Block` keeps the original `src_type` / `dst_type` visible to callers. For bipartite relations, the wrapped graph keeps the original endpoint node types. `Block.to(...)` and `Block.pin_memory()` mirror the existing graph/batch transfer behavior so block-aware code can participate in the same device pipeline.
 
 ## GraphBatch
 

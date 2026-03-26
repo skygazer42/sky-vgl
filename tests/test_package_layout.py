@@ -1,4 +1,4 @@
-from vgl import DataLoader, Graph, Loader
+from vgl import Block, DataLoader, Graph, Loader
 from vgl.core.graph import Graph as LegacyGraph
 from vgl.data.loader import Loader as LegacyLoader
 
@@ -58,6 +58,7 @@ def test_domain_packages_expose_preferred_import_paths():
         restore_checkpoint,
         save_checkpoint,
     )
+    from vgl.graph import Block as DomainBlock
     from vgl.graph import Graph as DomainGraph
     from vgl.graph import GraphBatch, GraphSchema, GraphView, NodeBatch
     from vgl.graph import LinkPredictionBatch, TemporalEventBatch
@@ -118,6 +119,7 @@ def test_domain_packages_expose_preferred_import_paths():
     from vgl.data import TemporalNeighborSampler as LegacyTemporalNeighborSampler
     from vgl.data import UniformNegativeLinkSampler as LegacyUniformNegativeLinkSampler
 
+    assert DomainBlock is Block
     assert DomainGraph is Graph
     assert Graph is LegacyGraph
     assert DomainDataLoader is DataLoader
@@ -271,7 +273,7 @@ def test_legacy_core_package_reexports_graph_support_types():
 def test_foundation_packages_expose_namespace_exports():
     import vgl.ops as ops_module
     from vgl.ops import GraphTransform, TransformPipeline
-    from vgl.ops import add_self_loops, compact_nodes, edge_subgraph, khop_nodes, khop_subgraph, line_graph, metapath_reachable_graph, node_subgraph, remove_self_loops, to_bidirected
+    from vgl.ops import add_self_loops, compact_nodes, edge_subgraph, khop_nodes, khop_subgraph, line_graph, metapath_reachable_graph, node_subgraph, remove_self_loops, to_bidirected, to_block
     from vgl.ops import __all__ as ops_all
     from vgl.sparse import SparseLayout, SparseTensor
     from vgl.sparse import __all__ as sparse_all
@@ -279,7 +281,7 @@ def test_foundation_packages_expose_namespace_exports():
     from vgl.storage import FeatureStore, GraphStore, InMemoryGraphStore, InMemoryTensorStore, MmapTensorStore, TensorSlice, TensorStore
     from vgl.storage import __all__ as storage_all
 
-    assert ops_all == ["GraphTransform", "TransformPipeline", "add_self_loops", "remove_self_loops", "to_bidirected", "line_graph", "metapath_reachable_graph", "random_walk", "metapath_random_walk", "node_subgraph", "edge_subgraph", "khop_nodes", "khop_subgraph", "compact_nodes"]
+    assert ops_all == ["GraphTransform", "TransformPipeline", "add_self_loops", "remove_self_loops", "to_bidirected", "line_graph", "metapath_reachable_graph", "random_walk", "metapath_random_walk", "node_subgraph", "edge_subgraph", "khop_nodes", "khop_subgraph", "compact_nodes", "to_block"]
     assert sparse_all == ["SparseLayout", "SparseTensor", "from_edge_index", "to_coo", "to_csr", "to_csc", "degree", "select_rows", "select_cols", "transpose", "sum", "spmm", "sddmm", "edge_softmax"]
     assert storage_all == ["TensorSlice", "TensorStore", "InMemoryTensorStore", "MmapTensorStore", "FeatureStore", "GraphStore", "InMemoryGraphStore"]
     assert SparseLayout.__name__ == "SparseLayout"
@@ -302,6 +304,7 @@ def test_foundation_packages_expose_namespace_exports():
     assert callable(khop_nodes)
     assert callable(khop_subgraph)
     assert callable(compact_nodes)
+    assert callable(to_block)
     assert TensorSlice.__name__ == "TensorSlice"
     assert TensorStore.__name__ == "TensorStore"
     assert InMemoryTensorStore.__name__ == "InMemoryTensorStore"

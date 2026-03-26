@@ -218,6 +218,11 @@ class Graph:
 
         return compact_nodes(self, node_ids, edge_type=edge_type)
 
+    def to_block(self, dst_nodes, *, edge_type=None, include_dst_in_src: bool = True):
+        from vgl.ops import to_block
+
+        return to_block(self, dst_nodes, edge_type=edge_type, include_dst_in_src=include_dst_in_src)
+
     def snapshot(self, t):
         if self.schema.time_attr is None:
             raise ValueError("snapshot requires a temporal graph")

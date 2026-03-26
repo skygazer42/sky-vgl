@@ -1,3 +1,4 @@
+from vgl.graph.block import Block as Block
 from vgl.graph.batch import GraphBatch as GraphBatch
 from vgl.graph.batch import LinkPredictionBatch as LinkPredictionBatch
 from vgl.graph.batch import NodeBatch as NodeBatch
@@ -11,6 +12,7 @@ from vgl.graph.stores import NodeStore as NodeStore
 from vgl.graph.view import GraphView as GraphView
 
 __all__ = [
+    "Block",
     "Graph",
     "GraphBatch",
     "GraphSchema",
