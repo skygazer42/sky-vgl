@@ -44,11 +44,35 @@ def _frame_data(frame):
     return dict(getattr(frame, "data", frame))
 
 
+def _data_device(data) -> torch.device | None:
+    for value in data.values():
+        if isinstance(value, torch.Tensor):
+            return value.device
+    return None
+
+
+def _has_count_tensor(data, *, count: int) -> bool:
+    for value in data.values():
+        if isinstance(value, torch.Tensor) and value.ndim > 0 and int(value.size(0)) == count:
+            return True
+    return False
+
+
 def _node_data_from_dgl(dgl_graph, node_type=None):
     nodes = getattr(dgl_graph, "nodes", None)
     if node_type is None or nodes is None or not hasattr(nodes, "__getitem__"):
         return dict(getattr(dgl_graph, "ndata", {}))
     return _frame_data(nodes[node_type])
+
+
+def _graph_num_nodes(dgl_graph, node_type=None) -> int:
+    num_nodes = getattr(dgl_graph, "num_nodes")
+    try:
+        if node_type is None:
+            return int(num_nodes())
+        return int(num_nodes(node_type))
+    except TypeError:
+        return int(num_nodes())
 
 
 def _edge_pairs_from_dgl(dgl_graph, edge_type=None):
@@ -137,7 +161,7 @@ def _as_long_tensor(value, *, device=None) -> torch.Tensor:
     return tensor.view(-1)
 
 
-def _normalized_public_ids(data, *, preferred_key, fallback_key, count: int, device=None) -> torch.Tensor:
+def _normalized_public_ids(data, *, preferred_key, fallback_key, count: int | None = None, device=None) -> torch.Tensor | None:
     value = data.get(preferred_key)
     if fallback_key is not None:
         if preferred_key in data:
@@ -145,10 +169,48 @@ def _normalized_public_ids(data, *, preferred_key, fallback_key, count: int, dev
         elif fallback_key in data:
             value = data.pop(fallback_key)
     if value is None:
+        if count is None:
+            return None
         value = torch.arange(count, device=device, dtype=torch.long)
     value = _as_long_tensor(value, device=device)
     data[preferred_key] = value
     return value
+
+
+def _graph_node_data_from_dgl(dgl_graph, node_type=None):
+    import dgl  # type: ignore[import-not-found]
+
+    node_data = _node_data_from_dgl(dgl_graph, node_type)
+    count = _graph_num_nodes(dgl_graph, node_type)
+    device = _data_device(node_data)
+    public_ids = _normalized_public_ids(
+        node_data,
+        preferred_key="n_id",
+        fallback_key=getattr(dgl, "NID", None),
+        device=device,
+    )
+    if public_ids is None and not _has_count_tensor(node_data, count=count):
+        _normalized_public_ids(
+            node_data,
+            preferred_key="n_id",
+            fallback_key=None,
+            count=count,
+            device=device,
+        )
+    return node_data
+
+
+def _graph_edge_data_from_dgl(dgl_graph, edge_type=None):
+    import dgl  # type: ignore[import-not-found]
+
+    edge_data = _edge_data_from_dgl(dgl_graph, edge_type)
+    _normalized_public_ids(
+        edge_data,
+        preferred_key="e_id",
+        fallback_key=getattr(dgl, "EID", None),
+        device=_data_device(edge_data),
+    )
+    return edge_data
 
 
 def block_from_dgl(dgl_block):
@@ -242,14 +304,17 @@ def block_to_dgl(block):
 
 
 def from_dgl(dgl_graph):
+    if _is_dgl_block(dgl_graph):
+        raise ValueError("Graph.from_dgl does not accept DGL blocks; use Block.from_dgl(...) or vgl.compat.block_from_dgl(...)")
+
     if _is_hetero_dgl_graph(dgl_graph):
         nodes = {
-            node_type: _node_data_from_dgl(dgl_graph, node_type)
+            node_type: _graph_node_data_from_dgl(dgl_graph, node_type)
             for node_type in _ntypes(dgl_graph)
         }
         edges = {}
         for edge_type in _canonical_etypes(dgl_graph):
-            edge_data = _edge_data_from_dgl(dgl_graph, edge_type)
+            edge_data = _graph_edge_data_from_dgl(dgl_graph, edge_type)
             edge_data["edge_index"] = _edge_index_from_dgl(dgl_graph, edge_type)
             edges[edge_type] = edge_data
         time_attr = getattr(dgl_graph, _VGL_TIME_ATTR, None)
@@ -259,8 +324,8 @@ def from_dgl(dgl_graph):
 
     return Graph.homo(
         edge_index=_edge_index_from_dgl(dgl_graph),
-        edge_data=_edge_data_from_dgl(dgl_graph) or None,
-        **_node_data_from_dgl(dgl_graph),
+        edge_data=_graph_edge_data_from_dgl(dgl_graph) or None,
+        **_graph_node_data_from_dgl(dgl_graph),
     )
 
 

@@ -38,9 +38,12 @@ Common import rewrites:
 ## From DGL
 
 - `graph.ndata[...]` style access remains available on homogeneous graphs
-- `Graph.from_dgl(dgl_graph)` imports DGL homogeneous graphs and heterographs into the unified `Graph` model
+- `Graph.from_dgl(dgl_graph)` is the graph-only import path for DGL homogeneous graphs and heterographs
+- DGL message-flow blocks use `Block.from_dgl(dgl_block)` or `vgl.compat.block_from_dgl(dgl_block)` instead of `Graph.from_dgl(...)`
 - `graph.to_dgl()` keeps simple homogeneous graphs on `dgl.graph(...)` and exports typed or temporal graphs through `dgl.heterograph(...)`
 - canonical edge types survive heterograph round-trips instead of collapsing to VGL's default relation
+- external DGL `dgl.NID` / `dgl.EID` metadata imports as VGL `n_id` / `e_id`
+- featureless external DGL graphs preserve declared node counts by importing node-id metadata when needed, so isolated nodes survive round-trips
 - temporal graphs preserve `graph.schema.time_attr` through the adapter-owned `vgl_time_attr` DGL graph attribute
 - sampled graph-classification records can attach labels to sample metadata instead of mutating the graph object
 

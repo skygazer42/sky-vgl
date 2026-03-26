@@ -322,6 +322,73 @@ def test_storage_backed_graph_with_sparse_cache_round_trips_to_dgl(monkeypatch):
 
 
 
+def test_from_dgl_preserves_homo_num_nodes_without_node_features(monkeypatch):
+    dgl_module = _install_fake_dgl(monkeypatch)
+
+    dgl_graph = dgl_module.graph(
+        (torch.tensor([0, 1]), torch.tensor([1, 0])),
+        num_nodes=4,
+    )
+
+    graph = Graph.from_dgl(dgl_graph)
+    restored = graph.to_dgl()
+
+    assert torch.equal(graph.ndata['n_id'], torch.tensor([0, 1, 2, 3]))
+    assert restored.num_nodes() == 4
+
+
+
+def test_from_dgl_preserves_hetero_num_nodes_without_node_features(monkeypatch):
+    dgl_module = _install_fake_dgl(monkeypatch)
+
+    writes = ('author', 'writes', 'paper')
+    dgl_graph = dgl_module.heterograph(
+        {writes: (torch.tensor([0]), torch.tensor([1]))},
+        num_nodes_dict={'author': 3, 'paper': 4},
+    )
+
+    graph = Graph.from_dgl(dgl_graph)
+    restored = graph.to_dgl()
+
+    assert torch.equal(graph.nodes['author'].data['n_id'], torch.tensor([0, 1, 2]))
+    assert torch.equal(graph.nodes['paper'].data['n_id'], torch.tensor([0, 1, 2, 3]))
+    assert restored.num_nodes('author') == 3
+    assert restored.num_nodes('paper') == 4
+
+
+
+def test_from_dgl_normalizes_external_graph_ids(monkeypatch):
+    dgl_module = _install_fake_dgl(monkeypatch)
+
+    dgl_graph = dgl_module.graph(
+        (torch.tensor([0, 2]), torch.tensor([1, 0])),
+        num_nodes=3,
+    )
+    dgl_graph.ndata[dgl_module.NID] = torch.tensor([10, 11, 12])
+    dgl_graph.edata[dgl_module.EID] = torch.tensor([20, 21])
+
+    graph = Graph.from_dgl(dgl_graph)
+
+    assert torch.equal(graph.ndata['n_id'], torch.tensor([10, 11, 12]))
+    assert dgl_module.NID not in graph.ndata
+    assert torch.equal(graph.edata['e_id'], torch.tensor([20, 21]))
+    assert dgl_module.EID not in graph.edata
+
+
+
+def test_graph_from_dgl_rejects_blocks(monkeypatch):
+    dgl_module = _install_fake_dgl(monkeypatch)
+
+    dgl_block = dgl_module.create_block(
+        (torch.tensor([0]), torch.tensor([0])),
+        num_src_nodes=1,
+        num_dst_nodes=1,
+    )
+
+    with pytest.raises(ValueError, match='Block.from_dgl'):
+        Graph.from_dgl(dgl_block)
+
+
 def test_homo_block_round_trips_to_dgl_block(monkeypatch):
     _install_fake_dgl(monkeypatch)
 
