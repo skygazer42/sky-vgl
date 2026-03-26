@@ -4,6 +4,8 @@ from vgl import Graph
 from vgl.core.batch import NodeBatch
 from vgl.data.sample import SampleRecord
 
+WRITES = ("author", "writes", "paper")
+
 
 def _sample(graph, seed, sample_id):
     return SampleRecord(
@@ -111,6 +113,86 @@ def test_node_batch_batches_block_layers_across_samples():
     assert len(batch.blocks) == 2
     outer_block = batch.blocks[0]
     inner_block = batch.blocks[1]
+    assert torch.equal(outer_block.src_n_id, torch.cat([g1_blocks[0].src_n_id, g2_blocks[0].src_n_id], dim=0))
+    assert torch.equal(outer_block.dst_n_id, torch.cat([g1_blocks[0].dst_n_id, g2_blocks[0].dst_n_id], dim=0))
+    assert torch.equal(inner_block.src_n_id, torch.cat([g1_blocks[1].src_n_id, g2_blocks[1].src_n_id], dim=0))
+    assert torch.equal(inner_block.dst_n_id, torch.cat([g1_blocks[1].dst_n_id, g2_blocks[1].dst_n_id], dim=0))
+    outer_offset = torch.tensor(
+        [[g1_blocks[0].src_n_id.numel()], [g1_blocks[0].dst_n_id.numel()]],
+        dtype=torch.long,
+    )
+    inner_offset = torch.tensor(
+        [[g1_blocks[1].src_n_id.numel()], [g1_blocks[1].dst_n_id.numel()]],
+        dtype=torch.long,
+    )
+    assert torch.equal(
+        outer_block.edge_index,
+        torch.cat([g1_blocks[0].edge_index, g2_blocks[0].edge_index + outer_offset], dim=1),
+    )
+    assert torch.equal(
+        inner_block.edge_index,
+        torch.cat([g1_blocks[1].edge_index, g2_blocks[1].edge_index + inner_offset], dim=1),
+    )
+
+
+def test_node_batch_batches_hetero_block_layers_across_samples():
+    g1 = Graph.hetero(
+        nodes={
+            "author": {"x": torch.randn(2, 4), "n_id": torch.tensor([10, 12], dtype=torch.long)},
+            "paper": {"x": torch.randn(2, 4), "n_id": torch.tensor([20, 21], dtype=torch.long)},
+        },
+        edges={
+            WRITES: {
+                "edge_index": torch.tensor([[0, 1, 0], [0, 0, 1]], dtype=torch.long),
+                "e_id": torch.tensor([100, 101, 102], dtype=torch.long),
+            }
+        },
+    )
+    g2 = Graph.hetero(
+        nodes={
+            "author": {"x": torch.randn(2, 4), "n_id": torch.tensor([30, 32], dtype=torch.long)},
+            "paper": {"x": torch.randn(2, 4), "n_id": torch.tensor([40, 41], dtype=torch.long)},
+        },
+        edges={
+            WRITES: {
+                "edge_index": torch.tensor([[0, 1, 0], [0, 0, 1]], dtype=torch.long),
+                "e_id": torch.tensor([200, 201, 202], dtype=torch.long),
+            }
+        },
+    )
+    g1_blocks = [
+        g1.to_block(torch.tensor([0, 1], dtype=torch.long), edge_type=WRITES),
+        g1.to_block(torch.tensor([0], dtype=torch.long), edge_type=WRITES),
+    ]
+    g2_blocks = [
+        g2.to_block(torch.tensor([0, 1], dtype=torch.long), edge_type=WRITES),
+        g2.to_block(torch.tensor([0], dtype=torch.long), edge_type=WRITES),
+    ]
+
+    batch = NodeBatch.from_samples(
+        [
+            SampleRecord(
+                graph=g1,
+                metadata={"seed": 0, "sample_id": "a", "node_type": "paper"},
+                sample_id="a",
+                subgraph_seed=0,
+                blocks=g1_blocks,
+            ),
+            SampleRecord(
+                graph=g2,
+                metadata={"seed": 0, "sample_id": "b", "node_type": "paper"},
+                sample_id="b",
+                subgraph_seed=0,
+                blocks=g2_blocks,
+            ),
+        ]
+    )
+
+    assert batch.blocks is not None
+    assert len(batch.blocks) == 2
+    outer_block = batch.blocks[0]
+    inner_block = batch.blocks[1]
+    assert outer_block.edge_type == WRITES
     assert torch.equal(outer_block.src_n_id, torch.cat([g1_blocks[0].src_n_id, g2_blocks[0].src_n_id], dim=0))
     assert torch.equal(outer_block.dst_n_id, torch.cat([g1_blocks[0].dst_n_id, g2_blocks[0].dst_n_id], dim=0))
     assert torch.equal(inner_block.src_n_id, torch.cat([g1_blocks[1].src_n_id, g2_blocks[1].src_n_id], dim=0))

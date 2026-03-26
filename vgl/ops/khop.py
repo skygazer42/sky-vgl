@@ -174,24 +174,35 @@ def expand_neighbors(
             return expanded, hop_nodes
         return expanded
 
-    if return_hops:
-        raise ValueError("return_hops is only supported for homogeneous neighbor expansion")
     if node_type is None:
         raise ValueError("node_type is required for heterogeneous neighbor expansion")
     if node_type not in graph.nodes:
         raise ValueError("node_type must exist in the source graph")
 
+    def _snapshot(visited_by_type):
+        return {
+            current_type: torch.tensor(
+                sorted(node_ids),
+                dtype=torch.long,
+                device=next(iter(graph.nodes[current_type].data.values())).device,
+            )
+            for current_type, node_ids in visited_by_type.items()
+        }
+
     visited = {current_type: set() for current_type in graph.schema.node_types}
     frontier = {current_type: set() for current_type in graph.schema.node_types}
     visited[node_type].update(int(node) for node in seed_tensor.tolist())
     frontier[node_type].update(int(node) for node in seed_tensor.tolist())
+    hop_nodes = [_snapshot(visited)] if return_hops else None
     for fanout in fanouts:
         frontier = _hetero_next_frontier(graph, frontier, visited, fanout, generator=generator)
         for current_type, node_ids in frontier.items():
             visited[current_type].update(node_ids)
-        if not any(frontier.values()):
+        if hop_nodes is not None:
+            hop_nodes.append(_snapshot(visited))
+        elif not any(frontier.values()):
             break
-    return {
+    expanded = {
         current_type: torch.tensor(
             sorted(visited[current_type]),
             dtype=torch.long,
@@ -199,6 +210,9 @@ def expand_neighbors(
         )
         for current_type in graph.schema.node_types
     }
+    if hop_nodes is not None:
+        return expanded, hop_nodes
+    return expanded
 
 
 def khop_nodes(graph: Graph, seeds, *, num_hops: int, direction: str = "out", edge_type=None) -> torch.Tensor | dict[str, torch.Tensor]:

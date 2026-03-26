@@ -46,6 +46,24 @@ def _single_link_edge_type(records, *, context: str) -> tuple[str, str, str]:
     return edge_types[0]
 
 
+def _single_inbound_node_block_edge_type(graph: Graph, *, node_type: str, context: str) -> tuple[str, str, str]:
+    if set(graph.nodes) == {"node"} and len(graph.edges) == 1:
+        return graph._default_edge_type()
+
+    inbound_edge_types = tuple(edge_type for edge_type in graph.edges if edge_type[2] == node_type)
+    if len(inbound_edge_types) == 1:
+        return inbound_edge_types[0]
+    if not inbound_edge_types:
+        raise ValueError(
+            f"{context} output_blocks requires exactly one inbound edge_type for node_type {node_type!r}; found none"
+        )
+    formatted = ", ".join(str(edge_type) for edge_type in inbound_edge_types)
+    raise ValueError(
+        f"{context} output_blocks requires exactly one inbound edge_type for node_type {node_type!r}; "
+        f"found {len(inbound_edge_types)}: {formatted}"
+    )
+
+
 def _resolve_temporal_edge_type(record):
     edge_type = getattr(record, "edge_type", None)
     if edge_type is None:
@@ -1182,8 +1200,13 @@ class NodeNeighborSampler(LinkNeighborSampler):
 
     def build_plan(self, item) -> SamplingPlan:
         graph, metadata, sample_id, source_graph_id, seed_ids, node_type = self._seed_item(item)
-        if self.output_blocks and not (set(graph.nodes) == {"node"} and len(graph.edges) == 1):
-            raise ValueError("NodeNeighborSampler output_blocks currently supports homogeneous node sampling only")
+        node_block_edge_type = None
+        if self.output_blocks:
+            node_block_edge_type = _single_inbound_node_block_edge_type(
+                graph,
+                node_type=node_type,
+                context="NodeNeighborSampler",
+            )
         plan_metadata = {}
         if sample_id is not None:
             plan_metadata["sample_id"] = sample_id
@@ -1201,6 +1224,7 @@ class NodeNeighborSampler(LinkNeighborSampler):
                     params={
                         "num_neighbors": tuple(self.num_neighbors),
                         "output_blocks": self.output_blocks,
+                        "node_block_edge_type": node_block_edge_type,
                     },
                 ),
             ),

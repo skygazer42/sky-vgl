@@ -424,6 +424,105 @@ def test_local_partition_sampled_training_stitched_hetero_sampling_crosses_parti
     assert history["completed_epochs"] == 1
 
 
+class TinyStitchedPartitionHeteroNodeBlockClassifier(nn.Module):
+    def __init__(self):
+        super().__init__()
+        self.linear = nn.Linear(1, 2)
+
+    def forward(self, batch):
+        assert batch.blocks is not None
+        assert len(batch.blocks) == 3
+        outer_block, middle_block, inner_block = batch.blocks
+        assert torch.equal(batch.graph.nodes["author"].n_id, torch.tensor([0, 2]))
+        assert torch.equal(batch.graph.nodes["paper"].n_id, torch.tensor([0, 1]))
+        assert torch.equal(batch.graph.nodes["author"].x.view(-1), torch.tensor([10.0, 30.0]))
+        assert torch.equal(batch.graph.nodes["paper"].x.view(-1), torch.tensor([1.0, 2.0]))
+        assert torch.equal(outer_block.dst_n_id, torch.tensor([0, 1]))
+        assert torch.equal(outer_block.src_n_id, torch.tensor([0, 2]))
+        assert torch.equal(outer_block.edata["e_id"], torch.tensor([0, 1, 2]))
+        assert torch.equal(outer_block.edata["edge_weight"], torch.tensor([10.0, 11.0, 12.0]))
+        assert torch.equal(outer_block.srcdata["x"].view(-1), torch.tensor([10.0, 30.0]))
+        assert torch.equal(outer_block.dstdata["x"].view(-1), torch.tensor([1.0, 2.0]))
+        assert torch.equal(middle_block.dst_n_id, torch.tensor([0]))
+        assert torch.equal(middle_block.src_n_id, torch.tensor([0, 2]))
+        assert torch.equal(middle_block.edata["e_id"], torch.tensor([0, 2]))
+        assert torch.equal(middle_block.edata["edge_weight"], torch.tensor([10.0, 12.0]))
+        assert torch.equal(inner_block.dst_n_id, torch.tensor([0]))
+        assert torch.equal(inner_block.src_n_id, torch.tensor([0, 2]))
+        assert torch.equal(inner_block.edata["e_id"], torch.tensor([0, 2]))
+        assert torch.equal(inner_block.edata["edge_weight"], torch.tensor([10.0, 12.0]))
+        assert torch.equal(batch.seed_index, torch.tensor([0]))
+        return self.linear(batch.graph.nodes["paper"].x)
+
+
+def test_local_partition_sampled_training_stitched_hetero_node_output_blocks_materialize_relation_local_blocks(
+    tmp_path,
+):
+    writes = ("author", "writes", "paper")
+    written_by = ("paper", "written_by", "author")
+    graph = Graph.hetero(
+        nodes={
+            "author": {"x": torch.tensor([[10.0], [20.0], [30.0]])},
+            "paper": {
+                "x": torch.tensor([[1.0], [2.0]]),
+                "y": torch.tensor([0, 1]),
+                "train_mask": torch.tensor([True, True]),
+                "val_mask": torch.tensor([True, True]),
+                "test_mask": torch.tensor([True, True]),
+            },
+        },
+        edges={
+            writes: {
+                "edge_index": torch.tensor([[0, 0, 2], [0, 1, 0]]),
+                "edge_weight": torch.tensor([10.0, 11.0, 12.0]),
+            },
+            written_by: {
+                "edge_index": torch.tensor([[0, 1, 0], [0, 0, 2]]),
+                "edge_weight": torch.tensor([100.0, 110.0, 120.0]),
+            },
+        },
+    )
+    write_partitioned_graph(graph, tmp_path, num_partitions=2)
+    shards = {
+        0: LocalGraphShard.from_partition_dir(tmp_path, partition_id=0),
+        1: LocalGraphShard.from_partition_dir(tmp_path, partition_id=1),
+    }
+    coordinator = LocalSamplingCoordinator(shards)
+    loader = DataLoader(
+        dataset=ListDataset(
+            [
+                (
+                    shards[0].graph,
+                    {"seed": 0, "node_type": "paper", "sample_id": "stitched_hetero_node_blocks"},
+                )
+            ]
+        ),
+        sampler=NodeNeighborSampler(
+            num_neighbors=[-1, -1, -1],
+            node_feature_names={"author": ("x",), "paper": ("x",)},
+            edge_feature_names={writes: ("edge_weight",), written_by: ("edge_weight",)},
+            output_blocks=True,
+        ),
+        batch_size=1,
+        feature_store=coordinator,
+    )
+    trainer = Trainer(
+        model=TinyStitchedPartitionHeteroNodeBlockClassifier(),
+        task=NodeClassificationTask(
+            target="y",
+            split=("train_mask", "val_mask", "test_mask"),
+            node_type="paper",
+        ),
+        optimizer=torch.optim.Adam,
+        lr=1e-2,
+        max_epochs=1,
+    )
+
+    history = trainer.fit(loader)
+
+    assert history["completed_epochs"] == 1
+
+
 
 class TinyStitchedPartitionNodeClassifier(nn.Module):
     def __init__(self):

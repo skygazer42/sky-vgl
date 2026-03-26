@@ -509,7 +509,8 @@ def _expand_stitched_hetero_node_ids(
     seed_node_type: str,
     fanouts,
     generator=None,
-) -> tuple[torch.Tensor, dict[str, torch.Tensor]]:
+    return_hops: bool = False,
+) -> tuple[torch.Tensor, dict[str, torch.Tensor]] | tuple[torch.Tensor, dict[str, torch.Tensor], list[dict[str, torch.Tensor]]]:
     seed_local_ids = torch.as_tensor(seed_local_ids, dtype=torch.long).view(-1)
     seed_global_ids = _graph_node_global_ids(graph, seed_local_ids, node_type=seed_node_type)
     seed_global_ids_by_type = {}
@@ -528,7 +529,11 @@ def _expand_stitched_hetero_node_ids(
         edge_types=tuple(graph.edges),
         fanouts=fanouts,
         generator=generator,
+        return_hops=return_hops,
     )
+    if return_hops:
+        node_ids_by_type, node_hops_by_type = node_ids_by_type
+        return seed_global_ids, node_ids_by_type, node_hops_by_type
     return seed_global_ids, node_ids_by_type
 
 
@@ -1660,17 +1665,28 @@ class PlanExecutor:
             return context
 
         if _match_hetero_partition_shard(context.graph, context.feature_store) is not None:
-            if output_blocks:
-                raise ValueError("NodeNeighborSampler output_blocks currently supports homogeneous node sampling only")
             seed_local_ids = torch.as_tensor(request.node_ids, dtype=torch.long).view(-1)
-            seed_global_ids, node_ids_by_type = _expand_stitched_hetero_node_ids(
-                context.graph,
-                context.feature_store,
-                seed_local_ids,
-                seed_node_type=request.node_type,
-                fanouts=stage.params["num_neighbors"],
-                generator=getattr(stage.params.get("sampler", None), "_generator", None),
-            )
+            if output_blocks:
+                seed_global_ids, node_ids_by_type, node_hops_by_type = _expand_stitched_hetero_node_ids(
+                    context.graph,
+                    context.feature_store,
+                    seed_local_ids,
+                    seed_node_type=request.node_type,
+                    fanouts=stage.params["num_neighbors"],
+                    generator=getattr(stage.params.get("sampler", None), "_generator", None),
+                    return_hops=True,
+                )
+                context.state["node_hops_by_type"] = node_hops_by_type
+                context.state["node_block_edge_type"] = stage.params["node_block_edge_type"]
+            else:
+                seed_global_ids, node_ids_by_type = _expand_stitched_hetero_node_ids(
+                    context.graph,
+                    context.feature_store,
+                    seed_local_ids,
+                    seed_node_type=request.node_type,
+                    fanouts=stage.params["num_neighbors"],
+                    generator=getattr(stage.params.get("sampler", None), "_generator", None),
+                )
             edge_ids_by_type, edge_index_by_type = _collect_stitched_hetero_edges(
                 context.feature_store,
                 node_ids_by_type,
@@ -1707,8 +1723,6 @@ class PlanExecutor:
         if output_blocks:
             expanded, node_hops = expanded
         if isinstance(expanded, dict):
-            if output_blocks:
-                raise ValueError("NodeNeighborSampler output_blocks currently supports homogeneous node sampling only")
             edge_ids_by_type = _induced_edge_ids_by_type(context.graph, expanded)
             context.state["node_ids_by_type"] = expanded
             context.state["edge_ids_by_type"] = edge_ids_by_type
@@ -1720,6 +1734,9 @@ class PlanExecutor:
                 edge_type: _graph_edge_global_ids(context.graph, edge_ids, edge_type=edge_type)
                 for edge_type, edge_ids in edge_ids_by_type.items()
             }
+            if node_hops is not None:
+                context.state["node_hops_by_type"] = node_hops
+                context.state["node_block_edge_type"] = stage.params["node_block_edge_type"]
         else:
             edge_ids = _induced_edge_ids(context.graph, expanded)
             context.state["node_ids"] = expanded

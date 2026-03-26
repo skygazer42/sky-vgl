@@ -301,7 +301,9 @@ def _link_message_passing_graph(graph: Graph, records: list[LinkPredictionRecord
 def _materialize_record_payload(context: MaterializationContext, payload):
     fetched_node_features = context.state.get("_materialized_node_features")
     fetched_edge_features = context.state.get("_materialized_edge_features")
-    needs_node_blocks = "node_hops" in context.state
+    needs_homo_node_blocks = "node_hops" in context.state
+    needs_hetero_node_blocks = "node_hops_by_type" in context.state and "node_block_edge_type" in context.state
+    needs_node_blocks = needs_homo_node_blocks or needs_hetero_node_blocks
     needs_homo_link_blocks = "link_node_hops" in context.state and "link_node_ids_local" in context.state
     needs_hetero_link_blocks = "link_node_hops_by_type" in context.state and "link_block_edge_type" in context.state
     needs_link_blocks = needs_homo_link_blocks or needs_hetero_link_blocks
@@ -325,16 +327,21 @@ def _materialize_record_payload(context: MaterializationContext, payload):
         return materialized
 
     def _materialized_node_blocks(graph: Graph):
-        graph_id = id(graph)
-        blocks = node_blocks_cache.get(graph_id)
+        cache_key = (id(graph), context.state.get("node_block_edge_type"))
+        blocks = node_blocks_cache.get(cache_key)
         if blocks is None:
-            if not (set(graph.nodes) == {"node"} and len(graph.edges) == 1):
-                raise ValueError("node block materialization currently supports homogeneous graphs only")
-            node_ids = graph.nodes["node"].data.get("n_id")
-            if node_ids is None:
-                node_ids = torch.arange(graph.x.size(0), dtype=torch.long, device=graph.x.device)
-            blocks = _build_homo_blocks_from_local_ids(graph, node_ids, context.state["node_hops"])
-            node_blocks_cache[graph_id] = blocks
+            if needs_homo_node_blocks:
+                node_ids = graph.nodes["node"].data.get("n_id")
+                if node_ids is None:
+                    node_ids = torch.arange(graph.x.size(0), dtype=torch.long, device=graph.x.device)
+                blocks = _build_homo_blocks_from_local_ids(graph, node_ids, context.state["node_hops"])
+            else:
+                blocks = _build_hetero_blocks_from_local_ids(
+                    graph,
+                    context.state["node_hops_by_type"],
+                    edge_type=context.state["node_block_edge_type"],
+                )
+            node_blocks_cache[cache_key] = blocks
         return blocks
 
     def _materialized_link_blocks(records: list[LinkPredictionRecord], graph: Graph):
@@ -422,6 +429,12 @@ def _node_context_to_sample(context: MaterializationContext) -> SampleRecord | l
         if node_type != "node":
             raise ValueError("node block materialization currently supports homogeneous graphs only")
         blocks = _build_homo_blocks(subgraph, node_mapping, context.state["node_hops"])
+    elif "node_hops_by_type" in context.state and "node_block_edge_type" in context.state:
+        blocks = _build_hetero_blocks_from_local_ids(
+            subgraph,
+            context.state["node_hops_by_type"],
+            edge_type=context.state["node_block_edge_type"],
+        )
 
     samples = []
     for seed, subgraph_seed in zip(seeds, subgraph_seeds):
