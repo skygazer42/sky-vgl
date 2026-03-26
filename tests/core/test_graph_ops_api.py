@@ -256,3 +256,17 @@ def test_graph_adj_external_bridge_calls_ops_layer():
     assert adjacency.layout is torch.sparse_coo
     assert tuple(adjacency.size()) == (4, 4)
     assert torch.equal(adjacency._indices(), torch.tensor([[1, 1, 0], [2, 0, 1]]))
+
+
+def test_graph_formats_and_create_formats_bridge_call_ops_layer():
+    graph = Graph.homo(
+        edge_index=torch.tensor([[0, 1, 1], [1, 0, 2]]),
+        x=torch.tensor([[1.0], [2.0], [3.0]]),
+    )
+
+    clone = graph.formats(["coo", "csr"])
+    result = clone.create_formats_()
+
+    assert result is None
+    assert graph.formats() == {"created": ["coo"], "not created": ["csr", "csc"]}
+    assert clone.formats() == {"created": ["coo", "csr"], "not created": []}

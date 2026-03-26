@@ -1,6 +1,10 @@
 import torch
 
 from vgl.graph.graph import Graph
+from vgl.graph.stores import EdgeStore, NodeStore
+
+
+_GRAPH_SPARSE_FORMAT_PRIORITY = ("coo", "csr", "csc")
 
 
 def _resolve_edge_type(graph: Graph, edge_type=None) -> tuple[str, str, str]:
@@ -128,6 +132,86 @@ def _normalize_sparse_layout(layout):
     if isinstance(layout, str):
         layout = SparseLayout(layout.lower())
     return layout
+
+
+def _normalize_graph_formats(formats) -> tuple[str, ...]:
+    if isinstance(formats, str):
+        requested = (formats,)
+    else:
+        requested = tuple(formats)
+    if not requested:
+        raise ValueError("formats must request at least one sparse format")
+    seen = set()
+    requested = tuple(fmt for fmt in requested if not (fmt in seen or seen.add(fmt)))
+    invalid = [fmt for fmt in requested if fmt not in _GRAPH_SPARSE_FORMAT_PRIORITY]
+    if invalid:
+        raise ValueError("formats must be drawn from 'coo', 'csr', and 'csc'")
+    return tuple(fmt for fmt in _GRAPH_SPARSE_FORMAT_PRIORITY if fmt in requested)
+
+
+def _graph_format_status(graph: Graph) -> dict[str, list[str]]:
+    created = [
+        fmt
+        for fmt in graph.allowed_sparse_formats
+        if fmt in graph.created_sparse_formats
+    ]
+    not_created = [
+        fmt
+        for fmt in graph.allowed_sparse_formats
+        if fmt not in graph.created_sparse_formats
+    ]
+    return {"created": created, "not created": not_created}
+
+
+def _fallback_created_format(formats: tuple[str, ...]) -> str:
+    for candidate in _GRAPH_SPARSE_FORMAT_PRIORITY:
+        if candidate in formats:
+            return candidate
+    raise ValueError("formats must request at least one sparse format")
+
+
+def _all_edges_have_cache(graph: Graph, *, format_name: str) -> bool:
+    return all(
+        format_name in store.adjacency_cache
+        for store in graph.edges.values()
+    )
+
+
+def _clone_graph_with_sparse_formats(
+    graph: Graph,
+    *,
+    allowed_sparse_formats: tuple[str, ...],
+    created_sparse_formats: tuple[str, ...],
+) -> Graph:
+    cloned = Graph(
+        schema=graph.schema,
+        nodes={
+            node_type: NodeStore(node_type, store.data)
+            for node_type, store in graph.nodes.items()
+        },
+        edges={
+            edge_type: EdgeStore(
+                edge_type,
+                store.data,
+                adjacency_cache={
+                    fmt: cache
+                    for fmt, cache in store.adjacency_cache.items()
+                    if fmt in created_sparse_formats
+                },
+            )
+            for edge_type, store in graph.edges.items()
+        },
+        feature_store=graph.feature_store,
+        graph_store=graph.graph_store,
+        allowed_sparse_formats=allowed_sparse_formats,
+        created_sparse_formats=created_sparse_formats,
+    )
+    for fmt in created_sparse_formats:
+        if fmt == "coo":
+            continue
+        if not _all_edges_have_cache(cloned, format_name=fmt):
+            cloned._materialize_sparse_layout_all(_normalize_sparse_layout(fmt))
+    return cloned
 
 
 def _ordered_edge_tensors(store) -> tuple[torch.Tensor, torch.Tensor]:
@@ -272,6 +356,32 @@ def all_edges(graph: Graph, *, form: str = "uv", order: str | None = "eid", edge
     store = graph.edges[edge_type]
     positions = _ordered_edge_positions(store, order=order)
     return _format_edge_selection(store, positions, form=form)
+
+
+def formats(graph: Graph, formats=None):
+    if formats is None:
+        return _graph_format_status(graph)
+
+    requested = _normalize_graph_formats(formats)
+    created = tuple(
+        fmt for fmt in requested
+        if fmt in graph.created_sparse_formats
+    )
+    if not created:
+        created = (_fallback_created_format(requested),)
+    return _clone_graph_with_sparse_formats(
+        graph,
+        allowed_sparse_formats=requested,
+        created_sparse_formats=created,
+    )
+
+
+def create_formats_(graph: Graph):
+    for format_name in graph.allowed_sparse_formats:
+        if format_name in graph.created_sparse_formats:
+            continue
+        graph._materialize_sparse_layout_all(_normalize_sparse_layout(format_name))
+    return None
 
 
 def adj(graph: Graph, *, edge_type=None, eweight_name: str | None = None, layout="coo"):

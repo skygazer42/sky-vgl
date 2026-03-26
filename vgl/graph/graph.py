@@ -14,6 +14,8 @@ class Graph:
     edges: dict[tuple[str, str, str], EdgeStore]
     feature_store: object | None = None
     graph_store: object | None = None
+    allowed_sparse_formats: tuple[str, ...] = ("coo", "csr", "csc")
+    created_sparse_formats: tuple[str, ...] = ("coo",)
 
     def _default_edge_type(self):
         edge_type = ("node", "to", "node")
@@ -54,6 +56,28 @@ class Graph:
             else:
                 edge_data[key] = value
         return edge_data
+
+    def _mark_sparse_format_created(self, format_name: str) -> None:
+        created = set(self.created_sparse_formats)
+        created.add(format_name)
+        self.created_sparse_formats = tuple(
+            fmt for fmt in self.allowed_sparse_formats if fmt in created
+        )
+
+    def _materialize_sparse_layout_all(self, layout) -> None:
+        from vgl.sparse import from_edge_index
+
+        cache_key = layout.value
+        for edge_type, store in self.edges.items():
+            if cache_key in store.adjacency_cache:
+                continue
+            src_type, _, dst_type = edge_type
+            store.adjacency_cache[cache_key] = from_edge_index(
+                store.edge_index,
+                shape=(self._node_count(src_type), self._node_count(dst_type)),
+                layout=layout,
+            )
+        self._mark_sparse_format_created(cache_key)
 
     @classmethod
     def homo(cls, *, edge_index, edge_data=None, **node_data):
@@ -154,11 +178,16 @@ class Graph:
             edge_type = self._default_edge_type()
         if isinstance(layout, str):
             layout = SparseLayout(layout.lower())
+        if layout.value not in self.allowed_sparse_formats:
+            raise ValueError(f"sparse format {layout.value!r} is not enabled for this graph")
         store = self.edges[tuple(edge_type)]
         cache_key = layout.value
         cached = store.adjacency_cache.get(cache_key)
         if cached is not None:
             return cached
+        if layout is not SparseLayout.COO:
+            self._materialize_sparse_layout_all(layout)
+            return store.adjacency_cache[cache_key]
         src_type, _, dst_type = tuple(edge_type)
         adjacency = from_edge_index(
             store.edge_index,
@@ -166,6 +195,7 @@ class Graph:
             layout=layout,
         )
         store.adjacency_cache[cache_key] = adjacency
+        self._mark_sparse_format_created(cache_key)
         return adjacency
 
     def add_self_loops(self, *, edge_type=None):
@@ -237,6 +267,16 @@ class Graph:
         from vgl.ops import all_edges
 
         return all_edges(self, form=form, order=order, edge_type=edge_type)
+
+    def formats(self, formats=None):
+        from vgl.ops import formats as formats_op
+
+        return formats_op(self, formats)
+
+    def create_formats_(self):
+        from vgl.ops import create_formats_
+
+        return create_formats_(self)
 
     def adj(self, *, edge_type=None, eweight_name: str | None = None, layout="coo"):
         from vgl.ops import adj
@@ -364,6 +404,8 @@ class Graph:
             schema=self.schema,
             feature_store=self.feature_store,
             graph_store=self.graph_store,
+            allowed_sparse_formats=self.allowed_sparse_formats,
+            created_sparse_formats=self.created_sparse_formats,
             nodes={
                 node_type: store.to(
                     device=device, dtype=dtype, non_blocking=non_blocking
@@ -383,6 +425,8 @@ class Graph:
             schema=self.schema,
             feature_store=self.feature_store,
             graph_store=self.graph_store,
+            allowed_sparse_formats=self.allowed_sparse_formats,
+            created_sparse_formats=self.created_sparse_formats,
             nodes={node_type: store.pin_memory() for node_type, store in self.nodes.items()},
             edges={edge_type: store.pin_memory() for edge_type, store in self.edges.items()},
         )

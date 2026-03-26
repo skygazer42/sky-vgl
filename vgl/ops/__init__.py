@@ -12,8 +12,10 @@ from vgl.ops.query import adj as adj
 from vgl.ops.query import adj_external as adj_external
 from vgl.ops.query import adj_tensors as adj_tensors
 from vgl.ops.query import all_edges as all_edges
+from vgl.ops.query import create_formats_ as create_formats_
 from vgl.ops.query import edge_ids as edge_ids
 from vgl.ops.query import find_edges as find_edges
+from vgl.ops.query import formats as formats
 from vgl.ops.query import has_edges_between as has_edges_between
 from vgl.ops.query import inc as inc
 from vgl.ops.query import in_degrees as in_degrees
@@ -54,6 +56,8 @@ __all__ = [
     "num_edges",
     "number_of_edges",
     "all_edges",
+    "formats",
+    "create_formats_",
     "adj",
     "adj_external",
     "adj_tensors",

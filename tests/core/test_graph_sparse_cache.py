@@ -1,3 +1,4 @@
+import pytest
 import torch
 
 from vgl import Graph
@@ -60,3 +61,65 @@ def test_homo_graph_caches_csc_adjacency_and_supports_sparse_ops():
     assert transposed.shape == (3, 3)
     assert torch.equal(transposed.crow_indices, first.ccol_indices)
     assert torch.equal(transposed.col_indices, first.row_indices)
+
+
+def test_graph_formats_report_status_and_adjacency_updates_created_formats():
+    graph = Graph.homo(
+        edge_index=torch.tensor([[0, 1, 1], [1, 0, 2]]),
+        x=torch.randn(3, 2),
+    )
+
+    assert graph.formats() == {"created": ["coo"], "not created": ["csr", "csc"]}
+
+    graph.adjacency(layout="csr")
+
+    assert graph.formats() == {"created": ["coo", "csr"], "not created": ["csc"]}
+
+
+def test_graph_formats_clone_state_is_isolated_from_base_graph():
+    graph = Graph.homo(
+        edge_index=torch.tensor([[0, 1, 1], [1, 0, 2]]),
+        x=torch.randn(3, 2),
+    )
+
+    clone = graph.formats(["coo", "csr"])
+
+    assert graph.formats() == {"created": ["coo"], "not created": ["csr", "csc"]}
+    assert clone.formats() == {"created": ["coo"], "not created": ["csr"]}
+
+    result = clone.create_formats_()
+
+    assert result is None
+    assert clone.formats() == {"created": ["coo", "csr"], "not created": []}
+    assert graph.formats() == {"created": ["coo"], "not created": ["csr", "csc"]}
+
+
+def test_graph_formats_can_restrict_to_single_created_format():
+    graph = Graph.homo(
+        edge_index=torch.tensor([[0, 1, 1], [1, 0, 2]]),
+        x=torch.randn(3, 2),
+    )
+
+    csr_clone = graph.formats("csr")
+
+    assert csr_clone.formats() == {"created": ["csr"], "not created": []}
+
+    csc_csr_clone = graph.formats(["csc", "csr"])
+
+    assert csc_csr_clone.formats() == {"created": ["csr"], "not created": ["csc"]}
+
+
+def test_graph_formats_validate_requested_formats():
+    graph = Graph.homo(
+        edge_index=torch.tensor([[0, 1], [1, 0]]),
+        x=torch.randn(2, 2),
+    )
+
+    with pytest.raises(ValueError):
+        graph.formats("bad")
+
+    with pytest.raises(ValueError):
+        graph.formats(["coo", "bad"])
+
+    with pytest.raises(ValueError):
+        graph.formats([])
