@@ -219,3 +219,27 @@ def test_graph_adj_tensors_bridge_calls_ops_layer():
     assert torch.equal(crow_indices, torch.tensor([0, 1, 2, 3, 3]))
     assert torch.equal(col_indices, torch.tensor([1, 0, 1]))
     assert torch.equal(eids, torch.tensor([1, 2, 0]))
+
+
+def test_graph_adj_bridge_calls_ops_layer():
+    graph = Graph.homo(
+        edge_index=torch.tensor([[2, 0, 1], [1, 1, 0]]),
+        x=torch.tensor([[1.0], [2.0], [3.0], [4.0]]),
+        edge_data={"weight": torch.tensor([0.5, 1.5, 2.5])},
+    )
+
+    weighted = graph.adj(eweight_name="weight", layout=SparseLayout.CSC)
+
+    assert weighted.layout is SparseLayout.CSC
+    assert weighted.shape == (4, 4)
+    assert torch.equal(
+        _sparse_to_dense(weighted),
+        torch.tensor(
+            [
+                [0.0, 1.5, 0.0, 0.0],
+                [2.5, 0.0, 0.0, 0.0],
+                [0.0, 0.5, 0.0, 0.0],
+                [0.0, 0.0, 0.0, 0.0],
+            ]
+        ),
+    )

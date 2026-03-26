@@ -2,7 +2,7 @@ import pytest
 import torch
 
 from vgl import Graph
-from vgl.ops import adj_tensors, all_edges, edge_ids, find_edges, has_edges_between, in_degrees, in_edges, in_subgraph, num_edges, num_nodes, number_of_edges, number_of_nodes, out_degrees, out_edges, out_subgraph, predecessors, reverse, successors
+from vgl.ops import adj, adj_tensors, all_edges, edge_ids, find_edges, has_edges_between, in_degrees, in_edges, in_subgraph, num_edges, num_nodes, number_of_edges, number_of_nodes, out_degrees, out_edges, out_subgraph, predecessors, reverse, successors
 from vgl.sparse import SparseLayout, to_coo
 
 
@@ -532,3 +532,115 @@ def test_adj_tensors_support_selected_heterogeneous_relation_and_validate_layout
 
     with pytest.raises(ValueError):
         adj_tensors(graph, "bad", edge_type=writes)
+
+
+def test_adj_returns_sparse_tensor_with_optional_edge_weights():
+    graph = Graph.homo(
+        edge_index=torch.tensor([[2, 0, 1], [1, 1, 0]]),
+        x=torch.tensor([[1.0], [2.0], [3.0], [4.0]]),
+        edge_data={"weight": torch.tensor([0.5, 1.5, 2.5])},
+    )
+
+    adjacency = adj(graph)
+    weighted = adj(graph, eweight_name="weight")
+
+    assert adjacency.layout is SparseLayout.COO
+    assert adjacency.shape == (4, 4)
+    assert torch.equal(
+        _sparse_to_dense(adjacency),
+        torch.tensor(
+            [
+                [0.0, 1.0, 0.0, 0.0],
+                [1.0, 0.0, 0.0, 0.0],
+                [0.0, 1.0, 0.0, 0.0],
+                [0.0, 0.0, 0.0, 0.0],
+            ]
+        ),
+    )
+    assert torch.equal(
+        _sparse_to_dense(weighted),
+        torch.tensor(
+            [
+                [0.0, 1.5, 0.0, 0.0],
+                [2.5, 0.0, 0.0, 0.0],
+                [0.0, 0.5, 0.0, 0.0],
+                [0.0, 0.0, 0.0, 0.0],
+            ]
+        ),
+    )
+
+
+def test_adj_uses_public_edge_ids_for_visible_coo_order_and_weight_alignment():
+    graph = Graph.homo(
+        edge_index=torch.tensor([[0, 2, 1, 0], [2, 3, 0, 1]]),
+        x=torch.tensor([[1.0], [2.0], [3.0], [4.0]]),
+        edge_data={
+            "e_id": torch.tensor([5, 1, 7, 3]),
+            "weight": torch.tensor([5.0, 1.0, 7.0, 3.0]),
+        },
+    )
+
+    frontier = out_subgraph(graph, torch.tensor([0, 2]))
+    weighted = adj(frontier, eweight_name="weight")
+    coo = to_coo(weighted)
+
+    assert torch.equal(coo.row, torch.tensor([2, 0, 0]))
+    assert torch.equal(coo.col, torch.tensor([3, 1, 2]))
+    assert torch.equal(coo.values, torch.tensor([1.0, 3.0, 5.0]))
+
+
+def test_adj_preserves_public_edge_order_within_csr_and_csc_buckets():
+    csr_graph = Graph.homo(
+        edge_index=torch.tensor([[0, 0, 0], [2, 1, 0]]),
+        x=torch.tensor([[1.0], [2.0], [3.0]]),
+        edge_data={"weight": torch.tensor([2.0, 1.0, 0.5])},
+    )
+    csc_graph = Graph.homo(
+        edge_index=torch.tensor([[2, 1, 0], [0, 0, 0]]),
+        x=torch.tensor([[1.0], [2.0], [3.0]]),
+        edge_data={"weight": torch.tensor([2.0, 1.0, 0.5])},
+    )
+
+    csr = adj(csr_graph, eweight_name="weight", layout="csr")
+    csc = adj(csc_graph, eweight_name="weight", layout="csc")
+
+    assert csr.layout is SparseLayout.CSR
+    assert torch.equal(csr.crow_indices, torch.tensor([0, 3, 3, 3]))
+    assert torch.equal(csr.col_indices, torch.tensor([2, 1, 0]))
+    assert torch.equal(csr.values, torch.tensor([2.0, 1.0, 0.5]))
+    assert csc.layout is SparseLayout.CSC
+    assert torch.equal(csc.ccol_indices, torch.tensor([0, 3, 3, 3]))
+    assert torch.equal(csc.row_indices, torch.tensor([2, 1, 0]))
+    assert torch.equal(csc.values, torch.tensor([2.0, 1.0, 0.5]))
+
+
+def test_adj_supports_selected_heterogeneous_relation_and_validates_weight_name():
+    writes = ("author", "writes", "paper")
+    graph = Graph.hetero(
+        nodes={
+            "author": {"x": torch.tensor([[1.0], [2.0]])},
+            "paper": {"x": torch.tensor([[10.0], [20.0], [30.0]])},
+        },
+        edges={
+            writes: {
+                "edge_index": torch.tensor([[1, 0], [2, 1]]),
+                "weight": torch.tensor([4.0, 5.0]),
+            },
+        },
+    )
+
+    weighted = adj(graph, edge_type=writes, eweight_name="weight")
+
+    assert weighted.shape == (2, 3)
+    assert torch.equal(
+        _sparse_to_dense(weighted),
+        torch.tensor(
+            [
+                [0.0, 5.0, 0.0],
+                [0.0, 0.0, 4.0],
+            ]
+        ),
+    )
+
+    with pytest.raises(ValueError):
+        adj(graph, edge_type=writes, eweight_name="missing")

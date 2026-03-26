@@ -138,21 +138,28 @@ def _ordered_edge_tensors(store) -> tuple[torch.Tensor, torch.Tensor]:
     return store.edge_index[:, positions], _public_edge_ids(store)[positions]
 
 
-def _compress_edge_tensors(
+def _compress_edge_payloads(
     major: torch.Tensor,
-    minor: torch.Tensor,
-    public_ids: torch.Tensor,
-    *,
+    *payloads,
     major_size: int,
-) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+) -> tuple:
     order = torch.argsort(major, stable=True)
     major = major[order]
-    minor = minor[order]
-    public_ids = public_ids[order]
     counts = torch.bincount(major, minlength=major_size)
     pointers = torch.zeros(major_size + 1, dtype=torch.long, device=major.device)
     pointers[1:] = torch.cumsum(counts, dim=0)
-    return pointers, minor, public_ids
+    ordered_payloads = tuple(None if payload is None else payload[order] for payload in payloads)
+    return (pointers, *ordered_payloads)
+
+
+def _edge_values(store, positions: torch.Tensor, *, eweight_name: str | None):
+    if eweight_name is None:
+        return torch.ones(positions.numel(), dtype=torch.float32, device=store.edge_index.device)
+    values = store.data.get(eweight_name)
+    if values is None:
+        raise ValueError(f"unknown edge feature {eweight_name!r}")
+    values = torch.as_tensor(values, device=store.edge_index.device)
+    return values[positions]
 
 
 def _degrees_for_endpoint(graph: Graph, edge_type, nodes, *, endpoint: int):
@@ -267,6 +274,60 @@ def all_edges(graph: Graph, *, form: str = "uv", order: str | None = "eid", edge
     return _format_edge_selection(store, positions, form=form)
 
 
+def adj(graph: Graph, *, edge_type=None, eweight_name: str | None = None, layout="coo"):
+    from vgl.sparse import SparseLayout, SparseTensor
+
+    edge_type = _resolve_edge_type(graph, edge_type)
+    layout = _normalize_sparse_layout(layout)
+    store = graph.edges[edge_type]
+    positions = _ordered_edge_positions(store, order="eid")
+    ordered, _ = _ordered_edge_tensors(store)
+    values = _edge_values(store, positions, eweight_name=eweight_name)
+    src_type, _, dst_type = edge_type
+    shape = (graph._node_count(src_type), graph._node_count(dst_type))
+
+    if layout is SparseLayout.COO:
+        return SparseTensor(
+            layout=SparseLayout.COO,
+            shape=shape,
+            row=ordered[0],
+            col=ordered[1],
+            values=values,
+        )
+
+    if layout is SparseLayout.CSR:
+        crow_indices, col_indices, compressed_values = _compress_edge_payloads(
+            ordered[0],
+            ordered[1],
+            values,
+            major_size=shape[0],
+        )
+        return SparseTensor(
+            layout=SparseLayout.CSR,
+            shape=shape,
+            crow_indices=crow_indices,
+            col_indices=col_indices,
+            values=compressed_values,
+        )
+
+    if layout is SparseLayout.CSC:
+        ccol_indices, row_indices, compressed_values = _compress_edge_payloads(
+            ordered[1],
+            ordered[0],
+            values,
+            major_size=shape[1],
+        )
+        return SparseTensor(
+            layout=SparseLayout.CSC,
+            shape=shape,
+            ccol_indices=ccol_indices,
+            row_indices=row_indices,
+            values=compressed_values,
+        )
+
+    raise ValueError(f"Unsupported sparse layout: {layout}")
+
+
 def adj_tensors(graph: Graph, layout="coo", *, edge_type=None):
     from vgl.sparse import SparseLayout
 
@@ -280,7 +341,7 @@ def adj_tensors(graph: Graph, layout="coo", *, edge_type=None):
         return ordered[0], ordered[1]
 
     if layout is SparseLayout.CSR:
-        return _compress_edge_tensors(
+        return _compress_edge_payloads(
             ordered[0],
             ordered[1],
             public_ids,
@@ -288,7 +349,7 @@ def adj_tensors(graph: Graph, layout="coo", *, edge_type=None):
         )
 
     if layout is SparseLayout.CSC:
-        return _compress_edge_tensors(
+        return _compress_edge_payloads(
             ordered[1],
             ordered[0],
             public_ids,
