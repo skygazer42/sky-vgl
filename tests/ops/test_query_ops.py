@@ -2,7 +2,7 @@ import pytest
 import torch
 
 from vgl import Graph
-from vgl.ops import edge_ids, find_edges, has_edges_between, in_edges, in_subgraph, out_edges, predecessors, reverse, successors
+from vgl.ops import edge_ids, find_edges, has_edges_between, in_degrees, in_edges, in_subgraph, out_degrees, out_edges, predecessors, reverse, successors
 
 
 def test_find_edges_returns_endpoints_for_requested_edge_ids():
@@ -248,3 +248,48 @@ def test_adjacency_query_ops_validate_form_and_node_ranges():
 
     with pytest.raises(ValueError):
         successors(graph, 3)
+
+
+def test_in_degrees_and_out_degrees_support_scalar_vector_and_all_node_queries():
+    graph = Graph.homo(
+        edge_index=torch.tensor([[0, 0, 1, 2], [1, 2, 2, 0]]),
+        x=torch.tensor([[1.0], [2.0], [3.0], [4.0]]),
+    )
+
+    assert in_degrees(graph, 2) == 2
+    assert out_degrees(graph, 0) == 2
+    assert torch.equal(in_degrees(graph), torch.tensor([1, 1, 2, 0]))
+    assert torch.equal(out_degrees(graph), torch.tensor([2, 1, 1, 0]))
+    assert torch.equal(in_degrees(graph, torch.tensor([3, 2, 3])), torch.tensor([0, 2, 0]))
+    assert torch.equal(out_degrees(graph, torch.tensor([0, 3, 0])), torch.tensor([2, 0, 2]))
+
+
+def test_in_degrees_and_out_degrees_work_on_selected_heterogeneous_relation():
+    writes = ("author", "writes", "paper")
+    graph = Graph.hetero(
+        nodes={
+            "author": {"x": torch.tensor([[1.0], [2.0]])},
+            "paper": {"x": torch.tensor([[10.0], [20.0], [30.0]])},
+        },
+        edges={
+            writes: {"edge_index": torch.tensor([[0, 1, 1], [1, 0, 2]])},
+        },
+    )
+
+    assert in_degrees(graph, 2, edge_type=writes) == 1
+    assert out_degrees(graph, 1, edge_type=writes) == 2
+    assert torch.equal(in_degrees(graph, edge_type=writes), torch.tensor([1, 1, 1]))
+    assert torch.equal(out_degrees(graph, edge_type=writes), torch.tensor([1, 2]))
+
+
+def test_in_degrees_and_out_degrees_validate_node_ranges():
+    graph = Graph.homo(
+        edge_index=torch.tensor([[0, 1], [1, 2]]),
+        x=torch.tensor([[1.0], [2.0], [3.0]]),
+    )
+
+    with pytest.raises(ValueError):
+        in_degrees(graph, torch.tensor([3]))
+
+    with pytest.raises(ValueError):
+        out_degrees(graph, torch.tensor([3]))

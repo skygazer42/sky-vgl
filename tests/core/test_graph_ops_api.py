@@ -142,3 +142,15 @@ def test_graph_adjacency_query_bridges_call_ops_layer():
     assert torch.equal(out_eids, torch.tensor([2, 3]))
     assert torch.equal(preds, torch.tensor([0, 0]))
     assert torch.equal(succs, torch.tensor([2, 2]))
+
+
+def test_graph_in_degrees_and_out_degrees_bridges_call_ops_layer():
+    graph = Graph.homo(
+        edge_index=torch.tensor([[0, 0, 1, 2], [1, 2, 2, 0]]),
+        x=torch.tensor([[1.0], [2.0], [3.0], [4.0]]),
+    )
+
+    assert graph.in_degrees(2) == 2
+    assert graph.out_degrees(0) == 2
+    assert torch.equal(graph.in_degrees(), torch.tensor([1, 1, 2, 0]))
+    assert torch.equal(graph.out_degrees(torch.tensor([0, 3])), torch.tensor([2, 0]))

@@ -294,3 +294,25 @@ def test_featureless_storage_backed_adjacency_queries_preserve_declared_node_spa
     assert torch.equal(graph.predecessors(3), torch.empty(0, dtype=torch.long))
     assert torch.equal(graph.in_edges(torch.tensor([3]), form="eid"), torch.empty(0, dtype=torch.long))
     assert torch.equal(graph.out_edges(torch.tensor([3]), form="eid"), torch.empty(0, dtype=torch.long))
+
+
+def test_featureless_storage_backed_in_degrees_and_out_degrees_preserve_declared_node_space():
+    schema = GraphSchema(
+        node_types=("node",),
+        edge_types=(HOMO_EDGE,),
+        node_features={"node": ()},
+        edge_features={HOMO_EDGE: ("edge_index",)},
+    )
+    graph = Graph.from_storage(
+        schema=schema,
+        feature_store=FeatureStore({}),
+        graph_store=InMemoryGraphStore(
+            {HOMO_EDGE: torch.tensor([[0, 1], [1, 0]])},
+            num_nodes={"node": 4},
+        ),
+    )
+
+    assert graph.in_degrees(3) == 0
+    assert graph.out_degrees(3) == 0
+    assert torch.equal(graph.in_degrees(), torch.tensor([1, 1, 0, 0]))
+    assert torch.equal(graph.out_degrees(torch.tensor([0, 3])), torch.tensor([1, 0]))

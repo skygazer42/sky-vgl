@@ -46,6 +46,13 @@ def _normalize_node_ids(nodes) -> torch.Tensor:
     return torch.as_tensor(nodes, dtype=torch.long).view(-1)
 
 
+def _normalize_optional_node_ids(nodes) -> tuple[torch.Tensor | None, bool]:
+    if nodes is None:
+        return None, False
+    node_tensor = torch.as_tensor(nodes, dtype=torch.long)
+    return node_tensor.view(-1), node_tensor.ndim == 0
+
+
 def _normalize_single_node(node, *, name: str) -> int:
     node_tensor = torch.as_tensor(node, dtype=torch.long)
     if node_tensor.numel() != 1:
@@ -88,6 +95,24 @@ def _format_edge_selection(store, positions: torch.Tensor, *, form: str):
     if form == "eid":
         return edge_ids
     return edge_index[0], edge_index[1], edge_ids
+
+
+def _degrees_for_endpoint(graph: Graph, edge_type, nodes, *, endpoint: int):
+    store = graph.edges[edge_type]
+    node_ids, scalar_input = _normalize_optional_node_ids(nodes)
+    node_type = edge_type[0] if endpoint == 0 else edge_type[2]
+    role = "source" if endpoint == 0 else "destination"
+    node_count = graph._node_count(node_type)
+    degrees = torch.bincount(store.edge_index[endpoint], minlength=node_count)
+    if node_ids is None:
+        return degrees
+    _validate_node_ids(graph, node_type, node_ids, role=role)
+    if node_ids.numel() == 0:
+        return torch.empty(0, dtype=degrees.dtype, device=degrees.device)
+    selected = degrees.index_select(0, node_ids.to(device=degrees.device))
+    if scalar_input:
+        return int(selected[0].item())
+    return selected
 
 
 def find_edges(graph: Graph, eids, *, edge_type=None) -> tuple[torch.Tensor, torch.Tensor]:
@@ -155,6 +180,16 @@ def has_edges_between(graph: Graph, u, v, *, edge_type=None):
     if scalar_input:
         return bool(exists[0])
     return torch.tensor(exists, dtype=torch.bool, device=store.edge_index.device)
+
+
+def in_degrees(graph: Graph, v=None, *, edge_type=None):
+    edge_type = _resolve_edge_type(graph, edge_type)
+    return _degrees_for_endpoint(graph, edge_type, v, endpoint=1)
+
+
+def out_degrees(graph: Graph, u=None, *, edge_type=None):
+    edge_type = _resolve_edge_type(graph, edge_type)
+    return _degrees_for_endpoint(graph, edge_type, u, endpoint=0)
 
 
 def in_edges(graph: Graph, v, *, form: str = "uv", edge_type=None):

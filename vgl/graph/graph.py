@@ -228,10 +228,20 @@ class Graph:
 
         return in_edges(self, v, form=form, edge_type=edge_type)
 
+    def in_degrees(self, v=None, *, edge_type=None):
+        from vgl.ops import in_degrees
+
+        return in_degrees(self, v, edge_type=edge_type)
+
     def out_edges(self, u, *, form: str = "uv", edge_type=None):
         from vgl.ops import out_edges
 
         return out_edges(self, u, form=form, edge_type=edge_type)
+
+    def out_degrees(self, u=None, *, edge_type=None):
+        from vgl.ops import out_degrees
+
+        return out_degrees(self, u, edge_type=edge_type)
 
     def predecessors(self, v, *, edge_type=None):
         from vgl.ops import predecessors

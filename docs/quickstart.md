@@ -34,7 +34,7 @@ For advanced systems work, the new foundation layers sit underneath the same sur
 - `vgl.data` for dataset manifests, cache helpers, built-in datasets, and manifest-backed homo/hetero/temporal on-disk datasets with lazy per-item payloads and split views
 - `vgl.distributed` for partition metadata, local shard loading, typed node routing, relation-scoped edge routing, edge feature fetches, owned-local plus boundary/incident partition queries, stitched homogeneous node/link/temporal sampling, stitched typed heterogeneous temporal sampling, plus non-temporal heterogeneous node/link sampling across shard boundaries, sampling coordination contracts, and routed plan feature sources across homogeneous, temporal homogeneous, single-node-type multi-relation, and multi-node-type heterogeneous graphs
 
-Use `graph.in_subgraph(...)` / `graph.out_subgraph(...)` for frontier-preserving filters, `graph.find_edges(...)`, `graph.edge_ids(...)`, and `graph.has_edges_between(...)` for edge lookups, `graph.in_edges(...)`, `graph.out_edges(...)`, `graph.predecessors(...)`, and `graph.successors(...)` for one-hop adjacency, and `graph.reverse(...)` for reversed structure.
+Use `graph.in_subgraph(...)` / `graph.out_subgraph(...)` for frontier-preserving filters, `graph.find_edges(...)`, `graph.edge_ids(...)`, and `graph.has_edges_between(...)` for edge lookups, `graph.in_edges(...)`, `graph.out_edges(...)`, `graph.predecessors(...)`, and `graph.successors(...)` for one-hop adjacency, `graph.in_degrees(...)` / `graph.out_degrees(...)` for degree inspection, and `graph.reverse(...)` for reversed structure. Degree queries return `int` for one node and tensors for many or all nodes.
 
 The smallest workflow is:
 

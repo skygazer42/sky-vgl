@@ -273,7 +273,7 @@ def test_legacy_core_package_reexports_graph_support_types():
 def test_foundation_packages_expose_namespace_exports():
     import vgl.ops as ops_module
     from vgl.ops import GraphTransform, TransformPipeline
-    from vgl.ops import add_self_loops, compact_nodes, edge_ids, edge_subgraph, find_edges, has_edges_between, in_edges, in_subgraph, khop_nodes, khop_subgraph, line_graph, metapath_reachable_graph, node_subgraph, out_edges, out_subgraph, predecessors, remove_self_loops, reverse, successors, to_bidirected, to_block
+    from vgl.ops import add_self_loops, compact_nodes, edge_ids, edge_subgraph, find_edges, has_edges_between, in_degrees, in_edges, in_subgraph, khop_nodes, khop_subgraph, line_graph, metapath_reachable_graph, node_subgraph, out_degrees, out_edges, out_subgraph, predecessors, remove_self_loops, reverse, successors, to_bidirected, to_block
     from vgl.ops import __all__ as ops_all
     from vgl.sparse import SparseLayout, SparseTensor
     from vgl.sparse import __all__ as sparse_all
@@ -281,7 +281,7 @@ def test_foundation_packages_expose_namespace_exports():
     from vgl.storage import FeatureStore, GraphStore, InMemoryGraphStore, InMemoryTensorStore, MmapTensorStore, TensorSlice, TensorStore
     from vgl.storage import __all__ as storage_all
 
-    assert ops_all == ["GraphTransform", "TransformPipeline", "add_self_loops", "remove_self_loops", "to_bidirected", "reverse", "line_graph", "metapath_reachable_graph", "random_walk", "metapath_random_walk", "find_edges", "edge_ids", "has_edges_between", "in_edges", "out_edges", "predecessors", "successors", "node_subgraph", "edge_subgraph", "in_subgraph", "out_subgraph", "khop_nodes", "khop_subgraph", "compact_nodes", "to_block"]
+    assert ops_all == ["GraphTransform", "TransformPipeline", "add_self_loops", "remove_self_loops", "to_bidirected", "reverse", "line_graph", "metapath_reachable_graph", "random_walk", "metapath_random_walk", "find_edges", "edge_ids", "has_edges_between", "in_degrees", "out_degrees", "in_edges", "out_edges", "predecessors", "successors", "node_subgraph", "edge_subgraph", "in_subgraph", "out_subgraph", "khop_nodes", "khop_subgraph", "compact_nodes", "to_block"]
     assert sparse_all == ["SparseLayout", "SparseTensor", "from_edge_index", "to_coo", "to_csr", "to_csc", "degree", "select_rows", "select_cols", "transpose", "sum", "spmm", "sddmm", "edge_softmax"]
     assert storage_all == ["TensorSlice", "TensorStore", "InMemoryTensorStore", "MmapTensorStore", "FeatureStore", "GraphStore", "InMemoryGraphStore"]
     assert SparseLayout.__name__ == "SparseLayout"
@@ -300,7 +300,9 @@ def test_foundation_packages_expose_namespace_exports():
     assert callable(find_edges)
     assert callable(edge_ids)
     assert callable(has_edges_between)
+    assert callable(in_degrees)
     assert callable(in_edges)
+    assert callable(out_degrees)
     assert callable(out_edges)
     assert callable(predecessors)
     assert callable(successors)
@@ -330,3 +332,16 @@ def test_foundation_packages_expose_namespace_exports():
     assert callable(spmm)
     assert callable(sddmm)
     assert callable(edge_softmax)
+
+
+def test_foundation_packages_expose_in_degrees_and_out_degrees_exports():
+    import vgl.ops as ops_module
+    from vgl.ops import in_degrees, out_degrees
+    from vgl.ops import __all__ as ops_all
+
+    assert "in_degrees" in ops_all
+    assert "out_degrees" in ops_all
+    assert callable(in_degrees)
+    assert callable(out_degrees)
+    assert callable(getattr(ops_module, "in_degrees", None))
+    assert callable(getattr(ops_module, "out_degrees", None))

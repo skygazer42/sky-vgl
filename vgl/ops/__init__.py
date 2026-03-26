@@ -11,7 +11,9 @@ from vgl.ops.pipeline import TransformPipeline as TransformPipeline
 from vgl.ops.query import edge_ids as edge_ids
 from vgl.ops.query import find_edges as find_edges
 from vgl.ops.query import has_edges_between as has_edges_between
+from vgl.ops.query import in_degrees as in_degrees
 from vgl.ops.query import in_edges as in_edges
+from vgl.ops.query import out_degrees as out_degrees
 from vgl.ops.query import out_edges as out_edges
 from vgl.ops.query import predecessors as predecessors
 from vgl.ops.query import successors as successors
@@ -38,6 +40,8 @@ __all__ = [
     "find_edges",
     "edge_ids",
     "has_edges_between",
+    "in_degrees",
+    "out_degrees",
     "in_edges",
     "out_edges",
     "predecessors",
