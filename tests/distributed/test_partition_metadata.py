@@ -1,6 +1,11 @@
 import pytest
 
-from vgl.distributed import PartitionManifest, PartitionShard
+from vgl.distributed import (
+    PartitionManifest,
+    PartitionShard,
+    load_partition_manifest,
+    save_partition_manifest,
+)
 
 
 def test_partition_manifest_resolves_owner_and_counts_shards():
@@ -61,3 +66,49 @@ def test_partition_manifest_validates_unique_ids_and_ranges():
             num_nodes=4,
             partitions=(PartitionShard(partition_id=0, node_range=(0, 5)),),
         )
+
+
+def test_partition_manifest_round_trips_edge_id_metadata(tmp_path):
+    writes = ("author", "writes", "paper")
+    manifest = PartitionManifest(
+        num_nodes=9,
+        num_nodes_by_type={"author": 4, "paper": 5},
+        partitions=(
+            PartitionShard(
+                partition_id=0,
+                node_range=(0, 2),
+                node_ranges={"author": (0, 2), "paper": (0, 3)},
+                path="part-0.pt",
+                metadata={
+                    "edge_ids_by_type": {
+                        writes: [0, 1],
+                    },
+                    "boundary_edge_ids_by_type": {
+                        writes: [4],
+                    },
+                },
+            ),
+            PartitionShard(
+                partition_id=1,
+                node_range=(2, 4),
+                node_ranges={"author": (2, 4), "paper": (3, 5)},
+                path="part-1.pt",
+                metadata={
+                    "edge_ids_by_type": {
+                        writes: [2, 3],
+                    },
+                    "boundary_edge_ids_by_type": {
+                        writes: [4],
+                    },
+                },
+            ),
+        ),
+    )
+
+    save_partition_manifest(tmp_path / "manifest.json", manifest)
+    loaded = load_partition_manifest(tmp_path / "manifest.json")
+
+    assert loaded.partitions[0].metadata["edge_ids_by_type"][writes] == (0, 1)
+    assert loaded.partitions[0].metadata["boundary_edge_ids_by_type"][writes] == (4,)
+    assert loaded.partitions[1].metadata["edge_ids_by_type"][writes] == (2, 3)
+    assert loaded.partitions[1].metadata["boundary_edge_ids_by_type"][writes] == (4,)

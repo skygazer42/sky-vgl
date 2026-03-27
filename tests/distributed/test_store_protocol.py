@@ -1,6 +1,11 @@
 import torch
 
-from vgl.distributed.store import LocalFeatureStoreAdapter, LocalGraphStoreAdapter
+from vgl.distributed.store import (
+    LocalFeatureStoreAdapter,
+    LocalGraphStoreAdapter,
+    PartitionedFeatureStore,
+    PartitionedGraphStore,
+)
 from vgl.storage import FeatureStore, InMemoryGraphStore, InMemoryTensorStore
 
 
@@ -32,3 +37,66 @@ def test_local_graph_store_adapter_forwards_graph_queries():
     assert torch.equal(adapter.edge_index(partition_id=3), torch.tensor([[0, 1], [1, 2]]))
     assert adapter.edge_count(partition_id=3) == 2
     assert adjacency.shape == (3, 3)
+
+
+def test_partitioned_feature_store_dispatches_partition_specific_fetches():
+    part0 = LocalFeatureStoreAdapter(
+        FeatureStore({NODE_KEY: InMemoryTensorStore(torch.tensor([[1.0], [2.0]]))})
+    )
+    part1 = LocalFeatureStoreAdapter(
+        FeatureStore({NODE_KEY: InMemoryTensorStore(torch.tensor([[3.0], [4.0]]))})
+    )
+    store = PartitionedFeatureStore({0: part0, 1: part1})
+
+    fetched = store.fetch(NODE_KEY, torch.tensor([1, 0]), partition_id=1)
+
+    assert store.shape(NODE_KEY) == (2, 1)
+    assert torch.equal(fetched.index, torch.tensor([1, 0]))
+    assert torch.equal(fetched.values, torch.tensor([[4.0], [3.0]]))
+
+
+def test_local_feature_store_adapter_fetches_boundary_edge_features():
+    edge_type = ("node", "to", "node")
+    key = ("edge", edge_type, "weight")
+    adapter = LocalFeatureStoreAdapter(
+        FeatureStore({}),
+        boundary_edge_data_by_type={
+            edge_type: {
+                "e_id": torch.tensor([4, 7]),
+                "weight": torch.tensor([1.5, 2.5]),
+            }
+        },
+    )
+
+    fetched = adapter.fetch_boundary(key, torch.tensor([7, 4]), partition_id=0)
+
+    assert torch.equal(fetched.index, torch.tensor([7, 4]))
+    assert torch.equal(fetched.values, torch.tensor([2.5, 1.5]))
+
+
+def test_partitioned_graph_store_dispatches_local_and_boundary_edge_queries():
+    edge_type = ("node", "to", "node")
+    part0 = LocalGraphStoreAdapter(
+        InMemoryGraphStore(
+            edges={edge_type: torch.tensor([[0], [1]])},
+            num_nodes={"node": 2},
+        ),
+        boundary_edge_index_by_type={edge_type: torch.tensor([[1], [2]])},
+    )
+    part1 = LocalGraphStoreAdapter(
+        InMemoryGraphStore(
+            edges={edge_type: torch.tensor([[0], [1]])},
+            num_nodes={"node": 2},
+        ),
+        boundary_edge_index_by_type={edge_type: torch.tensor([[0], [3]])},
+    )
+    store = PartitionedGraphStore({0: part0, 1: part1})
+
+    adjacency = store.adjacency(partition_id=0)
+
+    assert store.edge_types == (edge_type,)
+    assert store.num_nodes(partition_id=0) == 2
+    assert torch.equal(store.edge_index(partition_id=1), torch.tensor([[0], [1]]))
+    assert torch.equal(store.boundary_edge_index(partition_id=0), torch.tensor([[1], [2]]))
+    assert store.edge_count(partition_id=1) == 1
+    assert adjacency.shape == (2, 2)

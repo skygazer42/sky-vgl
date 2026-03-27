@@ -221,12 +221,14 @@ def _match_temporal_partition_shard(graph, source) -> int | None:
         and len(graph.edges) == 1
         and source is not None
         and graph.nodes["node"].data.get("n_id") is not None
-        and isinstance(getattr(source, "shards", None), dict)
         and all(
             callable(getattr(source, name, None))
             for name in (
+                "partition_ids",
                 "route_node_ids",
                 "partition_node_ids",
+                "partition_incident_edge_ids",
+                "fetch_partition_incident_edge_index",
                 "fetch_node_features",
                 "fetch_edge_features",
             )
@@ -261,7 +263,6 @@ def _match_hetero_partition_shard(graph, source) -> int | None:
         and graph.schema.time_attr is None
         and not (set(graph.nodes) == {"node"} and len(graph.edges) == 1)
         and source is not None
-        and isinstance(getattr(source, "shards", None), dict)
         and all(store.data.get("n_id") is not None for store in graph.nodes.values())
         and all(
             callable(getattr(source, name, None))
@@ -319,13 +320,15 @@ def _match_hetero_temporal_partition_shard(graph, source) -> int | None:
         and graph.schema.time_attr is not None
         and not (set(graph.nodes) == {"node"} and len(graph.edges) == 1)
         and source is not None
-        and isinstance(getattr(source, "shards", None), dict)
         and all(store.data.get("n_id") is not None for store in graph.nodes.values())
         and all(
             callable(getattr(source, name, None))
             for name in (
+                "partition_ids",
                 "route_node_ids",
                 "partition_node_ids",
+                "partition_incident_edge_ids",
+                "fetch_partition_incident_edge_index",
                 "fetch_node_features",
                 "fetch_edge_features",
             )
@@ -834,6 +837,13 @@ def _fetch_stitched_homo_node_data(graph, source, node_ids_global: torch.Tensor)
     return node_data
 
 
+def _fetch_routed_edge_feature_values(source, key, edge_ids: torch.Tensor) -> torch.Tensor:
+    try:
+        return source.fetch_edge_features(key, edge_ids).values
+    except KeyError:
+        return _fallback_routed_edge_tensor_slice(source, key, edge_ids).values
+
+
 def _fallback_routed_edge_tensor_slice(source, key, edge_ids: torch.Tensor) -> TensorSlice:
     _, edge_type, feature_name = key
     edge_type = tuple(edge_type)
@@ -1154,43 +1164,34 @@ def _build_stitched_homo_temporal_history(
     *,
     edge_type,
 ) -> tuple[torch.Tensor, torch.Tensor]:
-    shards = getattr(source, "shards", None)
-    if not isinstance(shards, dict) or not shards:
-        raise ValueError("stitched temporal sampling requires coordinator shard access")
+    partition_ids = getattr(source, "partition_ids", None)
+    if not callable(partition_ids):
+        raise ValueError("stitched temporal sampling requires coordinator partition access")
     time_attr = graph.schema.time_attr
     if time_attr is None:
         raise ValueError("stitched temporal sampling requires a temporal graph")
 
     timestamp = int(record.timestamp)
     edge_records: dict[int, tuple[int, int, int]] = {}
-    for partition_id in sorted(shards):
-        shard = shards[partition_id]
-        if tuple(edge_type) not in shard.graph.edges:
-            continue
-
-        owned_edge_ids = torch.as_tensor(shard.edge_ids(edge_type=edge_type), dtype=torch.long).view(-1)
-        boundary_data = shard.boundary_edge_data_by_type.get(tuple(edge_type), {})
-        boundary_edge_ids = torch.as_tensor(
-            boundary_data.get("e_id", torch.empty((0,), dtype=torch.long)),
+    for partition_id in partition_ids():
+        shard_edge_ids = torch.as_tensor(
+            source.partition_incident_edge_ids(partition_id, edge_type=edge_type),
             dtype=torch.long,
         ).view(-1)
-        if owned_edge_ids.numel() == 0 and boundary_edge_ids.numel() == 0:
+        if shard_edge_ids.numel() == 0:
             continue
 
-        owned_edge_index = torch.as_tensor(shard.global_edge_index(edge_type=edge_type), dtype=torch.long)
-        boundary_edge_index = torch.as_tensor(
-            boundary_data.get("edge_index", torch.empty((2, 0), dtype=torch.long)),
+        shard_edge_index = torch.as_tensor(
+            source.fetch_partition_incident_edge_index(partition_id, edge_type=edge_type),
             dtype=torch.long,
         )
-        owned_timestamps = torch.as_tensor(shard.graph.edges[tuple(edge_type)].data[time_attr]).view(-1)
-        boundary_timestamps = torch.as_tensor(
-            boundary_data.get(time_attr, torch.empty((0,), dtype=owned_timestamps.dtype)),
-            dtype=owned_timestamps.dtype,
+        shard_timestamps = torch.as_tensor(
+            _fetch_routed_edge_feature_values(
+                source,
+                ("edge", tuple(edge_type), time_attr),
+                shard_edge_ids,
+            )
         ).view(-1)
-
-        shard_edge_ids = torch.cat((owned_edge_ids, boundary_edge_ids), dim=0)
-        shard_edge_index = torch.cat((owned_edge_index, boundary_edge_index), dim=1)
-        shard_timestamps = torch.cat((owned_timestamps, boundary_timestamps), dim=0)
 
         if sampler.strict_history:
             edge_mask = shard_timestamps < timestamp
@@ -1248,43 +1249,34 @@ def _build_stitched_hetero_temporal_history(
     *,
     edge_type,
 ) -> tuple[torch.Tensor, torch.Tensor]:
-    shards = getattr(source, "shards", None)
-    if not isinstance(shards, dict) or not shards:
-        raise ValueError("stitched temporal sampling requires coordinator shard access")
+    partition_ids = getattr(source, "partition_ids", None)
+    if not callable(partition_ids):
+        raise ValueError("stitched temporal sampling requires coordinator partition access")
     time_attr = graph.schema.time_attr
     if time_attr is None:
         raise ValueError("stitched temporal sampling requires a temporal graph")
 
     timestamp = int(record.timestamp)
     edge_records: dict[int, tuple[int, int, int]] = {}
-    for partition_id in sorted(shards):
-        shard = shards[partition_id]
-        if tuple(edge_type) not in shard.graph.edges:
-            continue
-
-        owned_edge_ids = torch.as_tensor(shard.edge_ids(edge_type=edge_type), dtype=torch.long).view(-1)
-        boundary_data = shard.boundary_edge_data_by_type.get(tuple(edge_type), {})
-        boundary_edge_ids = torch.as_tensor(
-            boundary_data.get("e_id", torch.empty((0,), dtype=torch.long)),
+    for partition_id in partition_ids():
+        shard_edge_ids = torch.as_tensor(
+            source.partition_incident_edge_ids(partition_id, edge_type=edge_type),
             dtype=torch.long,
         ).view(-1)
-        if owned_edge_ids.numel() == 0 and boundary_edge_ids.numel() == 0:
+        if shard_edge_ids.numel() == 0:
             continue
 
-        owned_edge_index = torch.as_tensor(shard.global_edge_index(edge_type=edge_type), dtype=torch.long)
-        boundary_edge_index = torch.as_tensor(
-            boundary_data.get("edge_index", torch.empty((2, 0), dtype=torch.long)),
+        shard_edge_index = torch.as_tensor(
+            source.fetch_partition_incident_edge_index(partition_id, edge_type=edge_type),
             dtype=torch.long,
         )
-        owned_timestamps = torch.as_tensor(shard.graph.edges[tuple(edge_type)].data[time_attr]).view(-1)
-        boundary_timestamps = torch.as_tensor(
-            boundary_data.get(time_attr, torch.empty((0,), dtype=owned_timestamps.dtype)),
-            dtype=owned_timestamps.dtype,
+        shard_timestamps = torch.as_tensor(
+            _fetch_routed_edge_feature_values(
+                source,
+                ("edge", tuple(edge_type), time_attr),
+                shard_edge_ids,
+            )
         ).view(-1)
-
-        shard_edge_ids = torch.cat((owned_edge_ids, boundary_edge_ids), dim=0)
-        shard_edge_index = torch.cat((owned_edge_index, boundary_edge_index), dim=1)
-        shard_timestamps = torch.cat((owned_timestamps, boundary_timestamps), dim=0)
 
         if sampler.strict_history:
             edge_mask = shard_timestamps < timestamp

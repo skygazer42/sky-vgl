@@ -8,6 +8,13 @@ from vgl.data.dataset import ListDataset
 from vgl.data.sampler import NodeNeighborSampler
 from vgl.dataloading.plan import PlanStage
 from vgl.distributed import LocalGraphShard, LocalSamplingCoordinator, write_partitioned_graph
+from vgl.distributed.coordinator import StoreBackedSamplingCoordinator
+from vgl.distributed.store import (
+    LocalFeatureStoreAdapter,
+    LocalGraphStoreAdapter,
+    PartitionedFeatureStore,
+    PartitionedGraphStore,
+)
 from vgl.storage import FeatureStore, InMemoryTensorStore
 
 
@@ -78,6 +85,36 @@ def test_node_neighbor_sampler_extracts_hetero_local_subgraph():
     assert sample.subgraph_seed == 0
     assert torch.equal(sample.graph.nodes["paper"].data["n_id"], torch.tensor([1]))
     assert torch.equal(sample.graph.nodes["author"].data["n_id"], torch.tensor([0]))
+
+
+def _store_backed_coordinator(shards):
+    feature_store = PartitionedFeatureStore(
+        {
+            partition_id: LocalFeatureStoreAdapter(
+                shard.feature_store,
+                boundary_edge_data_by_type=shard.boundary_edge_data_by_type,
+            )
+            for partition_id, shard in shards.items()
+        }
+    )
+    graph_store = PartitionedGraphStore(
+        {
+            partition_id: LocalGraphStoreAdapter(
+                shard.graph_store,
+                boundary_edge_index_by_type={
+                    edge_type: shard.boundary_edge_index(edge_type=edge_type)
+                    for edge_type in shard.graph.edges
+                },
+            )
+            for partition_id, shard in shards.items()
+        }
+    )
+    manifest = next(iter(shards.values())).manifest
+    return StoreBackedSamplingCoordinator(
+        manifest=manifest,
+        feature_store=feature_store,
+        graph_store=graph_store,
+    )
     assert torch.equal(sample.graph.edges[("author", "writes", "paper")].edge_index, torch.tensor([[0], [0]]))
 
 
@@ -480,6 +517,66 @@ def test_node_neighbor_sampler_stitched_hetero_sampling_crosses_partition_bounda
     assert torch.equal(batch.graph.edges[WRITTEN_BY].edge_weight, torch.tensor([200.0]))
     assert torch.equal(batch.seed_index, torch.tensor([0]))
     assert batch.metadata == [{"seed": 1, "node_type": "paper", "sample_id": "stitched_hetero"}]
+
+
+def test_node_neighbor_sampler_stitched_hetero_sampling_crosses_partition_boundaries_through_store_backed_coordinator(
+    tmp_path,
+):
+    graph = Graph.hetero(
+        nodes={
+            "paper": {
+                "x": torch.tensor([[1.0], [2.0], [3.0], [4.0]]),
+                "y": torch.tensor([0, 1, 0, 1]),
+            },
+            "author": {
+                "x": torch.tensor([[10.0], [20.0], [30.0], [40.0]]),
+            },
+        },
+        edges={
+            WRITES: {
+                "edge_index": torch.tensor([[0, 2], [0, 1]]),
+                "edge_weight": torch.tensor([10.0, 20.0]),
+            },
+            WRITTEN_BY: {
+                "edge_index": torch.tensor([[0, 1], [0, 2]]),
+                "edge_weight": torch.tensor([100.0, 200.0]),
+            },
+        },
+    )
+    write_partitioned_graph(graph, tmp_path, num_partitions=2)
+    shards = {
+        0: LocalGraphShard.from_partition_dir(tmp_path, partition_id=0),
+        1: LocalGraphShard.from_partition_dir(tmp_path, partition_id=1),
+    }
+    coordinator = _store_backed_coordinator(shards)
+    loader = Loader(
+        dataset=ListDataset(
+            [(shards[0].graph, {"seed": 1, "node_type": "paper", "sample_id": "stitched_hetero_store"})]
+        ),
+        sampler=NodeNeighborSampler(
+            num_neighbors=[-1],
+            node_feature_names={"paper": ("x",), "author": ("x",)},
+            edge_feature_names={WRITES: ("edge_weight",), WRITTEN_BY: ("edge_weight",)},
+        ),
+        batch_size=1,
+        feature_store=coordinator,
+    )
+
+    batch = next(iter(loader))
+
+    assert isinstance(batch, NodeBatch)
+    assert torch.equal(batch.graph.nodes["paper"].n_id, torch.tensor([1]))
+    assert torch.equal(batch.graph.nodes["author"].n_id, torch.tensor([2]))
+    assert torch.equal(batch.graph.nodes["paper"].x, torch.tensor([[2.0]]))
+    assert torch.equal(batch.graph.nodes["author"].x, torch.tensor([[30.0]]))
+    assert torch.equal(batch.graph.edges[WRITES].edge_index, torch.tensor([[0], [0]]))
+    assert torch.equal(batch.graph.edges[WRITES].e_id, torch.tensor([1]))
+    assert torch.equal(batch.graph.edges[WRITES].edge_weight, torch.tensor([20.0]))
+    assert torch.equal(batch.graph.edges[WRITTEN_BY].edge_index, torch.tensor([[0], [0]]))
+    assert torch.equal(batch.graph.edges[WRITTEN_BY].e_id, torch.tensor([1]))
+    assert torch.equal(batch.graph.edges[WRITTEN_BY].edge_weight, torch.tensor([200.0]))
+    assert torch.equal(batch.seed_index, torch.tensor([0]))
+    assert batch.metadata == [{"seed": 1, "node_type": "paper", "sample_id": "stitched_hetero_store"}]
 
 
 

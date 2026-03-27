@@ -13,6 +13,48 @@ def _normalize_range(node_range) -> tuple[int, int]:
     return start, end
 
 
+_EDGE_ID_METADATA_KEYS = ("edge_ids_by_type", "boundary_edge_ids_by_type")
+
+
+def _normalize_edge_type(edge_type) -> tuple[str, str, str]:
+    if isinstance(edge_type, str):
+        edge_type = json.loads(edge_type)
+    if not isinstance(edge_type, (list, tuple)) or len(edge_type) != 3:
+        raise ValueError("edge type metadata keys must be length-3 tuples")
+    return tuple(str(value) for value in edge_type)
+
+
+def _normalize_edge_id_metadata(raw_value) -> dict[tuple[str, str, str], tuple[int, ...]]:
+    raw_value = dict(raw_value)
+    return {
+        _normalize_edge_type(edge_type): tuple(int(edge_id) for edge_id in edge_ids)
+        for edge_type, edge_ids in raw_value.items()
+    }
+
+
+def _normalize_partition_metadata(metadata: dict[str, Any]) -> dict[str, Any]:
+    normalized = dict(metadata)
+    for key in _EDGE_ID_METADATA_KEYS:
+        raw_value = normalized.get(key)
+        if raw_value is None:
+            continue
+        normalized[key] = _normalize_edge_id_metadata(raw_value)
+    return normalized
+
+
+def _serialize_partition_metadata(metadata: dict[str, Any]) -> dict[str, Any]:
+    serialized = dict(metadata)
+    for key in _EDGE_ID_METADATA_KEYS:
+        raw_value = serialized.get(key)
+        if raw_value is None:
+            continue
+        serialized[key] = {
+            json.dumps(list(edge_type)): list(edge_ids)
+            for edge_type, edge_ids in dict(raw_value).items()
+        }
+    return serialized
+
+
 @dataclass(frozen=True, slots=True)
 class PartitionShard:
     partition_id: int
@@ -33,9 +75,10 @@ class PartitionShard:
             node_ranges = {"node": default_range}
         if "node" in node_ranges:
             default_range = node_ranges["node"]
+        metadata = _normalize_partition_metadata(self.metadata)
         object.__setattr__(self, "partition_id", partition_id)
         object.__setattr__(self, "node_range", default_range)
-        object.__setattr__(self, "metadata", dict(self.metadata))
+        object.__setattr__(self, "metadata", metadata)
         object.__setattr__(self, "node_ranges", node_ranges)
 
     @property
@@ -49,6 +92,14 @@ class PartitionShard:
         except KeyError as exc:
             raise KeyError(node_type) from exc
 
+    @property
+    def edge_ids_by_type(self) -> dict[tuple[str, str, str], tuple[int, ...]]:
+        return dict(self.metadata.get("edge_ids_by_type", {}))
+
+    @property
+    def boundary_edge_ids_by_type(self) -> dict[tuple[str, str, str], tuple[int, ...]]:
+        return dict(self.metadata.get("boundary_edge_ids_by_type", {}))
+
     def owns(self, node_id: int, *, node_type: str = "node") -> bool:
         start, end = self.node_range_for(node_type)
         return start <= int(node_id) < end
@@ -59,7 +110,7 @@ class PartitionShard:
             "node_range": list(self.node_range),
             "node_ranges": {node_type: list(node_range) for node_type, node_range in self.node_ranges.items()},
             "path": self.path,
-            "metadata": dict(self.metadata),
+            "metadata": _serialize_partition_metadata(self.metadata),
         }
 
 

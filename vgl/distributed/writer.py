@@ -127,6 +127,20 @@ def write_partitioned_graph(graph: Graph, root, *, num_partitions: int) -> Parti
         shard_graph, node_ids_by_type, boundary_edges = _partition_subgraph(graph, node_ranges)
         filename = f"part-{partition_id}.pt"
         payload_node_ids = node_ids_by_type["node"] if single_node_type else node_ids_by_type
+        edge_ids_by_type = {
+            tuple(edge_type): tuple(
+                int(edge_id)
+                for edge_id in torch.as_tensor(shard_graph.edges[tuple(edge_type)].data["e_id"], dtype=torch.long).tolist()
+            )
+            for edge_type in shard_graph.edges
+        }
+        boundary_edge_ids_by_type = {
+            tuple(edge_type): tuple(
+                int(edge_id)
+                for edge_id in torch.as_tensor(boundary_edges[tuple(edge_type)]["e_id"], dtype=torch.long).tolist()
+            )
+            for edge_type in shard_graph.edges
+        }
         torch.save(
             {
                 "partition_id": partition_id,
@@ -142,6 +156,10 @@ def write_partitioned_graph(graph: Graph, root, *, num_partitions: int) -> Parti
                 node_range=node_ranges.get("node", (0, 0)),
                 node_ranges=node_ranges,
                 path=filename,
+                metadata={
+                    "edge_ids_by_type": edge_ids_by_type,
+                    "boundary_edge_ids_by_type": boundary_edge_ids_by_type,
+                },
             )
         )
 
