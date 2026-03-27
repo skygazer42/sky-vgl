@@ -173,6 +173,28 @@ class Graph:
 
         return from_edge_list(edge_list, num_nodes=num_nodes, node_data=node_data, edge_data=edge_data)
 
+    @classmethod
+    def from_edge_list_csv(
+        cls,
+        path,
+        *,
+        src_column="src",
+        dst_column="dst",
+        edge_columns=None,
+        delimiter=",",
+        num_nodes=None,
+    ):
+        from vgl.compat.edge_list_csv import from_edge_list_csv
+
+        return from_edge_list_csv(
+            path,
+            src_column=src_column,
+            dst_column=dst_column,
+            edge_columns=edge_columns,
+            delimiter=delimiter,
+            num_nodes=num_nodes,
+        )
+
     def to_pyg(self):
         from vgl.compat.pyg import to_pyg
 
@@ -192,6 +214,26 @@ class Graph:
         from vgl.compat.edgelist import to_edge_list
 
         return to_edge_list(self)
+
+    def to_edge_list_csv(
+        self,
+        path,
+        *,
+        src_column="src",
+        dst_column="dst",
+        edge_columns=None,
+        delimiter=",",
+    ):
+        from vgl.compat.edge_list_csv import to_edge_list_csv
+
+        return to_edge_list_csv(
+            self,
+            path,
+            src_column=src_column,
+            dst_column=dst_column,
+            edge_columns=edge_columns,
+            delimiter=delimiter,
+        )
 
     def adjacency(self, *, layout="coo", edge_type=None):
         from vgl.sparse import SparseLayout, from_edge_index
