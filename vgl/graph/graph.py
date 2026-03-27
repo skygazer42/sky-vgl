@@ -195,6 +195,32 @@ class Graph:
             num_nodes=num_nodes,
         )
 
+    @classmethod
+    def from_csv_tables(
+        cls,
+        nodes_path,
+        edges_path,
+        *,
+        node_id_column="node_id",
+        src_column="src",
+        dst_column="dst",
+        node_columns=None,
+        edge_columns=None,
+        delimiter=",",
+    ):
+        from vgl.compat.csv_tables import from_csv_tables
+
+        return from_csv_tables(
+            nodes_path,
+            edges_path,
+            node_id_column=node_id_column,
+            src_column=src_column,
+            dst_column=dst_column,
+            node_columns=node_columns,
+            edge_columns=edge_columns,
+            delimiter=delimiter,
+        )
+
     def to_pyg(self):
         from vgl.compat.pyg import to_pyg
 
@@ -231,6 +257,32 @@ class Graph:
             path,
             src_column=src_column,
             dst_column=dst_column,
+            edge_columns=edge_columns,
+            delimiter=delimiter,
+        )
+
+    def to_csv_tables(
+        self,
+        nodes_path,
+        edges_path,
+        *,
+        node_id_column="node_id",
+        src_column="src",
+        dst_column="dst",
+        node_columns=None,
+        edge_columns=None,
+        delimiter=",",
+    ):
+        from vgl.compat.csv_tables import to_csv_tables
+
+        return to_csv_tables(
+            self,
+            nodes_path,
+            edges_path,
+            node_id_column=node_id_column,
+            src_column=src_column,
+            dst_column=dst_column,
+            node_columns=node_columns,
             edge_columns=edge_columns,
             delimiter=delimiter,
         )

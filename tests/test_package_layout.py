@@ -376,6 +376,16 @@ def test_compat_package_exposes_edge_list_csv_helpers():
     assert callable(getattr(compat_module, "to_edge_list_csv", None))
 
 
+def test_compat_package_exposes_csv_table_helpers():
+    import vgl.compat as compat_module
+    from vgl.compat import from_csv_tables, to_csv_tables
+
+    assert callable(from_csv_tables)
+    assert callable(to_csv_tables)
+    assert callable(getattr(compat_module, "from_csv_tables", None))
+    assert callable(getattr(compat_module, "to_csv_tables", None))
+
+
 def test_foundation_packages_expose_in_degrees_and_out_degrees_exports():
     import vgl.ops as ops_module
     from vgl.ops import in_degrees, out_degrees
