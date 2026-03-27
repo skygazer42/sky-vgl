@@ -404,6 +404,24 @@ class Graph:
 
         return adj(self, edge_type=edge_type, eweight_name=eweight_name, layout=layout)
 
+    def laplacian(
+        self,
+        *,
+        edge_type=None,
+        normalization=None,
+        eweight_name: str | None = None,
+        layout="coo",
+    ):
+        from vgl.ops import laplacian
+
+        return laplacian(
+            self,
+            edge_type=edge_type,
+            normalization=normalization,
+            eweight_name=eweight_name,
+            layout=layout,
+        )
+
     def adj_external(
         self,
         transpose: bool = False,

@@ -3,7 +3,7 @@ import scipy.sparse
 import torch
 
 from vgl import Graph
-from vgl.ops import adj, adj_external, adj_tensors, all_edges, edge_ids, find_edges, has_edges_between, in_degrees, in_edges, in_subgraph, num_edges, num_nodes, number_of_edges, number_of_nodes, out_degrees, out_edges, out_subgraph, predecessors, reverse, successors
+from vgl.ops import adj, adj_external, adj_tensors, all_edges, edge_ids, find_edges, has_edges_between, in_degrees, in_edges, in_subgraph, laplacian, num_edges, num_nodes, number_of_edges, number_of_nodes, out_degrees, out_edges, out_subgraph, predecessors, reverse, successors
 from vgl.sparse import SparseLayout, to_coo
 
 
@@ -645,6 +645,103 @@ def test_adj_supports_selected_heterogeneous_relation_and_validates_weight_name(
 
     with pytest.raises(ValueError):
         adj(graph, edge_type=writes, eweight_name="missing")
+
+
+def test_laplacian_returns_weighted_degree_minus_adjacency_and_aggregates_duplicates():
+    graph = Graph.homo(
+        edge_index=torch.tensor([[0, 0, 0, 1, 1], [1, 1, 0, 2, 1]]),
+        x=torch.tensor([[1.0], [2.0], [3.0]]),
+        edge_data={"weight": torch.tensor([1.0, 2.0, 4.0, 3.0, 5.0])},
+    )
+
+    result = laplacian(graph, eweight_name="weight")
+
+    assert result.layout is SparseLayout.COO
+    assert result.shape == (3, 3)
+    assert torch.equal(
+        _sparse_to_dense(result),
+        torch.tensor(
+            [
+                [3.0, -3.0, 0.0],
+                [0.0, 3.0, -3.0],
+                [0.0, 0.0, 0.0],
+            ]
+        ),
+    )
+
+
+def test_laplacian_supports_random_walk_and_symmetric_normalization():
+    graph = Graph.homo(
+        edge_index=torch.tensor([[0, 1, 1, 2], [1, 0, 2, 1]]),
+        x=torch.tensor([[1.0], [2.0], [3.0]]),
+    )
+
+    random_walk = laplacian(graph, normalization="rw")
+    symmetric = laplacian(graph, normalization="sym")
+
+    expected = 1.0 / torch.sqrt(torch.tensor(2.0))
+    assert torch.allclose(
+        _sparse_to_dense(random_walk),
+        torch.tensor(
+            [
+                [1.0, -1.0, 0.0],
+                [-0.5, 1.0, -0.5],
+                [0.0, -1.0, 1.0],
+            ]
+        ),
+    )
+    assert torch.allclose(
+        _sparse_to_dense(symmetric),
+        torch.tensor(
+            [
+                [1.0, -expected, 0.0],
+                [-expected, 1.0, -expected],
+                [0.0, -expected, 1.0],
+            ]
+        ),
+    )
+
+
+def test_laplacian_supports_square_heterogeneous_relations_and_validates_inputs():
+    writes = ("author", "writes", "paper")
+    cites = ("paper", "cites", "paper")
+    graph = Graph.hetero(
+        nodes={
+            "author": {"x": torch.tensor([[1.0], [2.0]])},
+            "paper": {"x": torch.tensor([[10.0], [20.0], [30.0]])},
+        },
+        edges={
+            writes: {"edge_index": torch.tensor([[0, 1], [1, 2]])},
+            cites: {
+                "edge_index": torch.tensor([[0, 1, 1], [1, 0, 2]]),
+                "weight": torch.tensor([2.0, 4.0, 1.0]),
+            },
+        },
+    )
+
+    result = laplacian(graph, edge_type=cites, eweight_name="weight", layout="csr")
+
+    assert result.layout is SparseLayout.CSR
+    assert result.shape == (3, 3)
+    assert torch.equal(
+        _sparse_to_dense(result),
+        torch.tensor(
+            [
+                [2.0, -2.0, 0.0],
+                [-4.0, 5.0, -1.0],
+                [0.0, 0.0, 0.0],
+            ]
+        ),
+    )
+
+    with pytest.raises(ValueError):
+        laplacian(graph, edge_type=writes)
+
+    with pytest.raises(ValueError):
+        laplacian(graph, edge_type=cites, normalization="bad")
+
+    with pytest.raises(ValueError):
+        laplacian(graph, edge_type=cites, eweight_name="missing")
 
 
 def test_adj_external_returns_torch_sparse_tensor_and_supports_transpose():

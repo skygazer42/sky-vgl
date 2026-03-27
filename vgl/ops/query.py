@@ -134,6 +134,15 @@ def _normalize_sparse_layout(layout):
     return layout
 
 
+def _normalize_laplacian_normalization(normalization):
+    if normalization is None:
+        return None
+    normalized = str(normalization).lower()
+    if normalized not in {"rw", "sym"}:
+        raise ValueError("normalization must be one of None, 'rw', or 'sym'")
+    return normalized
+
+
 def _normalize_graph_formats(formats) -> tuple[str, ...]:
     if isinstance(formats, str):
         requested = (formats,)
@@ -244,6 +253,62 @@ def _edge_values(store, positions: torch.Tensor, *, eweight_name: str | None):
         raise ValueError(f"unknown edge feature {eweight_name!r}")
     values = torch.as_tensor(values, device=store.edge_index.device)
     return values[positions]
+
+
+def _laplacian_edge_weights(store, positions: torch.Tensor, *, eweight_name: str | None) -> torch.Tensor:
+    values = _edge_values(store, positions, eweight_name=eweight_name)
+    if values.ndim != 1:
+        raise ValueError("laplacian requires 1-D edge weights")
+    if not torch.is_floating_point(values):
+        values = values.to(dtype=torch.float32)
+    return values
+
+
+def _coalesced_sparse_tensor(
+    *,
+    shape: tuple[int, int],
+    row: torch.Tensor,
+    col: torch.Tensor,
+    values: torch.Tensor,
+    layout,
+):
+    from vgl.sparse import SparseLayout, SparseTensor, to_csc, to_csr
+
+    if row.numel() == 0:
+        empty_index = torch.empty(0, dtype=torch.long, device=row.device)
+        empty_values = values.new_empty(0)
+        coo = SparseTensor(
+            layout=SparseLayout.COO,
+            shape=shape,
+            row=empty_index,
+            col=empty_index,
+            values=empty_values,
+        )
+    else:
+        keys = row * max(shape[1], 1) + col
+        unique_keys, inverse = torch.unique(keys, sorted=True, return_inverse=True)
+        aggregated = values.new_zeros(unique_keys.numel())
+        aggregated.index_add_(0, inverse, values)
+        nonzero = aggregated != 0
+        unique_keys = unique_keys[nonzero]
+        aggregated = aggregated[nonzero]
+        coo_row = torch.div(unique_keys, max(shape[1], 1), rounding_mode="floor")
+        coo_col = unique_keys.remainder(max(shape[1], 1))
+        coo = SparseTensor(
+            layout=SparseLayout.COO,
+            shape=shape,
+            row=coo_row,
+            col=coo_col,
+            values=aggregated,
+        )
+
+    if layout is SparseLayout.COO:
+        return coo
+    if layout is SparseLayout.CSR:
+        return to_csr(coo)
+    if layout is SparseLayout.CSC:
+        return to_csc(coo)
+    raise ValueError(f"Unsupported sparse layout: {layout}")
 
 
 def _degrees_for_endpoint(graph: Graph, edge_type, nodes, *, endpoint: int):
@@ -436,6 +501,54 @@ def adj(graph: Graph, *, edge_type=None, eweight_name: str | None = None, layout
         )
 
     raise ValueError(f"Unsupported sparse layout: {layout}")
+
+
+def laplacian(
+    graph: Graph,
+    *,
+    edge_type=None,
+    normalization=None,
+    eweight_name: str | None = None,
+    layout="coo",
+):
+    edge_type = _resolve_edge_type(graph, edge_type)
+    src_type, _, dst_type = edge_type
+    if src_type != dst_type:
+        raise ValueError("laplacian requires matching source and destination node types")
+
+    normalization = _normalize_laplacian_normalization(normalization)
+    layout = _normalize_sparse_layout(layout)
+    store = graph.edges[edge_type]
+    positions = _ordered_edge_positions(store, order="eid")
+    ordered = store.edge_index[:, positions] if positions.numel() > 0 else store.edge_index[:, :0]
+    weights = _laplacian_edge_weights(store, positions, eweight_name=eweight_name)
+    num_nodes = graph._node_count(src_type)
+    degree = torch.zeros(num_nodes, dtype=weights.dtype, device=weights.device)
+
+    if ordered.numel() > 0:
+        degree.index_add_(0, ordered[0], weights)
+
+    active = degree > 0
+    diagonal_nodes = torch.nonzero(active, as_tuple=False).view(-1)
+    if normalization is None:
+        diagonal_values = degree[diagonal_nodes]
+        edge_values = -weights
+    elif normalization == "rw":
+        diagonal_values = torch.ones(diagonal_nodes.numel(), dtype=weights.dtype, device=weights.device)
+        inv_degree = torch.zeros_like(degree)
+        inv_degree[active] = degree[active].reciprocal()
+        edge_values = -weights * inv_degree[ordered[0]]
+    else:
+        diagonal_values = torch.ones(diagonal_nodes.numel(), dtype=weights.dtype, device=weights.device)
+        inv_sqrt_degree = torch.zeros_like(degree)
+        inv_sqrt_degree[active] = degree[active].rsqrt()
+        edge_values = -weights * inv_sqrt_degree[ordered[0]] * inv_sqrt_degree[ordered[1]]
+
+    row = torch.cat((diagonal_nodes, ordered[0]))
+    col = torch.cat((diagonal_nodes, ordered[1]))
+    values = torch.cat((diagonal_values, edge_values))
+    shape = (num_nodes, num_nodes)
+    return _coalesced_sparse_tensor(shape=shape, row=row, col=col, values=values, layout=layout)
 
 
 def adj_external(

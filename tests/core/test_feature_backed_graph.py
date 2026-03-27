@@ -2,7 +2,7 @@ import torch
 
 from vgl import Graph
 from vgl.graph import GraphSchema
-from vgl.sparse import to_coo
+from vgl.sparse import SparseLayout, to_coo
 from vgl.storage import FeatureStore, InMemoryGraphStore, InMemoryTensorStore
 from vgl.ops import in_subgraph, out_subgraph
 
@@ -384,6 +384,39 @@ def test_featureless_storage_backed_to_simple_preserves_declared_node_space():
     assert simplified.adjacency().shape == (4, 4)
     assert torch.equal(simplified.edge_index, torch.tensor([[0, 1], [1, 0]]))
     assert torch.equal(simplified.edata["count"], torch.tensor([2, 1]))
+
+
+def test_featureless_storage_backed_laplacian_preserves_declared_node_space():
+    schema = GraphSchema(
+        node_types=("node",),
+        edge_types=(HOMO_EDGE,),
+        node_features={"node": ()},
+        edge_features={HOMO_EDGE: ("edge_index",)},
+    )
+    graph = Graph.from_storage(
+        schema=schema,
+        feature_store=FeatureStore({}),
+        graph_store=InMemoryGraphStore(
+            {HOMO_EDGE: torch.tensor([[0, 1], [1, 0]])},
+            num_nodes={"node": 4},
+        ),
+    )
+
+    lap = graph.laplacian(layout="csr")
+
+    assert lap.layout is SparseLayout.CSR
+    assert lap.shape == (4, 4)
+    assert torch.equal(
+        _sparse_to_dense(lap),
+        torch.tensor(
+            [
+                [1.0, -1.0, 0.0, 0.0],
+                [-1.0, 1.0, 0.0, 0.0],
+                [0.0, 0.0, 0.0, 0.0],
+                [0.0, 0.0, 0.0, 0.0],
+            ]
+        ),
+    )
 
 
 def test_featureless_storage_backed_adjacency_queries_preserve_declared_node_space():

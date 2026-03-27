@@ -273,7 +273,7 @@ def test_legacy_core_package_reexports_graph_support_types():
 def test_foundation_packages_expose_namespace_exports():
     import vgl.ops as ops_module
     from vgl.ops import GraphTransform, TransformPipeline
-    from vgl.ops import add_self_loops, adj, adj_external, adj_tensors, all_edges, compact_nodes, create_formats_, edge_ids, edge_subgraph, find_edges, formats, has_edges_between, inc, in_degrees, in_edges, in_subgraph, khop_nodes, khop_subgraph, line_graph, metapath_reachable_graph, node_subgraph, num_edges, num_nodes, number_of_edges, number_of_nodes, out_degrees, out_edges, out_subgraph, predecessors, remove_self_loops, reverse, successors, to_bidirected, to_block, to_hetero_block, to_simple
+    from vgl.ops import add_self_loops, adj, adj_external, adj_tensors, all_edges, compact_nodes, create_formats_, edge_ids, edge_subgraph, find_edges, formats, has_edges_between, inc, in_degrees, in_edges, in_subgraph, khop_nodes, khop_subgraph, laplacian, line_graph, metapath_reachable_graph, node_subgraph, num_edges, num_nodes, number_of_edges, number_of_nodes, out_degrees, out_edges, out_subgraph, predecessors, remove_self_loops, reverse, successors, to_bidirected, to_block, to_hetero_block, to_simple
     from vgl.ops import __all__ as ops_all
     from vgl.sparse import SparseLayout, SparseTensor
     from vgl.sparse import __all__ as sparse_all
@@ -281,7 +281,7 @@ def test_foundation_packages_expose_namespace_exports():
     from vgl.storage import FeatureStore, GraphStore, InMemoryGraphStore, InMemoryTensorStore, MmapTensorStore, TensorSlice, TensorStore
     from vgl.storage import __all__ as storage_all
 
-    assert ops_all == ["GraphTransform", "TransformPipeline", "add_self_loops", "remove_self_loops", "to_bidirected", "to_simple", "reverse", "line_graph", "metapath_reachable_graph", "random_walk", "metapath_random_walk", "find_edges", "edge_ids", "has_edges_between", "num_nodes", "number_of_nodes", "num_edges", "number_of_edges", "all_edges", "formats", "create_formats_", "adj", "adj_external", "adj_tensors", "inc", "in_degrees", "out_degrees", "in_edges", "out_edges", "predecessors", "successors", "node_subgraph", "edge_subgraph", "in_subgraph", "out_subgraph", "khop_nodes", "khop_subgraph", "compact_nodes", "to_block", "to_hetero_block"]
+    assert ops_all == ["GraphTransform", "TransformPipeline", "add_self_loops", "remove_self_loops", "to_bidirected", "to_simple", "reverse", "line_graph", "metapath_reachable_graph", "random_walk", "metapath_random_walk", "find_edges", "edge_ids", "has_edges_between", "num_nodes", "number_of_nodes", "num_edges", "number_of_edges", "all_edges", "formats", "create_formats_", "adj", "laplacian", "adj_external", "adj_tensors", "inc", "in_degrees", "out_degrees", "in_edges", "out_edges", "predecessors", "successors", "node_subgraph", "edge_subgraph", "in_subgraph", "out_subgraph", "khop_nodes", "khop_subgraph", "compact_nodes", "to_block", "to_hetero_block"]
     assert sparse_all == ["SparseLayout", "SparseTensor", "from_edge_index", "from_torch_sparse", "to_coo", "to_csr", "to_csc", "to_torch_sparse", "degree", "select_rows", "select_cols", "transpose", "sum", "spmm", "sddmm", "edge_softmax"]
     assert storage_all == ["TensorSlice", "TensorStore", "InMemoryTensorStore", "MmapTensorStore", "FeatureStore", "GraphStore", "InMemoryGraphStore"]
     assert SparseLayout.__name__ == "SparseLayout"
@@ -311,6 +311,7 @@ def test_foundation_packages_expose_namespace_exports():
     assert callable(formats)
     assert callable(create_formats_)
     assert callable(adj)
+    assert callable(laplacian)
     assert callable(adj_external)
     assert callable(adj_tensors)
     assert callable(inc)

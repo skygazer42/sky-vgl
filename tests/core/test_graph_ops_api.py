@@ -193,6 +193,27 @@ def test_graph_adjacency_query_bridges_call_ops_layer():
     assert torch.equal(succs, torch.tensor([2, 2]))
 
 
+def test_graph_laplacian_bridge_calls_ops_layer():
+    graph = Graph.homo(
+        edge_index=torch.tensor([[0, 1, 1, 2], [1, 0, 2, 1]]),
+        x=torch.tensor([[1.0], [2.0], [3.0]]),
+    )
+
+    result = graph.laplacian(normalization="rw")
+
+    assert result.layout is SparseLayout.COO
+    assert torch.allclose(
+        _sparse_to_dense(result),
+        torch.tensor(
+            [
+                [1.0, -1.0, 0.0],
+                [-0.5, 1.0, -0.5],
+                [0.0, -1.0, 1.0],
+            ]
+        ),
+    )
+
+
 def test_graph_in_degrees_and_out_degrees_bridges_call_ops_layer():
     graph = Graph.homo(
         edge_index=torch.tensor([[0, 0, 1, 2], [1, 2, 2, 0]]),

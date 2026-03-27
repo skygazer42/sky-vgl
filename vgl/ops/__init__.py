@@ -21,6 +21,7 @@ from vgl.ops.query import has_edges_between as has_edges_between
 from vgl.ops.query import inc as inc
 from vgl.ops.query import in_degrees as in_degrees
 from vgl.ops.query import in_edges as in_edges
+from vgl.ops.query import laplacian as laplacian
 from vgl.ops.query import num_edges as num_edges
 from vgl.ops.query import num_nodes as num_nodes
 from vgl.ops.query import number_of_edges as number_of_edges
@@ -62,6 +63,7 @@ __all__ = [
     "formats",
     "create_formats_",
     "adj",
+    "laplacian",
     "adj_external",
     "adj_tensors",
     "inc",
