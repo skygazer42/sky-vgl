@@ -26,6 +26,42 @@ class RecordingTensorStore:
         return type("TensorSliceProxy", (), {"index": captured, "values": self._tensor[captured]})()
 
 
+class RecordingGraphStore:
+    def __init__(self, edges, *, num_nodes):
+        self._store = InMemoryGraphStore(edges, num_nodes=num_nodes)
+        self.edge_index_calls = []
+        self.edge_count_calls = []
+
+    @property
+    def edge_types(self):
+        return self._store.edge_types
+
+    def num_nodes(self, node_type: str = "node") -> int:
+        return self._store.num_nodes(node_type)
+
+    def _resolve_edge_type(self, edge_type):
+        if edge_type is not None:
+            return tuple(edge_type)
+        if HOMO_EDGE in self._store.edge_types:
+            return HOMO_EDGE
+        if len(self._store.edge_types) == 1:
+            return next(iter(self._store.edge_types))
+        raise KeyError("edge_type is required when multiple edge types exist")
+
+    def edge_index(self, edge_type=None):
+        resolved = self._resolve_edge_type(edge_type)
+        self.edge_index_calls.append(resolved)
+        return self._store.edge_index(resolved)
+
+    def edge_count(self, edge_type=None) -> int:
+        resolved = self._resolve_edge_type(edge_type)
+        self.edge_count_calls.append(resolved)
+        return int(self._store.edge_index(resolved).size(1))
+
+    def adjacency(self, *, edge_type=None, layout="coo"):
+        return self._store.adjacency(edge_type=edge_type, layout=layout)
+
+
 HOMO_EDGE = ("node", "to", "node")
 WRITES = ("author", "writes", "paper")
 
@@ -139,6 +175,45 @@ def test_graph_from_storage_fetches_features_lazily_and_caches_them():
     assert torch.equal(graph.y, torch.tensor([0, 1, 0]))
     assert len(y_store.fetch_calls) == 1
     assert torch.equal(y_store.fetch_calls[0], torch.tensor([0, 1, 2]))
+
+
+def test_graph_from_storage_fetches_edge_structure_lazily_and_caches_it():
+    edge_weight_store = RecordingTensorStore(torch.tensor([0.1, 0.2, 0.3]))
+    schema = GraphSchema(
+        node_types=("node",),
+        edge_types=(HOMO_EDGE,),
+        node_features={"node": ()},
+        edge_features={HOMO_EDGE: ("edge_index", "edge_weight")},
+    )
+    feature_store = FeatureStore(
+        {
+            ("edge", HOMO_EDGE, "edge_weight"): edge_weight_store,
+        }
+    )
+    graph_store = RecordingGraphStore(
+        {HOMO_EDGE: torch.tensor([[0, 1, 2], [1, 2, 0]])},
+        num_nodes={"node": 3},
+    )
+
+    graph = Graph.from_storage(schema=schema, feature_store=feature_store, graph_store=graph_store)
+
+    assert graph_store.edge_index_calls == []
+    assert graph_store.edge_count_calls == []
+    assert edge_weight_store.fetch_calls == []
+
+    assert torch.equal(graph.edata["edge_weight"], torch.tensor([0.1, 0.2, 0.3]))
+    assert graph_store.edge_index_calls == []
+    assert graph_store.edge_count_calls == [HOMO_EDGE]
+    assert len(edge_weight_store.fetch_calls) == 1
+    assert torch.equal(edge_weight_store.fetch_calls[0], torch.tensor([0, 1, 2]))
+
+    assert torch.equal(graph.edge_index, torch.tensor([[0, 1, 2], [1, 2, 0]]))
+    assert graph_store.edge_index_calls == [HOMO_EDGE]
+
+    assert torch.equal(graph.edge_index, torch.tensor([[0, 1, 2], [1, 2, 0]]))
+    adjacency = graph.adjacency()
+    assert graph_store.edge_index_calls == [HOMO_EDGE]
+    assert adjacency.shape == (3, 3)
 
 
 def test_graph_from_storage_retains_feature_store_context():

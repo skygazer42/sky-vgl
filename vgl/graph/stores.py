@@ -118,17 +118,20 @@ class EdgeStore:
 
     @classmethod
     def from_storage(cls, type_name, feature_names, feature_store, graph_store):
-        edge_count = graph_store.edge_count(type_name)
-        values = {"edge_index": graph_store.edge_index(type_name)}
-        loaders = {}
+        values = {}
+        loaders = {
+            "edge_index": lambda type_name=type_name, graph_store=graph_store: graph_store.edge_index(type_name),
+        }
         for feature_name in feature_names:
             if feature_name == "edge_index":
                 continue
             key = ("edge", type_name, feature_name)
-            loaders[feature_name] = lambda key=key, edge_count=edge_count, feature_store=feature_store: feature_store.fetch(
-                key,
-                torch.arange(edge_count, dtype=torch.long),
-            ).values
+            loaders[feature_name] = (
+                lambda key=key, type_name=type_name, feature_store=feature_store, graph_store=graph_store: feature_store.fetch(
+                    key,
+                    torch.arange(graph_store.edge_count(type_name), dtype=torch.long),
+                ).values
+            )
         return cls(type_name, LazyFeatureMap(values=values, loaders=loaders))
 
     def __getattr__(self, name: str) -> torch.Tensor:
