@@ -120,6 +120,17 @@ class HeteroBlock:
     def edge_index(self, edge_type) -> torch.Tensor:
         return self.graph.edges[self.block_edge_type(edge_type)].edge_index
 
+    @classmethod
+    def from_dgl(cls, dgl_block):
+        from vgl.compat.dgl import hetero_block_from_dgl
+
+        return hetero_block_from_dgl(dgl_block)
+
+    def to_dgl(self):
+        from vgl.compat.dgl import hetero_block_to_dgl
+
+        return hetero_block_to_dgl(self)
+
     def to(self, device=None, dtype=None, non_blocking: bool = False):
         return HeteroBlock(
             graph=self.graph.to(device=device, dtype=dtype, non_blocking=non_blocking),

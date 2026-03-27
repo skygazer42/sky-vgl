@@ -5,7 +5,7 @@ import pytest
 import torch
 
 from vgl import Graph
-from vgl.graph import Block, GraphSchema
+from vgl.graph import Block, GraphSchema, HeteroBlock
 from vgl.storage import FeatureStore, InMemoryGraphStore, InMemoryTensorStore
 
 
@@ -484,6 +484,52 @@ def test_relation_local_hetero_block_round_trips_to_dgl_block(monkeypatch):
 
 
 
+def test_multi_relation_hetero_block_round_trips_to_dgl_block(monkeypatch):
+    _install_fake_dgl(monkeypatch)
+
+    writes = ('author', 'writes', 'paper')
+    cites = ('paper', 'cites', 'paper')
+    graph = Graph.hetero(
+        nodes={
+            'author': {'x': torch.tensor([[10.0], [20.0]])},
+            'paper': {'x': torch.tensor([[1.0], [2.0], [3.0]])},
+        },
+        edges={
+            writes: {
+                'edge_index': torch.tensor([[0, 1, 1], [1, 0, 2]]),
+                'e_id': torch.tensor([30, 31, 32]),
+                'weight': torch.tensor([1.0, 2.0, 3.0]),
+            },
+            cites: {
+                'edge_index': torch.tensor([[0, 1, 2], [2, 2, 0]]),
+                'e_id': torch.tensor([40, 41, 42]),
+                'weight': torch.tensor([5.0, 6.0, 7.0]),
+            },
+        },
+    )
+
+    block = graph.to_hetero_block({'paper': torch.tensor([0, 2])})
+
+    dgl_block = block.to_dgl()
+    restored = HeteroBlock.from_dgl(dgl_block)
+
+    assert getattr(dgl_block, 'is_block', False)
+    assert restored.edge_types == block.edge_types
+    assert restored.src_store_types == block.src_store_types
+    assert restored.dst_store_types == block.dst_store_types
+    assert torch.equal(restored.src_n_id['author'], block.src_n_id['author'])
+    assert torch.equal(restored.src_n_id['paper'], block.src_n_id['paper'])
+    assert torch.equal(restored.dst_n_id['paper'], block.dst_n_id['paper'])
+    assert torch.equal(restored.srcdata('author')['x'], block.srcdata('author')['x'])
+    assert torch.equal(restored.srcdata('paper')['x'], block.srcdata('paper')['x'])
+    assert torch.equal(restored.dstdata('paper')['x'], block.dstdata('paper')['x'])
+    assert torch.equal(restored.edata(writes)['e_id'], block.edata(writes)['e_id'])
+    assert torch.equal(restored.edata(cites)['e_id'], block.edata(cites)['e_id'])
+    assert torch.equal(restored.edata(cites)['weight'], block.edata(cites)['weight'])
+    assert torch.equal(restored.edge_index(writes), block.edge_index(writes))
+    assert torch.equal(restored.edge_index(cites), block.edge_index(cites))
+
+
 def test_from_dgl_imports_external_single_relation_block(monkeypatch):
     dgl_module = _install_fake_dgl(monkeypatch)
 
@@ -515,6 +561,47 @@ def test_from_dgl_imports_external_single_relation_block(monkeypatch):
 
 
 
+def test_from_dgl_imports_external_multi_relation_block(monkeypatch):
+    dgl_module = _install_fake_dgl(monkeypatch)
+
+    writes = ('author', 'writes', 'paper')
+    cites = ('paper', 'cites', 'paper')
+    dgl_block = dgl_module.create_block(
+        {
+            writes: (torch.tensor([0, 0]), torch.tensor([0, 1])),
+            cites: (torch.tensor([0, 2, 1]), torch.tensor([1, 1, 0])),
+        },
+        num_src_nodes={'author': 1, 'paper': 3},
+        num_dst_nodes={'paper': 2},
+    )
+    dgl_block.srcnodes['author'].data['n_id'] = torch.tensor([12])
+    dgl_block.srcnodes['author'].data['x'] = torch.tensor([[20.0]])
+    dgl_block.srcnodes['paper'].data['n_id'] = torch.tensor([20, 22, 21])
+    dgl_block.srcnodes['paper'].data['x'] = torch.tensor([[1.0], [3.0], [2.0]])
+    dgl_block.dstnodes['paper'].data['n_id'] = torch.tensor([20, 22])
+    dgl_block.dstnodes['paper'].data['x'] = torch.tensor([[1.0], [3.0]])
+    dgl_block.edges[writes].data['e_id'] = torch.tensor([31, 32])
+    dgl_block.edges[writes].data['weight'] = torch.tensor([2.0, 3.0])
+    dgl_block.edges[cites].data['e_id'] = torch.tensor([40, 41, 42])
+    dgl_block.edges[cites].data['weight'] = torch.tensor([5.0, 6.0, 7.0])
+
+    block = HeteroBlock.from_dgl(dgl_block)
+
+    assert block.edge_types == (writes, cites)
+    assert block.src_store_types == {'author': 'author', 'paper': 'paper__src'}
+    assert block.dst_store_types == {'paper': 'paper__dst'}
+    assert torch.equal(block.src_n_id['author'], torch.tensor([12]))
+    assert torch.equal(block.src_n_id['paper'], torch.tensor([20, 22, 21]))
+    assert torch.equal(block.dst_n_id['paper'], torch.tensor([20, 22]))
+    assert torch.equal(block.srcdata('author')['x'], torch.tensor([[20.0]]))
+    assert torch.equal(block.srcdata('paper')['x'], torch.tensor([[1.0], [3.0], [2.0]]))
+    assert torch.equal(block.dstdata('paper')['x'], torch.tensor([[1.0], [3.0]]))
+    assert torch.equal(block.edata(writes)['e_id'], torch.tensor([31, 32]))
+    assert torch.equal(block.edata(cites)['weight'], torch.tensor([5.0, 6.0, 7.0]))
+    assert torch.equal(block.edge_index(writes), torch.tensor([[0, 0], [0, 1]]))
+    assert torch.equal(block.edge_index(cites), torch.tensor([[0, 2, 1], [1, 1, 0]]))
+
+
 def test_from_dgl_rejects_multi_relation_blocks(monkeypatch):
     dgl_module = _install_fake_dgl(monkeypatch)
 
@@ -529,3 +616,63 @@ def test_from_dgl_rejects_multi_relation_blocks(monkeypatch):
 
     with pytest.raises(ValueError, match='single-relation'):
         Block.from_dgl(dgl_block)
+
+
+def test_temporal_hetero_block_round_trips_time_attr_through_dgl_adapter(monkeypatch):
+    _install_fake_dgl(monkeypatch)
+
+    writes = ('author', 'writes', 'paper')
+    cites = ('paper', 'cites', 'paper')
+    graph = Graph.temporal(
+        nodes={
+            'author': {'x': torch.tensor([[10.0], [20.0]])},
+            'paper': {'x': torch.tensor([[1.0], [2.0], [3.0]])},
+        },
+        edges={
+            writes: {
+                'edge_index': torch.tensor([[0, 1, 1], [1, 0, 2]]),
+                'timestamp': torch.tensor([1.0, 2.0, 3.0]),
+            },
+            cites: {
+                'edge_index': torch.tensor([[0, 1, 2], [2, 2, 0]]),
+                'timestamp': torch.tensor([4.0, 5.0, 6.0]),
+            },
+        },
+        time_attr='timestamp',
+    )
+
+    block = graph.to_hetero_block({'paper': torch.tensor([0, 2])})
+
+    dgl_block = block.to_dgl()
+    restored = HeteroBlock.from_dgl(dgl_block)
+
+    assert getattr(dgl_block, 'vgl_time_attr') == 'timestamp'
+    assert restored.graph.schema.time_attr == 'timestamp'
+    assert torch.equal(restored.edata(writes)['timestamp'], block.edata(writes)['timestamp'])
+    assert torch.equal(restored.edata(cites)['timestamp'], block.edata(cites)['timestamp'])
+
+
+def test_compat_exports_hetero_block_dgl_helpers(monkeypatch):
+    _install_fake_dgl(monkeypatch)
+
+    from vgl.compat import hetero_block_from_dgl, hetero_block_to_dgl
+
+    writes = ('author', 'writes', 'paper')
+    cites = ('paper', 'cites', 'paper')
+    graph = Graph.hetero(
+        nodes={
+            'author': {'x': torch.tensor([[10.0], [20.0]])},
+            'paper': {'x': torch.tensor([[1.0], [2.0], [3.0]])},
+        },
+        edges={
+            writes: {'edge_index': torch.tensor([[0, 1, 1], [1, 0, 2]])},
+            cites: {'edge_index': torch.tensor([[0, 1, 2], [2, 2, 0]])},
+        },
+    )
+
+    block = graph.to_hetero_block({'paper': torch.tensor([0, 2])})
+    dgl_block = hetero_block_to_dgl(block)
+    restored = hetero_block_from_dgl(dgl_block)
+
+    assert isinstance(restored, HeteroBlock)
+    assert restored.edge_types == block.edge_types

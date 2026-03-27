@@ -1,6 +1,6 @@
 import torch
 
-from vgl.graph import Block, Graph
+from vgl.graph import Block, Graph, HeteroBlock
 
 
 _DGL_DEFAULT_NODE_TYPE = "_N"
@@ -135,6 +135,34 @@ def _block_store_types(src_type: str, dst_type: str) -> tuple[str, str]:
     if src_type == dst_type:
         return f"{src_type}__src", f"{dst_type}__dst"
     return src_type, dst_type
+
+
+def _ordered_unique(values):
+    ordered = []
+    seen = set()
+    for value in values:
+        if value in seen:
+            continue
+        seen.add(value)
+        ordered.append(value)
+    return tuple(ordered)
+
+
+def _hetero_block_store_type_maps(
+    src_node_types: tuple[str, ...],
+    dst_node_types: tuple[str, ...],
+) -> tuple[dict[str, str], dict[str, str]]:
+    src_type_set = set(src_node_types)
+    dst_type_set = set(dst_node_types)
+    src_store_types = {
+        node_type: f"{node_type}__src" if node_type in dst_type_set else node_type
+        for node_type in src_node_types
+    }
+    dst_store_types = {
+        node_type: f"{node_type}__dst" if node_type in src_type_set else node_type
+        for node_type in dst_node_types
+    }
+    return src_store_types, dst_store_types
 
 
 def _block_node_data_from_dgl(dgl_block, node_type, *, side: str):
@@ -298,6 +326,104 @@ def block_to_dgl(block):
             edge_frame[key] = value
 
     setattr(dgl_block, _VGL_GRAPH_KIND_ATTR, "block")
+    if block.graph.schema.time_attr is not None:
+        setattr(dgl_block, _VGL_TIME_ATTR, block.graph.schema.time_attr)
+    return dgl_block
+
+
+def hetero_block_from_dgl(dgl_block):
+    import dgl  # type: ignore[import-not-found]
+
+    if not _is_dgl_block(dgl_block):
+        raise ValueError("hetero_block_from_dgl expects a DGL block")
+
+    canonical_etypes = _canonical_etypes(dgl_block)
+    if not canonical_etypes:
+        raise ValueError("hetero_block_from_dgl requires at least one relation")
+
+    src_node_types = _ordered_unique(edge_type[0] for edge_type in canonical_etypes)
+    dst_node_types = _ordered_unique(edge_type[2] for edge_type in canonical_etypes)
+    src_store_types, dst_store_types = _hetero_block_store_type_maps(src_node_types, dst_node_types)
+
+    nodes = {}
+    src_n_id = {}
+    dst_n_id = {}
+    for node_type in src_node_types:
+        node_data = _block_node_data_from_dgl(dgl_block, node_type, side="src")
+        src_n_id[node_type] = _normalized_public_ids(
+            node_data,
+            preferred_key="n_id",
+            fallback_key=getattr(dgl, "NID", None),
+            count=_block_num_nodes(dgl_block, node_type=node_type, side="src"),
+            device=_data_device(node_data),
+        )
+        nodes[src_store_types[node_type]] = node_data
+    for node_type in dst_node_types:
+        node_data = _block_node_data_from_dgl(dgl_block, node_type, side="dst")
+        dst_n_id[node_type] = _normalized_public_ids(
+            node_data,
+            preferred_key="n_id",
+            fallback_key=getattr(dgl, "NID", None),
+            count=_block_num_nodes(dgl_block, node_type=node_type, side="dst"),
+            device=_data_device(node_data),
+        )
+        nodes[dst_store_types[node_type]] = node_data
+
+    edges = {}
+    for edge_type in canonical_etypes:
+        src_type, rel_type, dst_type = edge_type
+        edge_data = _edge_data_from_dgl(dgl_block, edge_type)
+        edge_index = _edge_index_from_dgl(dgl_block, edge_type)
+        edge_data["edge_index"] = edge_index
+        _normalized_public_ids(
+            edge_data,
+            preferred_key="e_id",
+            fallback_key=getattr(dgl, "EID", None),
+            count=int(edge_index.size(1)),
+            device=edge_index.device,
+        )
+        edges[(src_store_types[src_type], rel_type, dst_store_types[dst_type])] = edge_data
+
+    time_attr = getattr(dgl_block, _VGL_TIME_ATTR, None)
+    if time_attr is None or not _has_feature(nodes, edges, time_attr):
+        block_graph = Graph.hetero(nodes=nodes, edges=edges)
+    else:
+        block_graph = Graph.temporal(nodes=nodes, edges=edges, time_attr=time_attr)
+
+    return HeteroBlock(
+        graph=block_graph,
+        edge_types=canonical_etypes,
+        src_n_id=src_n_id,
+        dst_n_id=dst_n_id,
+        src_store_types=src_store_types,
+        dst_store_types=dst_store_types,
+    )
+
+
+def hetero_block_to_dgl(block):
+    import dgl  # type: ignore[import-not-found]
+
+    dgl_block = dgl.create_block(
+        {edge_type: tuple(block.edge_index(edge_type)) for edge_type in block.edge_types},
+        num_src_nodes={node_type: int(node_ids.numel()) for node_type, node_ids in block.src_n_id.items()},
+        num_dst_nodes={node_type: int(node_ids.numel()) for node_type, node_ids in block.dst_n_id.items()},
+    )
+
+    for node_type in block.src_n_id:
+        src_frame = dgl_block.srcnodes[node_type].data
+        for key, value in block.srcdata(node_type).items():
+            src_frame[key] = value
+    for node_type in block.dst_n_id:
+        dst_frame = dgl_block.dstnodes[node_type].data
+        for key, value in block.dstdata(node_type).items():
+            dst_frame[key] = value
+    for edge_type in block.edge_types:
+        edge_frame = dgl_block.edges[edge_type].data
+        for key, value in block.edata(edge_type).items():
+            if key != "edge_index":
+                edge_frame[key] = value
+
+    setattr(dgl_block, _VGL_GRAPH_KIND_ATTR, "hetero_block")
     if block.graph.schema.time_attr is not None:
         setattr(dgl_block, _VGL_TIME_ATTR, block.graph.schema.time_attr)
     return dgl_block
