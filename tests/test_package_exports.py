@@ -307,4 +307,4 @@ def test_package_exposes_broad_vgl_root_surface():
     assert callable(global_mean_pool)
     assert callable(global_sum_pool)
     assert callable(global_max_pool)
-    assert __version__ == "0.1.0"
+    assert __version__ == "0.1.1"

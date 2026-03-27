@@ -9,7 +9,7 @@
 <p align="center">
   <a href="https://www.python.org/downloads/"><img src="https://img.shields.io/badge/python-%E2%89%A53.10-blue?style=flat-square&logo=python&logoColor=white" alt="Python 3.10+"/></a>
   <a href="https://pytorch.org/"><img src="https://img.shields.io/badge/PyTorch-%E2%89%A52.4-ee4c2c?style=flat-square&logo=pytorch&logoColor=white" alt="PyTorch 2.4+"/></a>
-  <img src="https://img.shields.io/badge/version-0.1.0-8b5cf6?style=flat-square" alt="Version 0.1.0"/>
+  <img src="https://img.shields.io/badge/version-0.1.1-8b5cf6?style=flat-square" alt="Version 0.1.1"/>
   <img src="https://img.shields.io/badge/license-see%20LICENSE-green?style=flat-square" alt="License"/>
 </p>
 

@@ -91,6 +91,8 @@ def test_release_workflows_exist_for_ci_and_pypi_publish():
     assert "python -m pytest -q" in ci_text
     assert "python -m build" in ci_text
     assert "python -m twine check" in ci_text
+    assert "tags:" in publish_text
+    assert "v*" in publish_text
     assert "testpypi" in publish_text.lower()
     assert "pypi" in publish_text.lower()
     assert "id-token: write" in publish_text
