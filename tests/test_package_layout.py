@@ -346,6 +346,16 @@ def test_foundation_packages_expose_namespace_exports():
     assert callable(edge_softmax)
 
 
+def test_compat_package_exposes_networkx_helpers():
+    import vgl.compat as compat_module
+    from vgl.compat import from_networkx, to_networkx
+
+    assert callable(from_networkx)
+    assert callable(to_networkx)
+    assert callable(getattr(compat_module, "from_networkx", None))
+    assert callable(getattr(compat_module, "to_networkx", None))
+
+
 def test_foundation_packages_expose_in_degrees_and_out_degrees_exports():
     import vgl.ops as ops_module
     from vgl.ops import in_degrees, out_degrees

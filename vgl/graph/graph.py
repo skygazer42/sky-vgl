@@ -161,6 +161,12 @@ class Graph:
 
         return from_dgl(graph)
 
+    @classmethod
+    def from_networkx(cls, graph):
+        from vgl.compat.networkx import from_networkx
+
+        return from_networkx(graph)
+
     def to_pyg(self):
         from vgl.compat.pyg import to_pyg
 
@@ -170,6 +176,11 @@ class Graph:
         from vgl.compat.dgl import to_dgl
 
         return to_dgl(self)
+
+    def to_networkx(self):
+        from vgl.compat.networkx import to_networkx
+
+        return to_networkx(self)
 
     def adjacency(self, *, layout="coo", edge_type=None):
         from vgl.sparse import SparseLayout, from_edge_index
