@@ -5,7 +5,12 @@ import torch
 
 from vgl.distributed.partition import PartitionManifest, PartitionShard
 from vgl.distributed.shard import LocalGraphShard
-from vgl.distributed.store import DistributedFeatureStore, DistributedGraphStore, LocalFeatureStoreAdapter
+from vgl.distributed.store import (
+    DistributedFeatureStore,
+    DistributedGraphStore,
+    LocalFeatureStoreAdapter,
+    load_partitioned_stores,
+)
 from vgl.sparse import SparseLayout, SparseTensor
 from vgl.storage.base import TensorSlice
 from vgl.storage.feature_store import FeatureKey
@@ -334,6 +339,15 @@ class StoreBackedSamplingCoordinator:
             self._edge_ids_by_partition_and_type[partition.partition_id] = edge_ids_by_type
             self._boundary_edge_ids_by_partition_and_type[partition.partition_id] = boundary_edge_ids_by_type
             self._local_edge_id_by_partition_and_type[partition.partition_id] = local_edge_ids_by_type
+
+    @classmethod
+    def from_partition_dir(cls, root) -> "StoreBackedSamplingCoordinator":
+        manifest, feature_store, graph_store = load_partitioned_stores(root)
+        return cls(
+            manifest=manifest,
+            feature_store=feature_store,
+            graph_store=graph_store,
+        )
 
     def _collect_edge_types(self) -> tuple[tuple[str, str, str], ...]:
         ordered = []

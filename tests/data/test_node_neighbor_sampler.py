@@ -9,12 +9,6 @@ from vgl.data.sampler import NodeNeighborSampler
 from vgl.dataloading.plan import PlanStage
 from vgl.distributed import LocalGraphShard, LocalSamplingCoordinator, write_partitioned_graph
 from vgl.distributed.coordinator import StoreBackedSamplingCoordinator
-from vgl.distributed.store import (
-    LocalFeatureStoreAdapter,
-    LocalGraphStoreAdapter,
-    PartitionedFeatureStore,
-    PartitionedGraphStore,
-)
 from vgl.storage import FeatureStore, InMemoryTensorStore
 
 
@@ -88,34 +82,8 @@ def test_node_neighbor_sampler_extracts_hetero_local_subgraph():
 
 
 def _store_backed_coordinator(shards):
-    feature_store = PartitionedFeatureStore(
-        {
-            partition_id: LocalFeatureStoreAdapter(
-                shard.feature_store,
-                boundary_edge_data_by_type=shard.boundary_edge_data_by_type,
-            )
-            for partition_id, shard in shards.items()
-        }
-    )
-    graph_store = PartitionedGraphStore(
-        {
-            partition_id: LocalGraphStoreAdapter(
-                shard.graph_store,
-                boundary_edge_index_by_type={
-                    edge_type: shard.boundary_edge_index(edge_type=edge_type)
-                    for edge_type in shard.graph.edges
-                },
-            )
-            for partition_id, shard in shards.items()
-        }
-    )
-    manifest = next(iter(shards.values())).manifest
-    return StoreBackedSamplingCoordinator(
-        manifest=manifest,
-        feature_store=feature_store,
-        graph_store=graph_store,
-    )
-    assert torch.equal(sample.graph.edges[("author", "writes", "paper")].edge_index, torch.tensor([[0], [0]]))
+    root = next(iter(shards.values())).root
+    return StoreBackedSamplingCoordinator.from_partition_dir(root)
 
 
 def test_loader_routes_node_neighbor_sampler_through_plan_execution():

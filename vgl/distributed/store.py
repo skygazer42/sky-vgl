@@ -1,10 +1,12 @@
 from collections.abc import Mapping
+from pathlib import Path
 from typing import Protocol
 
 import torch
 
+from vgl.distributed.partition import PartitionManifest, PartitionShard, load_partition_manifest
 from vgl.sparse import SparseLayout, SparseTensor
-from vgl.storage import FeatureStore, GraphStore
+from vgl.storage import FeatureStore, GraphStore, InMemoryGraphStore, InMemoryTensorStore
 from vgl.storage.base import TensorSlice
 from vgl.storage.feature_store import FeatureKey
 from vgl.storage.graph_store import EdgeType
@@ -355,6 +357,137 @@ class PartitionedGraphStore:
         )
 
 
+def _partition_payload(root, partition: PartitionShard) -> dict:
+    if partition.path is None:
+        raise ValueError(f"partition {partition.partition_id} does not declare a payload path")
+    return torch.load(Path(root) / partition.path, weights_only=True)
+
+
+def _node_ids_by_type(payload: dict, partition: PartitionShard) -> dict[str, torch.Tensor]:
+    graph_payload = payload["graph"]
+    node_payloads = {
+        str(node_type): dict(node_data)
+        for node_type, node_data in graph_payload["nodes"].items()
+    }
+    raw_node_ids = payload.get("node_ids")
+    node_ids_by_type = {}
+    if isinstance(raw_node_ids, dict):
+        node_ids_by_type = {
+            str(node_type): torch.as_tensor(node_ids, dtype=torch.long)
+            for node_type, node_ids in raw_node_ids.items()
+        }
+    elif raw_node_ids is not None and len(node_payloads) == 1:
+        only_node_type = next(iter(node_payloads))
+        node_ids_by_type[only_node_type] = torch.as_tensor(raw_node_ids, dtype=torch.long)
+
+    for node_type, node_data in node_payloads.items():
+        if node_type in node_ids_by_type:
+            continue
+        node_ids = node_data.get("n_id")
+        if node_ids is None:
+            start, end = partition.node_range_for(node_type)
+            node_ids = torch.arange(start, end, dtype=torch.long)
+        node_ids_by_type[node_type] = torch.as_tensor(node_ids, dtype=torch.long)
+    return node_ids_by_type
+
+
+def _boundary_edge_data_by_type(payload: dict, edge_types) -> dict[EdgeType, dict]:
+    raw_boundary_edges = payload.get("boundary_edges", {})
+    boundary_edge_data_by_type = {}
+    for edge_type in edge_types:
+        edge_type = tuple(edge_type)
+        raw_edge_data = raw_boundary_edges.get(edge_type)
+        if raw_edge_data is None:
+            raw_edge_data = {
+                "edge_index": torch.empty((2, 0), dtype=torch.long),
+                "e_id": torch.empty((0,), dtype=torch.long),
+            }
+        boundary_edge_data_by_type[edge_type] = {
+            key: value.clone() if isinstance(value, torch.Tensor) else value
+            for key, value in dict(raw_edge_data).items()
+        }
+        boundary_edge_data_by_type[edge_type].setdefault(
+            "edge_index",
+            torch.empty((2, 0), dtype=torch.long),
+        )
+        boundary_edge_data_by_type[edge_type].setdefault(
+            "e_id",
+            torch.empty((0,), dtype=torch.long),
+        )
+    return boundary_edge_data_by_type
+
+
+def _feature_store_adapter_from_payload(payload: dict) -> LocalFeatureStoreAdapter:
+    graph_payload = payload["graph"]
+    node_payloads = {
+        str(node_type): dict(node_data)
+        for node_type, node_data in graph_payload["nodes"].items()
+    }
+    edge_payloads = {
+        tuple(edge_type): dict(edge_data)
+        for edge_type, edge_data in graph_payload["edges"].items()
+    }
+    edge_types = tuple(edge_payloads)
+    feature_store = FeatureStore(
+        {
+            **{
+                ("node", node_type, name): InMemoryTensorStore(value)
+                for node_type, node_data in node_payloads.items()
+                for name, value in node_data.items()
+                if isinstance(value, torch.Tensor)
+            },
+            **{
+                ("edge", edge_type, name): InMemoryTensorStore(value)
+                for edge_type, edge_data in edge_payloads.items()
+                for name, value in edge_data.items()
+                if name != "edge_index" and isinstance(value, torch.Tensor)
+            },
+        }
+    )
+    return LocalFeatureStoreAdapter(
+        feature_store,
+        boundary_edge_data_by_type=_boundary_edge_data_by_type(payload, edge_types),
+    )
+
+
+def _graph_store_adapter_from_payload(payload: dict, partition: PartitionShard) -> LocalGraphStoreAdapter:
+    graph_payload = payload["graph"]
+    edge_payloads = {
+        tuple(edge_type): dict(edge_data)
+        for edge_type, edge_data in graph_payload["edges"].items()
+    }
+    node_ids_by_type = _node_ids_by_type(payload, partition)
+    graph_store = InMemoryGraphStore(
+        edges={
+            edge_type: torch.as_tensor(edge_payload["edge_index"], dtype=torch.long)
+            for edge_type, edge_payload in edge_payloads.items()
+        },
+        num_nodes={
+            node_type: int(node_ids.numel())
+            for node_type, node_ids in node_ids_by_type.items()
+        },
+    )
+    return LocalGraphStoreAdapter(
+        graph_store,
+        boundary_edge_index_by_type={
+            edge_type: boundary_edge_data["edge_index"]
+            for edge_type, boundary_edge_data in _boundary_edge_data_by_type(payload, tuple(edge_payloads)).items()
+        },
+    )
+
+
+def load_partitioned_stores(root) -> tuple[PartitionManifest, PartitionedFeatureStore, PartitionedGraphStore]:
+    root = Path(root)
+    manifest = load_partition_manifest(root / "manifest.json")
+    feature_stores = {}
+    graph_stores = {}
+    for partition in manifest.partitions:
+        payload = _partition_payload(root, partition)
+        feature_stores[partition.partition_id] = _feature_store_adapter_from_payload(payload)
+        graph_stores[partition.partition_id] = _graph_store_adapter_from_payload(payload, partition)
+    return manifest, PartitionedFeatureStore(feature_stores), PartitionedGraphStore(graph_stores)
+
+
 __all__ = [
     "DistributedFeatureStore",
     "DistributedGraphStore",
@@ -362,4 +495,5 @@ __all__ = [
     "LocalGraphStoreAdapter",
     "PartitionedFeatureStore",
     "PartitionedGraphStore",
+    "load_partitioned_stores",
 ]

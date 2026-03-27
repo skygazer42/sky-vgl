@@ -104,6 +104,28 @@ def test_store_backed_sampling_coordinator_routes_seeds_and_fetches_features(tmp
     assert torch.equal(fetched.values, torch.tensor([[6.0, 7.0], [0.0, 1.0], [4.0, 5.0]]))
 
 
+def test_store_backed_sampling_coordinator_can_load_directly_from_partition_directory(tmp_path):
+    graph = Graph.homo(
+        edge_index=torch.tensor([[0, 1, 2, 3], [1, 2, 3, 0]]),
+        x=torch.arange(8, dtype=torch.float32).view(4, 2),
+        edge_data={"weight": torch.tensor([1.0, 2.0, 3.0, 4.0])},
+    )
+    write_partitioned_graph(graph, tmp_path, num_partitions=2)
+    coordinator = StoreBackedSamplingCoordinator.from_partition_dir(tmp_path)
+    node_ids = torch.tensor([3, 0, 2])
+    edge_ids = torch.tensor([1, 3])
+
+    node_routes = coordinator.route_node_ids(node_ids)
+    edge_features = coordinator.fetch_edge_features(("edge", ("node", "to", "node"), "weight"), edge_ids)
+
+    assert coordinator.partition_ids() == (0, 1)
+    assert len(node_routes) == 2
+    assert torch.equal(node_routes[0].global_ids, torch.tensor([0]))
+    assert torch.equal(node_routes[1].global_ids, torch.tensor([3, 2]))
+    assert torch.equal(edge_features.index, edge_ids)
+    assert torch.equal(edge_features.values, torch.tensor([2.0, 4.0]))
+
+
 def test_local_sampling_coordinator_exposes_partition_graph_queries(tmp_path):
     graph = Graph.homo(
         edge_index=torch.tensor([[0, 1, 2, 3], [1, 2, 3, 0]]),

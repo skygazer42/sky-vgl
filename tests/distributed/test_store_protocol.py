@@ -1,11 +1,14 @@
 import torch
 
+from vgl import Graph
 from vgl.distributed.store import (
     LocalFeatureStoreAdapter,
     LocalGraphStoreAdapter,
     PartitionedFeatureStore,
     PartitionedGraphStore,
+    load_partitioned_stores,
 )
+from vgl.distributed.writer import write_partitioned_graph
 from vgl.storage import FeatureStore, InMemoryGraphStore, InMemoryTensorStore
 
 
@@ -100,3 +103,29 @@ def test_partitioned_graph_store_dispatches_local_and_boundary_edge_queries():
     assert torch.equal(store.boundary_edge_index(partition_id=0), torch.tensor([[1], [2]]))
     assert store.edge_count(partition_id=1) == 1
     assert adjacency.shape == (2, 2)
+
+
+def test_load_partitioned_stores_builds_partition_aware_stores_from_partition_directory(tmp_path):
+    edge_type = ("node", "to", "node")
+    weight_key = ("edge", edge_type, "weight")
+    graph = Graph.homo(
+        edge_index=torch.tensor([[0, 1, 2, 3], [1, 2, 3, 0]]),
+        x=torch.arange(8, dtype=torch.float32).view(4, 2),
+        edge_data={"weight": torch.tensor([1.0, 2.0, 3.0, 4.0])},
+    )
+    write_partitioned_graph(graph, tmp_path, num_partitions=2)
+
+    manifest, feature_store, graph_store = load_partitioned_stores(tmp_path)
+
+    fetched_node = feature_store.fetch(NODE_KEY, torch.tensor([1, 0]), partition_id=1)
+    fetched_boundary = feature_store.fetch_boundary(weight_key, torch.tensor([1, 3]), partition_id=0)
+    local_edge_index = graph_store.edge_index(partition_id=1)
+    boundary_edge_index = graph_store.boundary_edge_index(partition_id=0)
+
+    assert manifest.num_partitions == 2
+    assert torch.equal(fetched_node.index, torch.tensor([1, 0]))
+    assert torch.equal(fetched_node.values, torch.tensor([[6.0, 7.0], [4.0, 5.0]]))
+    assert torch.equal(fetched_boundary.index, torch.tensor([1, 3]))
+    assert torch.equal(fetched_boundary.values, torch.tensor([2.0, 4.0]))
+    assert torch.equal(local_edge_index, torch.tensor([[0], [1]]))
+    assert torch.equal(boundary_edge_index, torch.tensor([[1, 3], [2, 0]]))

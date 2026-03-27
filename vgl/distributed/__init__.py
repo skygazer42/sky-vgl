@@ -13,6 +13,7 @@ from vgl.distributed.store import LocalFeatureStoreAdapter as LocalFeatureStoreA
 from vgl.distributed.store import LocalGraphStoreAdapter as LocalGraphStoreAdapter
 from vgl.distributed.store import PartitionedFeatureStore as PartitionedFeatureStore
 from vgl.distributed.store import PartitionedGraphStore as PartitionedGraphStore
+from vgl.distributed.store import load_partitioned_stores as load_partitioned_stores
 from vgl.distributed.writer import write_partitioned_graph as write_partitioned_graph
 
 __all__ = [
@@ -29,6 +30,7 @@ __all__ = [
     "SamplingCoordinator",
     "ShardRoute",
     "StoreBackedSamplingCoordinator",
+    "load_partitioned_stores",
     "load_partition_manifest",
     "save_partition_manifest",
     "write_partitioned_graph",
