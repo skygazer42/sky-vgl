@@ -1,6 +1,7 @@
 import torch
 
 from vgl import Graph
+import vgl.distributed.store as distributed_store_module
 from vgl.distributed.coordinator import LocalSamplingCoordinator, StoreBackedSamplingCoordinator
 from vgl.distributed.shard import LocalGraphShard
 from vgl.distributed.store import (
@@ -124,6 +125,37 @@ def test_store_backed_sampling_coordinator_can_load_directly_from_partition_dire
     assert torch.equal(node_routes[1].global_ids, torch.tensor([3, 2]))
     assert torch.equal(edge_features.index, edge_ids)
     assert torch.equal(edge_features.values, torch.tensor([2.0, 4.0]))
+
+
+def test_store_backed_sampling_coordinator_from_partition_dir_is_lazy_until_store_access(monkeypatch, tmp_path):
+    graph = Graph.homo(
+        edge_index=torch.tensor([[0, 1, 2, 3], [1, 2, 3, 0]]),
+        x=torch.arange(8, dtype=torch.float32).view(4, 2),
+        edge_data={"weight": torch.tensor([1.0, 2.0, 3.0, 4.0])},
+    )
+    write_partitioned_graph(graph, tmp_path, num_partitions=2)
+
+    load_calls = []
+    real_torch_load = distributed_store_module.torch.load
+
+    def counting_load(path, *args, **kwargs):
+        load_calls.append(str(path))
+        return real_torch_load(path, *args, **kwargs)
+
+    monkeypatch.setattr(distributed_store_module.torch, "load", counting_load)
+
+    coordinator = StoreBackedSamplingCoordinator.from_partition_dir(tmp_path)
+
+    assert load_calls == []
+
+    routes = coordinator.route_node_ids(torch.tensor([3, 0, 2]))
+    assert len(routes) == 2
+    assert load_calls == []
+
+    fetched = coordinator.fetch_node_features(NODE_KEY, torch.tensor([3, 2]))
+    assert torch.equal(fetched.values, torch.tensor([[6.0, 7.0], [4.0, 5.0]]))
+    assert len(load_calls) == 1
+    assert load_calls[0].endswith("part-1.pt")
 
 
 def test_local_sampling_coordinator_exposes_partition_graph_queries(tmp_path):

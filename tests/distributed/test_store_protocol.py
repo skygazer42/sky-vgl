@@ -1,6 +1,7 @@
 import torch
 
 from vgl import Graph
+import vgl.distributed.store as distributed_store_module
 from vgl.distributed.store import (
     LocalFeatureStoreAdapter,
     LocalGraphStoreAdapter,
@@ -129,3 +130,41 @@ def test_load_partitioned_stores_builds_partition_aware_stores_from_partition_di
     assert torch.equal(fetched_boundary.values, torch.tensor([2.0, 4.0]))
     assert torch.equal(local_edge_index, torch.tensor([[0], [1]]))
     assert torch.equal(boundary_edge_index, torch.tensor([[1, 3], [2, 0]]))
+
+
+def test_load_partitioned_stores_lazily_loads_and_reuses_partition_payloads(monkeypatch, tmp_path):
+    edge_type = ("node", "to", "node")
+    weight_key = ("edge", edge_type, "weight")
+    graph = Graph.homo(
+        edge_index=torch.tensor([[0, 1, 2, 3], [1, 2, 3, 0]]),
+        x=torch.arange(8, dtype=torch.float32).view(4, 2),
+        edge_data={"weight": torch.tensor([1.0, 2.0, 3.0, 4.0])},
+    )
+    write_partitioned_graph(graph, tmp_path, num_partitions=2)
+
+    load_calls = []
+    real_torch_load = distributed_store_module.torch.load
+
+    def counting_load(path, *args, **kwargs):
+        load_calls.append(str(path))
+        return real_torch_load(path, *args, **kwargs)
+
+    monkeypatch.setattr(distributed_store_module.torch, "load", counting_load)
+
+    _, feature_store, graph_store = load_partitioned_stores(tmp_path)
+
+    assert load_calls == []
+    assert graph_store.edge_types == (edge_type,)
+    assert graph_store.num_nodes(partition_id=1) == 2
+    assert load_calls == []
+
+    feature_store.fetch(NODE_KEY, torch.tensor([1, 0]), partition_id=1)
+    assert len(load_calls) == 1
+    assert load_calls[0].endswith("part-1.pt")
+
+    graph_store.edge_index(partition_id=1)
+    assert len(load_calls) == 1
+
+    feature_store.fetch_boundary(weight_key, torch.tensor([1, 3]), partition_id=0)
+    assert len(load_calls) == 2
+    assert load_calls[1].endswith("part-0.pt")

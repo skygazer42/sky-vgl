@@ -1,4 +1,5 @@
 from collections.abc import Mapping
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Protocol
 
@@ -226,6 +227,181 @@ class LocalGraphStoreAdapter:
         partition_id: int | None = None,
     ) -> SparseTensor:
         return self._store.adjacency(edge_type=edge_type, layout=layout)
+
+
+def _partition_edge_types(partition: PartitionShard) -> tuple[EdgeType, ...]:
+    ordered = []
+    seen = set()
+    for mapping in (partition.edge_ids_by_type, partition.boundary_edge_ids_by_type):
+        for edge_type in mapping:
+            edge_type = tuple(edge_type)
+            if edge_type in seen:
+                continue
+            seen.add(edge_type)
+            ordered.append(edge_type)
+    return tuple(ordered)
+
+
+@dataclass(slots=True)
+class _PartitionStoreBundle:
+    feature_store: LocalFeatureStoreAdapter
+    graph_store: LocalGraphStoreAdapter
+
+
+class _PartitionStoreBundleCache:
+    def __init__(self, root: Path, partitions: Mapping[int, PartitionShard]):
+        self._root = Path(root)
+        self._partitions = {int(partition_id): partition for partition_id, partition in dict(partitions).items()}
+        self._bundles: dict[int, _PartitionStoreBundle] = {}
+
+    def _partition(self, partition_id: int) -> PartitionShard:
+        try:
+            return self._partitions[int(partition_id)]
+        except KeyError as exc:
+            raise KeyError(f"missing partition {partition_id}") from exc
+
+    def bundle(self, partition_id: int) -> _PartitionStoreBundle:
+        partition_id = int(partition_id)
+        bundle = self._bundles.get(partition_id)
+        if bundle is not None:
+            return bundle
+
+        partition = self._partition(partition_id)
+        payload = _partition_payload(self._root, partition)
+        bundle = _PartitionStoreBundle(
+            feature_store=_feature_store_adapter_from_payload(payload),
+            graph_store=_graph_store_adapter_from_payload(payload, partition),
+        )
+        self._bundles[partition_id] = bundle
+        return bundle
+
+
+class _LazyPartitionFeatureStoreAdapter:
+    def __init__(self, cache: _PartitionStoreBundleCache, partition_id: int):
+        self._cache = cache
+        self._partition_id = int(partition_id)
+
+    @property
+    def _store(self) -> LocalFeatureStoreAdapter:
+        return self._cache.bundle(self._partition_id).feature_store
+
+    def fetch(
+        self,
+        key: FeatureKey,
+        index: torch.Tensor,
+        *,
+        partition_id: int | None = None,
+    ) -> TensorSlice:
+        return self._store.fetch(key, index, partition_id=self._partition_id if partition_id is None else partition_id)
+
+    def fetch_boundary(
+        self,
+        key: FeatureKey,
+        index: torch.Tensor,
+        *,
+        partition_id: int | None = None,
+    ) -> TensorSlice:
+        return self._store.fetch_boundary(
+            key,
+            index,
+            partition_id=self._partition_id if partition_id is None else partition_id,
+        )
+
+    def shape(
+        self,
+        key: FeatureKey,
+        *,
+        partition_id: int | None = None,
+    ) -> tuple[int, ...]:
+        return self._store.shape(key, partition_id=self._partition_id if partition_id is None else partition_id)
+
+
+class _LazyPartitionGraphStoreAdapter:
+    def __init__(self, cache: _PartitionStoreBundleCache, partition: PartitionShard):
+        self._cache = cache
+        self._partition_id = int(partition.partition_id)
+        self._edge_types = _partition_edge_types(partition)
+        self._edge_ids_by_type = {
+            tuple(edge_type): tuple(int(edge_id) for edge_id in edge_ids)
+            for edge_type, edge_ids in partition.edge_ids_by_type.items()
+        }
+        self._num_nodes_by_type = {
+            str(node_type): int(end) - int(start)
+            for node_type, (start, end) in partition.node_ranges.items()
+        }
+
+    @property
+    def _store(self) -> LocalGraphStoreAdapter:
+        return self._cache.bundle(self._partition_id).graph_store
+
+    def _resolve_edge_type(self, edge_type: EdgeType | None) -> EdgeType:
+        if edge_type is not None:
+            return tuple(edge_type)
+        default_edge_type = ("node", "to", "node")
+        if default_edge_type in self._edge_types:
+            return default_edge_type
+        if len(self._edge_types) == 1:
+            return self._edge_types[0]
+        raise KeyError("edge_type is required when multiple edge types exist")
+
+    @property
+    def edge_types(self) -> tuple[EdgeType, ...]:
+        return self._edge_types
+
+    def num_nodes(
+        self,
+        node_type: str = "node",
+        *,
+        partition_id: int | None = None,
+    ) -> int:
+        try:
+            return self._num_nodes_by_type[str(node_type)]
+        except KeyError as exc:
+            raise KeyError(node_type) from exc
+
+    def edge_index(
+        self,
+        edge_type: EdgeType | None = None,
+        *,
+        partition_id: int | None = None,
+    ) -> torch.Tensor:
+        return self._store.edge_index(
+            edge_type,
+            partition_id=self._partition_id if partition_id is None else partition_id,
+        )
+
+    def edge_count(
+        self,
+        edge_type: EdgeType | None = None,
+        *,
+        partition_id: int | None = None,
+    ) -> int:
+        resolved = self._resolve_edge_type(edge_type)
+        return len(self._edge_ids_by_type.get(resolved, ()))
+
+    def boundary_edge_index(
+        self,
+        edge_type: EdgeType | None = None,
+        *,
+        partition_id: int | None = None,
+    ) -> torch.Tensor:
+        return self._store.boundary_edge_index(
+            edge_type,
+            partition_id=self._partition_id if partition_id is None else partition_id,
+        )
+
+    def adjacency(
+        self,
+        *,
+        edge_type: EdgeType | None = None,
+        layout: SparseLayout | str = SparseLayout.COO,
+        partition_id: int | None = None,
+    ) -> SparseTensor:
+        return self._store.adjacency(
+            edge_type=edge_type,
+            layout=layout,
+            partition_id=self._partition_id if partition_id is None else partition_id,
+        )
 
 
 class PartitionedFeatureStore:
@@ -479,12 +655,15 @@ def _graph_store_adapter_from_payload(payload: dict, partition: PartitionShard) 
 def load_partitioned_stores(root) -> tuple[PartitionManifest, PartitionedFeatureStore, PartitionedGraphStore]:
     root = Path(root)
     manifest = load_partition_manifest(root / "manifest.json")
+    cache = _PartitionStoreBundleCache(
+        root,
+        {partition.partition_id: partition for partition in manifest.partitions},
+    )
     feature_stores = {}
     graph_stores = {}
     for partition in manifest.partitions:
-        payload = _partition_payload(root, partition)
-        feature_stores[partition.partition_id] = _feature_store_adapter_from_payload(payload)
-        graph_stores[partition.partition_id] = _graph_store_adapter_from_payload(payload, partition)
+        feature_stores[partition.partition_id] = _LazyPartitionFeatureStoreAdapter(cache, partition.partition_id)
+        graph_stores[partition.partition_id] = _LazyPartitionGraphStoreAdapter(cache, partition)
     return manifest, PartitionedFeatureStore(feature_stores), PartitionedGraphStore(graph_stores)
 
 
