@@ -4,6 +4,8 @@ import sys
 from datetime import datetime
 from pathlib import Path
 
+from vgl._optional import import_optional
+
 
 class Logger:
     def on_fit_start(self, run_info):
@@ -129,13 +131,12 @@ def _filter_record(record, *, metric_names, include_context, show_learning_rate)
 
 
 def _tensorboard_summary_writer_class():
-    try:
-        from torch.utils.tensorboard import SummaryWriter
-    except Exception as exc:
-        raise ImportError(
-            "TensorBoardLogger requires tensorboard support. Install the 'tensorboard' package."
-        ) from exc
-    return SummaryWriter
+    return import_optional(
+        "torch.utils.tensorboard",
+        package_name="tensorboard",
+        extra_name="tensorboard",
+        feature_name="TensorBoardLogger",
+    ).SummaryWriter
 
 
 def _tensorboard_metric_name(metric_name, *, stage):

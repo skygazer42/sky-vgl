@@ -1,3 +1,4 @@
+from vgl._optional import import_optional
 from vgl.graph import Graph
 
 
@@ -16,7 +17,12 @@ def from_pyg(data):
 
 
 def to_pyg(graph):
-    from torch_geometric.data import Data  # type: ignore[import-not-found]
+    Data = import_optional(
+        "torch_geometric.data",
+        package_name="torch-geometric",
+        extra_name="pyg",
+        feature_name="PyG interoperability",
+    ).Data
 
     kwargs = {
         "x": graph.x,

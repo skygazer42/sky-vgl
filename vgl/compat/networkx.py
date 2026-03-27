@@ -1,5 +1,6 @@
 import torch
 
+from vgl._optional import import_optional
 from vgl.graph import Graph
 
 
@@ -70,7 +71,11 @@ def from_networkx(nx_graph):
 
 
 def to_networkx(graph: Graph):
-    import networkx as nx  # type: ignore[import-not-found]
+    nx = import_optional(
+        "networkx",
+        extra_name="networkx",
+        feature_name="NetworkX interoperability",
+    )
 
     _ensure_homo_graph(graph)
     nx_graph = nx.MultiDiGraph()

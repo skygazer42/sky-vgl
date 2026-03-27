@@ -7,7 +7,7 @@
 </p>
 
 <p align="center">
-  <a href="https://www.python.org/downloads/"><img src="https://img.shields.io/badge/python-%E2%89%A53.11-blue?style=flat-square&logo=python&logoColor=white" alt="Python 3.11+"/></a>
+  <a href="https://www.python.org/downloads/"><img src="https://img.shields.io/badge/python-%E2%89%A53.10-blue?style=flat-square&logo=python&logoColor=white" alt="Python 3.10+"/></a>
   <a href="https://pytorch.org/"><img src="https://img.shields.io/badge/PyTorch-%E2%89%A52.4-ee4c2c?style=flat-square&logo=pytorch&logoColor=white" alt="PyTorch 2.4+"/></a>
   <img src="https://img.shields.io/badge/version-0.1.0-8b5cf6?style=flat-square" alt="Version 0.1.0"/>
   <img src="https://img.shields.io/badge/license-see%20LICENSE-green?style=flat-square" alt="License"/>
@@ -355,13 +355,32 @@ For typed heterogeneous temporal graphs, pass `edge_type=` on each `TemporalEven
 
 ### Requirements
 
-- Python ≥ 3.11
+- Python ≥ 3.10
 - PyTorch ≥ 2.4
+
+### From PyPI
+
+```bash
+pip install vgl
+```
+
+### Optional Extras
+
+```bash
+pip install "vgl[scipy]"
+pip install "vgl[networkx]"
+pip install "vgl[tensorboard]"
+pip install "vgl[dgl]"
+pip install "vgl[pyg]"
+pip install "vgl[full]"
+```
+
+Use extras when you need optional sparse export, interoperability, or logging integrations.
 
 ### From Source
 
 ```bash
-git clone https://github.com/<your-org>/VGL.git
+git clone https://github.com/skygazer42/VGL.git
 cd VGL
 pip install -e .
 ```
@@ -369,7 +388,7 @@ pip install -e .
 ### With Development Dependencies
 
 ```bash
-pip install -e ".[dev]"    # adds pytest, ruff, mypy
+pip install -e ".[dev,networkx,scipy,tensorboard]"    # adds test/lint/type tools plus common test extras
 ```
 
 Simple homogeneous graphs stay on DGL's lightweight `dgl.graph(...)` path. Typed or temporal VGL graphs export through `dgl.heterograph(...)` so canonical edge types survive, and temporal round-trips preserve `Graph.schema.time_attr` through the adapter-owned `vgl_time_attr` graph attribute. Relation-local VGL `Block` objects now also round-trip through dedicated single-relation DGL block helpers.
@@ -535,6 +554,7 @@ VGL/
 - [Quickstart Guide](docs/quickstart.md)
 - [Core Concepts](docs/core-concepts.md)
 - [Migration Guide](docs/migration-guide.md)
+- [Releasing Guide](docs/releasing.md)
 
 ---
 

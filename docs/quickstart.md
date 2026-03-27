@@ -2,6 +2,8 @@
 
 `vgl` is a PyTorch-first graph learning package with one core `Graph` abstraction.
 
+Install the core package with `pip install vgl`. Add extras such as `pip install "vgl[networkx]"`, `pip install "vgl[scipy]"`, `pip install "vgl[tensorboard]"`, `pip install "vgl[dgl]"`, `pip install "vgl[pyg]"`, or `pip install "vgl[full]"` when you need those optional integrations. Public releases target Python 3.10+.
+
 Preferred imports follow the domain layout:
 
 ```python

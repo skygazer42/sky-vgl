@@ -1,5 +1,6 @@
 import torch
 
+from vgl._optional import import_optional
 from vgl.graph import Block, Graph, HeteroBlock
 
 
@@ -206,7 +207,11 @@ def _normalized_public_ids(data, *, preferred_key, fallback_key, count: int | No
 
 
 def _graph_node_data_from_dgl(dgl_graph, node_type=None):
-    import dgl  # type: ignore[import-not-found]
+    dgl = import_optional(
+        "dgl",
+        extra_name="dgl",
+        feature_name="DGL interoperability",
+    )
 
     node_data = _node_data_from_dgl(dgl_graph, node_type)
     count = _graph_num_nodes(dgl_graph, node_type)
@@ -229,7 +234,11 @@ def _graph_node_data_from_dgl(dgl_graph, node_type=None):
 
 
 def _graph_edge_data_from_dgl(dgl_graph, edge_type=None):
-    import dgl  # type: ignore[import-not-found]
+    dgl = import_optional(
+        "dgl",
+        extra_name="dgl",
+        feature_name="DGL interoperability",
+    )
 
     edge_data = _edge_data_from_dgl(dgl_graph, edge_type)
     _normalized_public_ids(
@@ -242,7 +251,11 @@ def _graph_edge_data_from_dgl(dgl_graph, edge_type=None):
 
 
 def block_from_dgl(dgl_block):
-    import dgl  # type: ignore[import-not-found]
+    dgl = import_optional(
+        "dgl",
+        extra_name="dgl",
+        feature_name="DGL interoperability",
+    )
 
     if not _is_dgl_block(dgl_block):
         raise ValueError("block_from_dgl expects a DGL block")
@@ -306,7 +319,11 @@ def block_from_dgl(dgl_block):
 
 
 def block_to_dgl(block):
-    import dgl  # type: ignore[import-not-found]
+    dgl = import_optional(
+        "dgl",
+        extra_name="dgl",
+        feature_name="DGL interoperability",
+    )
 
     dgl_block = dgl.create_block(
         {block.edge_type: tuple(block.edge_index)},
@@ -332,7 +349,11 @@ def block_to_dgl(block):
 
 
 def hetero_block_from_dgl(dgl_block):
-    import dgl  # type: ignore[import-not-found]
+    dgl = import_optional(
+        "dgl",
+        extra_name="dgl",
+        feature_name="DGL interoperability",
+    )
 
     if not _is_dgl_block(dgl_block):
         raise ValueError("hetero_block_from_dgl expects a DGL block")
@@ -401,7 +422,11 @@ def hetero_block_from_dgl(dgl_block):
 
 
 def hetero_block_to_dgl(block):
-    import dgl  # type: ignore[import-not-found]
+    dgl = import_optional(
+        "dgl",
+        extra_name="dgl",
+        feature_name="DGL interoperability",
+    )
 
     dgl_block = dgl.create_block(
         {edge_type: tuple(block.edge_index(edge_type)) for edge_type in block.edge_types},
@@ -456,7 +481,11 @@ def from_dgl(dgl_graph):
 
 
 def to_dgl(graph):
-    import dgl  # type: ignore[import-not-found]
+    dgl = import_optional(
+        "dgl",
+        extra_name="dgl",
+        feature_name="DGL interoperability",
+    )
 
     if _use_homo_export(graph):
         row, col = graph.edge_index

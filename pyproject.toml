@@ -4,20 +4,104 @@ build-backend = "hatchling.build"
 
 [project]
 name = "vgl"
-version = "0.1.0"
+dynamic = ["version"]
 description = "Unified graph learning framework with PyTorch"
 readme = "README.md"
-requires-python = ">=3.11"
+license = { file = "LICENSE" }
+authors = [
+  { name = "jhlu", email = "jhlu@kingdonsoft.com" },
+]
+maintainers = [
+  { name = "jhlu", email = "jhlu@kingdonsoft.com" },
+]
+keywords = [
+  "graph learning",
+  "graph neural networks",
+  "gnn",
+  "pytorch",
+  "heterogeneous graphs",
+  "temporal graphs",
+]
+classifiers = [
+  "Development Status :: 3 - Alpha",
+  "Intended Audience :: Developers",
+  "Intended Audience :: Science/Research",
+  "License :: OSI Approved :: MIT License",
+  "Programming Language :: Python :: 3",
+  "Programming Language :: Python :: 3.10",
+  "Programming Language :: Python :: 3.11",
+  "Programming Language :: Python :: 3.12",
+  "Topic :: Scientific/Engineering :: Artificial Intelligence",
+  "Topic :: Software Development :: Libraries :: Python Modules",
+]
+requires-python = ">=3.10"
 dependencies = [
   "torch>=2.4",
   "typing_extensions>=4.12",
 ]
 
+[project.urls]
+Homepage = "https://github.com/skygazer42/VGL"
+Repository = "https://github.com/skygazer42/VGL"
+Documentation = "https://github.com/skygazer42/VGL#readme"
+Issues = "https://github.com/skygazer42/VGL/issues"
+Changelog = "https://github.com/skygazer42/VGL/releases"
+
 [project.optional-dependencies]
 dev = [
+  "build>=1.2",
+  "twine>=5.1",
   "pytest>=8.3",
   "ruff>=0.6",
   "mypy>=1.11",
+]
+scipy = [
+  "scipy>=1.11",
+]
+networkx = [
+  "networkx>=3.2",
+]
+tensorboard = [
+  "tensorboard>=2.14",
+]
+dgl = [
+  "dgl>=2.1",
+]
+pyg = [
+  "torch-geometric>=2.5",
+]
+full = [
+  "scipy>=1.11",
+  "networkx>=3.2",
+  "tensorboard>=2.14",
+  "dgl>=2.1",
+  "torch-geometric>=2.5",
+]
+
+[tool.hatch.version]
+path = "vgl/version.py"
+
+[tool.hatch.build.targets.wheel]
+packages = ["vgl"]
+
+[tool.hatch.build.targets.sdist]
+include = [
+  "/pyproject.toml",
+  "/README.md",
+  "/LICENSE",
+  "/vgl",
+  "/examples",
+  "/docs/core-concepts.md",
+  "/docs/quickstart.md",
+  "/docs/migration-guide.md",
+  "/docs/releasing.md",
+  "/.github/workflows/ci.yml",
+  "/.github/workflows/publish.yml",
+]
+exclude = [
+  "/.factory",
+  "/docs/plans",
+  "/**/__pycache__",
 ]
 
 [tool.pytest.ini_options]

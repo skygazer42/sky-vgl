@@ -1,5 +1,6 @@
 import torch
 
+from vgl._optional import import_optional
 from vgl.graph.graph import Graph
 from vgl.graph.stores import EdgeStore, NodeStore
 
@@ -590,10 +591,15 @@ def adj_external(
         indices = torch.stack((row, col))
         return torch.sparse_coo_tensor(indices, values, size=shape)
 
-    import scipy.sparse
+    scipy_sparse = import_optional(
+        "scipy.sparse",
+        package_name="scipy",
+        extra_name="scipy",
+        feature_name="SciPy sparse export",
+    )
 
     if scipy_fmt == "coo":
-        return scipy.sparse.coo_matrix(
+        return scipy_sparse.coo_matrix(
             (values.cpu().numpy(), (row.cpu().numpy(), col.cpu().numpy())),
             shape=shape,
         )
@@ -604,7 +610,7 @@ def adj_external(
             values,
             major_size=shape[0],
         )
-        return scipy.sparse.csr_matrix(
+        return scipy_sparse.csr_matrix(
             (
                 compressed_values.cpu().numpy(),
                 col_indices.cpu().numpy(),
