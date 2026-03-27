@@ -2,6 +2,7 @@ from dataclasses import dataclass
 
 import torch
 
+from vgl._memory import pin_tensor
 from vgl.graph.graph import Graph
 
 
@@ -20,7 +21,7 @@ def _transfer_tensor_dict(values: dict[str, torch.Tensor], *, device=None, dtype
 
 
 def _pin_tensor_dict(values: dict[str, torch.Tensor]):
-    return {key: value.pin_memory() for key, value in values.items()}
+    return {key: pin_tensor(value) for key, value in values.items()}
 
 
 @dataclass(slots=True)
@@ -83,8 +84,8 @@ class Block:
             edge_type=self.edge_type,
             src_type=self.src_type,
             dst_type=self.dst_type,
-            src_n_id=self.src_n_id.pin_memory(),
-            dst_n_id=self.dst_n_id.pin_memory(),
+            src_n_id=pin_tensor(self.src_n_id),
+            dst_n_id=pin_tensor(self.dst_n_id),
             src_store_type=self.src_store_type,
             dst_store_type=self.dst_store_type,
         )

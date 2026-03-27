@@ -4,7 +4,6 @@ from vgl.storage.feature_store import FeatureStore as FeatureStore
 from vgl.storage.graph_store import GraphStore as GraphStore
 from vgl.storage.graph_store import InMemoryGraphStore as InMemoryGraphStore
 from vgl.storage.memory import InMemoryTensorStore as InMemoryTensorStore
-from vgl.storage.mmap import MmapTensorStore as MmapTensorStore
 
 __all__ = [
     "TensorSlice",
@@ -15,3 +14,11 @@ __all__ = [
     "GraphStore",
     "InMemoryGraphStore",
 ]
+
+
+def __getattr__(name: str):
+    if name == "MmapTensorStore":
+        from vgl.storage.mmap import MmapTensorStore
+
+        return MmapTensorStore
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")

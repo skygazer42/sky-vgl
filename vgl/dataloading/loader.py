@@ -3,6 +3,7 @@ from dataclasses import FrozenInstanceError, fields, is_dataclass
 
 import torch
 
+from vgl._memory import pin_tensor
 from vgl.dataloading.executor import PlanExecutor
 from vgl.dataloading.materialize import materialize_batch, materialize_context
 from vgl.dataloading.plan import SamplingPlan
@@ -125,7 +126,7 @@ class Loader:
 
     def _pin_memory_value(self, value):
         if isinstance(value, torch.Tensor):
-            return value.pin_memory()
+            return pin_tensor(value)
         if isinstance(value, list):
             return [self._pin_memory_value(item) for item in value]
         if isinstance(value, tuple):

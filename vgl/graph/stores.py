@@ -3,6 +3,8 @@ from dataclasses import dataclass, field
 
 import torch
 
+from vgl._memory import pin_tensor
+
 
 def _transfer_data(data: Mapping, *, device=None, dtype=None, non_blocking: bool = False) -> dict:
     transferred = {}
@@ -24,7 +26,7 @@ def _transfer_data(data: Mapping, *, device=None, dtype=None, non_blocking: bool
 
 def _pin_data(data: Mapping) -> dict:
     return {
-        key: value.pin_memory() if isinstance(value, torch.Tensor) else value
+        key: pin_tensor(value) if isinstance(value, torch.Tensor) else value
         for key, value in data.items()
     }
 

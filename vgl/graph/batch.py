@@ -3,6 +3,7 @@ from typing import TYPE_CHECKING, Hashable, SupportsInt
 
 import torch
 
+from vgl._memory import pin_tensor
 from vgl.graph.block import Block, HeteroBlock
 from vgl.graph.graph import Graph
 from vgl.graph.stores import EdgeStore
@@ -557,16 +558,16 @@ class GraphBatch:
     def pin_memory(self):
         return GraphBatch(
             graphs=[graph.pin_memory() for graph in self.graphs],
-            graph_index=None if self.graph_index is None else self.graph_index.pin_memory(),
-            graph_ptr=None if self.graph_ptr is None else self.graph_ptr.pin_memory(),
-            labels=None if self.labels is None else self.labels.pin_memory(),
+            graph_index=None if self.graph_index is None else pin_tensor(self.graph_index),
+            graph_ptr=None if self.graph_ptr is None else pin_tensor(self.graph_ptr),
+            labels=None if self.labels is None else pin_tensor(self.labels),
             metadata=self.metadata,
             graph_index_by_type=None
             if self.graph_index_by_type is None
-            else {node_type: value.pin_memory() for node_type, value in self.graph_index_by_type.items()},
+            else {node_type: pin_tensor(value) for node_type, value in self.graph_index_by_type.items()},
             graph_ptr_by_type=None
             if self.graph_ptr_by_type is None
-            else {node_type: value.pin_memory() for node_type, value in self.graph_ptr_by_type.items()},
+            else {node_type: pin_tensor(value) for node_type, value in self.graph_ptr_by_type.items()},
         )
 
 
@@ -639,7 +640,7 @@ class NodeBatch:
     def pin_memory(self):
         return NodeBatch(
             graph=self.graph.pin_memory(),
-            seed_index=self.seed_index.pin_memory(),
+            seed_index=pin_tensor(self.seed_index),
             metadata=self.metadata,
             blocks=None if self.blocks is None else [block.pin_memory() for block in self.blocks],
         )
@@ -854,16 +855,16 @@ class LinkPredictionBatch:
     def pin_memory(self):
         return LinkPredictionBatch(
             graph=self.graph.pin_memory(),
-            src_index=self.src_index.pin_memory(),
-            dst_index=self.dst_index.pin_memory(),
-            labels=self.labels.pin_memory(),
+            src_index=pin_tensor(self.src_index),
+            dst_index=pin_tensor(self.dst_index),
+            labels=pin_tensor(self.labels),
             edge_types=self.edge_types,
-            edge_type_index=None if self.edge_type_index is None else self.edge_type_index.pin_memory(),
+            edge_type_index=None if self.edge_type_index is None else pin_tensor(self.edge_type_index),
             edge_type=self.edge_type,
             src_node_type=self.src_node_type,
             dst_node_type=self.dst_node_type,
-            query_index=None if self.query_index is None else self.query_index.pin_memory(),
-            filter_mask=None if self.filter_mask is None else self.filter_mask.pin_memory(),
+            query_index=None if self.query_index is None else pin_tensor(self.query_index),
+            filter_mask=None if self.filter_mask is None else pin_tensor(self.filter_mask),
             metadata=self.metadata,
             blocks=None if self.blocks is None else [block.pin_memory() for block in self.blocks],
         )
@@ -1017,13 +1018,13 @@ class TemporalEventBatch:
     def pin_memory(self):
         return TemporalEventBatch(
             graph=self.graph.pin_memory(),
-            src_index=self.src_index.pin_memory(),
-            dst_index=self.dst_index.pin_memory(),
-            timestamp=self.timestamp.pin_memory(),
-            labels=self.labels.pin_memory(),
-            event_features=None if self.event_features is None else self.event_features.pin_memory(),
+            src_index=pin_tensor(self.src_index),
+            dst_index=pin_tensor(self.dst_index),
+            timestamp=pin_tensor(self.timestamp),
+            labels=pin_tensor(self.labels),
+            event_features=None if self.event_features is None else pin_tensor(self.event_features),
             edge_types=self.edge_types,
-            edge_type_index=None if self.edge_type_index is None else self.edge_type_index.pin_memory(),
+            edge_type_index=None if self.edge_type_index is None else pin_tensor(self.edge_type_index),
             edge_type=self.edge_type,
             src_node_type=self.src_node_type,
             dst_node_type=self.dst_node_type,
