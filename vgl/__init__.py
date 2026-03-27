@@ -59,6 +59,7 @@ from vgl.graph import Graph as Graph
 from vgl.graph import GraphBatch as GraphBatch
 from vgl.graph import GraphSchema as GraphSchema
 from vgl.graph import GraphView as GraphView
+from vgl.graph import HeteroBlock as HeteroBlock
 from vgl.graph import LinkPredictionBatch as LinkPredictionBatch
 from vgl.graph import NodeBatch as NodeBatch
 from vgl.graph import TemporalEventBatch as TemporalEventBatch
@@ -171,6 +172,7 @@ __all__ = [
     "SymmetricCrossEntropyBetaScheduler",
     "GradientAccumulationScheduler",
     "Block",
+    "HeteroBlock",
     "Graph",
     "GraphBatch",
     "GraphSchema",

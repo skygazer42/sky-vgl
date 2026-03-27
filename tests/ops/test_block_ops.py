@@ -2,8 +2,8 @@ import pytest
 import torch
 
 from vgl import Graph
-from vgl.graph import Block, GraphSchema
-from vgl.ops import to_block
+from vgl.graph import Block, GraphSchema, HeteroBlock
+from vgl.ops import to_block, to_hetero_block
 from vgl.storage import FeatureStore, InMemoryGraphStore
 
 
@@ -182,3 +182,125 @@ def test_block_pin_memory_pins_graph_and_metadata():
     assert pinned.srcdata["x"].is_pinned()
     assert pinned.edge_index.is_pinned()
     assert not block.src_n_id.is_pinned()
+
+
+def test_to_hetero_block_builds_multi_relation_block_layer():
+    writes = ("author", "writes", "paper")
+    cites = ("paper", "cites", "paper")
+    graph = Graph.hetero(
+        nodes={
+            "author": {"x": torch.tensor([[10.0], [20.0]])},
+            "paper": {"x": torch.tensor([[1.0], [2.0], [3.0]])},
+        },
+        edges={
+            writes: {
+                "edge_index": torch.tensor([[0, 1, 1], [1, 0, 2]]),
+                "weight": torch.tensor([1.0, 2.0, 3.0]),
+            },
+            cites: {
+                "edge_index": torch.tensor([[0, 1, 2], [2, 2, 0]]),
+                "weight": torch.tensor([5.0, 6.0, 7.0]),
+            },
+        },
+    )
+
+    block = to_hetero_block(graph, {"paper": torch.tensor([0, 2])})
+
+    assert isinstance(block, HeteroBlock)
+    assert block.edge_types == (writes, cites)
+    assert block.src_store_types == {"author": "author", "paper": "paper__src"}
+    assert block.dst_store_types == {"paper": "paper__dst"}
+    assert set(block.graph.nodes) == {"author", "paper__src", "paper__dst"}
+    assert set(block.graph.edges) == {
+        ("author", "writes", "paper__dst"),
+        ("paper__src", "cites", "paper__dst"),
+    }
+    assert torch.equal(block.src_n_id["author"], torch.tensor([1]))
+    assert torch.equal(block.src_n_id["paper"], torch.tensor([0, 2, 1]))
+    assert torch.equal(block.dst_n_id["paper"], torch.tensor([0, 2]))
+    assert torch.equal(block.srcdata("author")["x"], torch.tensor([[20.0]]))
+    assert torch.equal(block.srcdata("paper")["x"], torch.tensor([[1.0], [3.0], [2.0]]))
+    assert torch.equal(block.dstdata("paper")["x"], torch.tensor([[1.0], [3.0]]))
+    assert torch.equal(block.edata(writes)["e_id"], torch.tensor([1, 2]))
+    assert torch.equal(block.edata(writes)["weight"], torch.tensor([2.0, 3.0]))
+    assert torch.equal(block.edge_index(writes), torch.tensor([[0, 0], [0, 1]]))
+    assert torch.equal(block.edata(cites)["e_id"], torch.tensor([0, 1, 2]))
+    assert torch.equal(block.edata(cites)["weight"], torch.tensor([5.0, 6.0, 7.0]))
+    assert torch.equal(block.edge_index(cites), torch.tensor([[0, 2, 1], [1, 1, 0]]))
+
+
+def test_to_hetero_block_respects_relation_subset():
+    writes = ("author", "writes", "paper")
+    cites = ("paper", "cites", "paper")
+    graph = Graph.hetero(
+        nodes={
+            "author": {"x": torch.tensor([[10.0], [20.0]])},
+            "paper": {"x": torch.tensor([[1.0], [2.0], [3.0]])},
+        },
+        edges={
+            writes: {"edge_index": torch.tensor([[0, 1, 1], [1, 0, 2]])},
+            cites: {"edge_index": torch.tensor([[0, 1, 2], [2, 2, 0]])},
+        },
+    )
+
+    block = to_hetero_block(graph, {"paper": torch.tensor([0, 2])}, edge_types=(writes,))
+
+    assert block.edge_types == (writes,)
+    assert block.src_store_types == {"author": "author"}
+    assert block.dst_store_types == {"paper": "paper"}
+    assert set(block.graph.nodes) == {"author", "paper"}
+    assert set(block.graph.edges) == {("author", "writes", "paper")}
+    assert torch.equal(block.src_n_id["author"], torch.tensor([1]))
+    assert torch.equal(block.dst_n_id["paper"], torch.tensor([0, 2]))
+
+
+def test_hetero_block_to_moves_graph_and_metadata():
+    writes = ("author", "writes", "paper")
+    cites = ("paper", "cites", "paper")
+    graph = Graph.hetero(
+        nodes={
+            "author": {"x": torch.tensor([[10.0], [20.0]])},
+            "paper": {"x": torch.tensor([[1.0], [2.0], [3.0]])},
+        },
+        edges={
+            writes: {"edge_index": torch.tensor([[0, 1, 1], [1, 0, 2]])},
+            cites: {"edge_index": torch.tensor([[0, 1, 2], [2, 2, 0]])},
+        },
+    )
+
+    block = to_hetero_block(graph, {"paper": torch.tensor([0, 2])})
+    moved = block.to(device=_transfer_device(), dtype=torch.float64)
+
+    assert moved is not block
+    assert moved.src_n_id["author"].device.type == "meta"
+    assert moved.src_n_id["paper"].device.type == "meta"
+    assert moved.dst_n_id["paper"].device.type == "meta"
+    assert moved.srcdata("paper")["x"].device.type == "meta"
+    assert moved.srcdata("paper")["x"].dtype == torch.float64
+    assert moved.edge_index(cites).device.type == "meta"
+
+
+def test_hetero_block_pin_memory_pins_graph_and_metadata():
+    writes = ("author", "writes", "paper")
+    cites = ("paper", "cites", "paper")
+    graph = Graph.hetero(
+        nodes={
+            "author": {"x": torch.tensor([[10.0], [20.0]])},
+            "paper": {"x": torch.tensor([[1.0], [2.0], [3.0]])},
+        },
+        edges={
+            writes: {"edge_index": torch.tensor([[0, 1, 1], [1, 0, 2]])},
+            cites: {"edge_index": torch.tensor([[0, 1, 2], [2, 2, 0]])},
+        },
+    )
+
+    block = to_hetero_block(graph, {"paper": torch.tensor([0, 2])})
+    pinned = block.pin_memory()
+
+    assert pinned is not block
+    assert pinned.src_n_id["author"].is_pinned()
+    assert pinned.src_n_id["paper"].is_pinned()
+    assert pinned.dst_n_id["paper"].is_pinned()
+    assert pinned.srcdata("paper")["x"].is_pinned()
+    assert pinned.edge_index(cites).is_pinned()
+    assert not block.src_n_id["author"].is_pinned()

@@ -378,6 +378,16 @@ class Graph:
 
         return to_block(self, dst_nodes, edge_type=edge_type, include_dst_in_src=include_dst_in_src)
 
+    def to_hetero_block(self, dst_nodes_by_type, *, edge_types=None, include_dst_in_src: bool = True):
+        from vgl.ops import to_hetero_block
+
+        return to_hetero_block(
+            self,
+            dst_nodes_by_type,
+            edge_types=edge_types,
+            include_dst_in_src=include_dst_in_src,
+        )
+
     def snapshot(self, t):
         if self.schema.time_attr is None:
             raise ValueError("snapshot requires a temporal graph")

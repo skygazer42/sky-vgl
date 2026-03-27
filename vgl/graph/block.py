@@ -12,6 +12,17 @@ def _transfer_tensor(tensor: torch.Tensor, *, device=None, dtype=None, non_block
     return tensor.to(device=device, non_blocking=non_blocking)
 
 
+def _transfer_tensor_dict(values: dict[str, torch.Tensor], *, device=None, dtype=None, non_blocking: bool = False):
+    return {
+        key: _transfer_tensor(value, device=device, dtype=None, non_blocking=non_blocking)
+        for key, value in values.items()
+    }
+
+
+def _pin_tensor_dict(values: dict[str, torch.Tensor]):
+    return {key: value.pin_memory() for key, value in values.items()}
+
+
 @dataclass(slots=True)
 class Block:
     graph: Graph
@@ -76,4 +87,65 @@ class Block:
             dst_n_id=self.dst_n_id.pin_memory(),
             src_store_type=self.src_store_type,
             dst_store_type=self.dst_store_type,
+        )
+
+
+@dataclass(slots=True)
+class HeteroBlock:
+    graph: Graph
+    edge_types: tuple[tuple[str, str, str], ...]
+    src_n_id: dict[str, torch.Tensor]
+    dst_n_id: dict[str, torch.Tensor]
+    src_store_types: dict[str, str]
+    dst_store_types: dict[str, str]
+
+    def block_edge_type(self, edge_type) -> tuple[str, str, str]:
+        edge_type = tuple(edge_type)
+        src_type, rel_type, dst_type = edge_type
+        return (
+            self.src_store_types[src_type],
+            rel_type,
+            self.dst_store_types[dst_type],
+        )
+
+    def srcdata(self, node_type: str):
+        return self.graph.nodes[self.src_store_types[str(node_type)]].data
+
+    def dstdata(self, node_type: str):
+        return self.graph.nodes[self.dst_store_types[str(node_type)]].data
+
+    def edata(self, edge_type):
+        return self.graph.edges[self.block_edge_type(edge_type)].data
+
+    def edge_index(self, edge_type) -> torch.Tensor:
+        return self.graph.edges[self.block_edge_type(edge_type)].edge_index
+
+    def to(self, device=None, dtype=None, non_blocking: bool = False):
+        return HeteroBlock(
+            graph=self.graph.to(device=device, dtype=dtype, non_blocking=non_blocking),
+            edge_types=self.edge_types,
+            src_n_id=_transfer_tensor_dict(
+                self.src_n_id,
+                device=device,
+                dtype=None,
+                non_blocking=non_blocking,
+            ),
+            dst_n_id=_transfer_tensor_dict(
+                self.dst_n_id,
+                device=device,
+                dtype=None,
+                non_blocking=non_blocking,
+            ),
+            src_store_types=dict(self.src_store_types),
+            dst_store_types=dict(self.dst_store_types),
+        )
+
+    def pin_memory(self):
+        return HeteroBlock(
+            graph=self.graph.pin_memory(),
+            edge_types=self.edge_types,
+            src_n_id=_pin_tensor_dict(self.src_n_id),
+            dst_n_id=_pin_tensor_dict(self.dst_n_id),
+            src_store_types=dict(self.src_store_types),
+            dst_store_types=dict(self.dst_store_types),
         )

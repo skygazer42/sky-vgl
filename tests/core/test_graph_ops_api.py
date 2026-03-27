@@ -82,6 +82,29 @@ def test_graph_to_block_bridge_calls_ops_layer():
     assert torch.equal(block.edge_index, torch.tensor([[2, 0, 1], [0, 1, 0]]))
 
 
+def test_graph_to_hetero_block_bridge_calls_ops_layer():
+    writes = ("author", "writes", "paper")
+    cites = ("paper", "cites", "paper")
+    graph = Graph.hetero(
+        nodes={
+            "author": {"x": torch.tensor([[10.0], [20.0]])},
+            "paper": {"x": torch.tensor([[1.0], [2.0], [3.0]])},
+        },
+        edges={
+            writes: {"edge_index": torch.tensor([[0, 1, 1], [1, 0, 2]])},
+            cites: {"edge_index": torch.tensor([[0, 1, 2], [2, 2, 0]])},
+        },
+    )
+
+    block = graph.to_hetero_block({"paper": torch.tensor([0, 2])})
+
+    assert torch.equal(block.dst_n_id["paper"], torch.tensor([0, 2]))
+    assert torch.equal(block.src_n_id["author"], torch.tensor([1]))
+    assert torch.equal(block.src_n_id["paper"], torch.tensor([0, 2, 1]))
+    assert torch.equal(block.edge_index(writes), torch.tensor([[0, 0], [0, 1]]))
+    assert torch.equal(block.edge_index(cites), torch.tensor([[0, 2, 1], [1, 1, 0]]))
+
+
 def test_graph_metapath_random_walk_bridge_calls_ops_layer():
     writes = ("author", "writes", "paper")
     published_in = ("paper", "published_in", "venue")
