@@ -399,10 +399,23 @@ class Graph:
 
         return adj(self, edge_type=edge_type, eweight_name=eweight_name, layout=layout)
 
-    def adj_external(self, transpose: bool = False, *, scipy_fmt: str | None = None, edge_type=None):
+    def adj_external(
+        self,
+        transpose: bool = False,
+        *,
+        scipy_fmt: str | None = None,
+        torch_fmt: str | None = None,
+        edge_type=None,
+    ):
         from vgl.ops import adj_external
 
-        return adj_external(self, transpose=transpose, scipy_fmt=scipy_fmt, edge_type=edge_type)
+        return adj_external(
+            self,
+            transpose=transpose,
+            scipy_fmt=scipy_fmt,
+            torch_fmt=torch_fmt,
+            edge_type=edge_type,
+        )
 
     def adj_tensors(self, layout="coo", *, edge_type=None):
         from vgl.ops import adj_tensors

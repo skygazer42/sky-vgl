@@ -547,6 +547,30 @@ def test_featureless_storage_backed_adj_external_preserves_declared_node_space()
     assert torch.equal(adjacency._indices(), torch.tensor([[0, 1], [1, 0]]))
 
 
+def test_featureless_storage_backed_adj_external_preserves_declared_node_space_for_torch_csr():
+    schema = GraphSchema(
+        node_types=("node",),
+        edge_types=(HOMO_EDGE,),
+        node_features={"node": ()},
+        edge_features={HOMO_EDGE: ("edge_index",)},
+    )
+    graph = Graph.from_storage(
+        schema=schema,
+        feature_store=FeatureStore({}),
+        graph_store=InMemoryGraphStore(
+            {HOMO_EDGE: torch.tensor([[0, 1], [1, 0]])},
+            num_nodes={"node": 4},
+        ),
+    )
+
+    adjacency = graph.adj_external(torch_fmt="csr")
+
+    assert adjacency.layout is torch.sparse_csr
+    assert tuple(adjacency.size()) == (4, 4)
+    assert torch.equal(adjacency.crow_indices(), torch.tensor([0, 1, 2, 2, 2]))
+    assert torch.equal(adjacency.col_indices(), torch.tensor([1, 0]))
+
+
 def test_featureless_storage_backed_graph_formats_preserve_status_model():
     schema = GraphSchema(
         node_types=("node",),

@@ -281,6 +281,20 @@ def test_graph_adj_external_bridge_calls_ops_layer():
     assert torch.equal(adjacency._indices(), torch.tensor([[1, 1, 0], [2, 0, 1]]))
 
 
+def test_graph_adj_external_bridge_supports_torch_format_keyword():
+    graph = Graph.homo(
+        edge_index=torch.tensor([[2, 0, 1], [1, 1, 0]]),
+        x=torch.tensor([[1.0], [2.0], [3.0], [4.0]]),
+    )
+
+    adjacency = graph.adj_external(torch_fmt="csr")
+
+    assert adjacency.layout is torch.sparse_csr
+    assert tuple(adjacency.size()) == (4, 4)
+    assert torch.equal(adjacency.crow_indices(), torch.tensor([0, 1, 2, 3, 3]))
+    assert torch.equal(adjacency.col_indices(), torch.tensor([1, 0, 1]))
+
+
 def test_graph_formats_and_create_formats_bridge_call_ops_layer():
     graph = Graph.homo(
         edge_index=torch.tensor([[0, 1, 1], [1, 0, 2]]),

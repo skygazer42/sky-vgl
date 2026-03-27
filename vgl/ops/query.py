@@ -438,7 +438,16 @@ def adj(graph: Graph, *, edge_type=None, eweight_name: str | None = None, layout
     raise ValueError(f"Unsupported sparse layout: {layout}")
 
 
-def adj_external(graph: Graph, transpose: bool = False, *, scipy_fmt: str | None = None, edge_type=None):
+def adj_external(
+    graph: Graph,
+    transpose: bool = False,
+    *,
+    scipy_fmt: str | None = None,
+    torch_fmt: str | None = None,
+    edge_type=None,
+):
+    from vgl.sparse import SparseLayout, from_edge_index, to_torch_sparse
+
     edge_type = _resolve_edge_type(graph, edge_type)
     store = graph.edges[edge_type]
     ordered, _ = _ordered_edge_tensors(store)
@@ -451,6 +460,19 @@ def adj_external(graph: Graph, transpose: bool = False, *, scipy_fmt: str | None
         shape = (shape[1], shape[0])
 
     values = torch.ones(row.numel(), dtype=torch.float32, device=store.edge_index.device)
+    if scipy_fmt is not None and torch_fmt is not None:
+        raise ValueError("scipy_fmt and torch_fmt cannot both be set")
+    if torch_fmt is not None:
+        if isinstance(torch_fmt, SparseLayout):
+            layout = torch_fmt
+        else:
+            try:
+                layout = SparseLayout(str(torch_fmt).lower())
+            except ValueError as exc:
+                raise ValueError("torch_fmt must be one of None, 'coo', 'csr', or 'csc'") from exc
+        edge_index = torch.stack((row, col))
+        sparse = from_edge_index(edge_index, shape=shape, layout=layout, values=values)
+        return to_torch_sparse(sparse)
     if scipy_fmt is None:
         indices = torch.stack((row, col))
         return torch.sparse_coo_tensor(indices, values, size=shape)

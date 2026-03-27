@@ -681,6 +681,28 @@ def test_adj_external_supports_scipy_coo_and_csr_exports():
     assert list(zip(csr.tocoo().row.tolist(), csr.tocoo().col.tolist(), csr.tocoo().data.tolist())) == [(0, 1, 1.0), (1, 2, 1.0), (1, 0, 1.0)]
 
 
+def test_adj_external_supports_torch_csr_and_csc_exports():
+    graph = Graph.homo(
+        edge_index=torch.tensor([[2, 0, 1], [1, 1, 0]]),
+        x=torch.tensor([[1.0], [2.0], [3.0], [4.0]]),
+    )
+
+    csr = adj_external(graph, torch_fmt="csr")
+    csc = adj_external(graph, torch_fmt="csc", transpose=True)
+
+    assert csr.layout is torch.sparse_csr
+    assert tuple(csr.size()) == (4, 4)
+    assert torch.equal(csr.crow_indices(), torch.tensor([0, 1, 2, 3, 3]))
+    assert torch.equal(csr.col_indices(), torch.tensor([1, 0, 1]))
+    assert torch.equal(csr.values(), torch.tensor([1.0, 1.0, 1.0]))
+
+    assert csc.layout is torch.sparse_csc
+    assert tuple(csc.size()) == (4, 4)
+    assert torch.equal(csc.ccol_indices(), torch.tensor([0, 1, 2, 3, 3]))
+    assert torch.equal(csc.row_indices(), torch.tensor([1, 0, 1]))
+    assert torch.equal(csc.values(), torch.tensor([1.0, 1.0, 1.0]))
+
+
 def test_adj_external_supports_selected_heterogeneous_relation_and_validates_format():
     writes = ("author", "writes", "paper")
     graph = Graph.hetero(
@@ -703,3 +725,34 @@ def test_adj_external_supports_selected_heterogeneous_relation_and_validates_for
 
     with pytest.raises(ValueError):
         adj_external(graph, edge_type=writes, scipy_fmt="csc")
+
+
+def test_adj_external_supports_selected_heterogeneous_relation_with_torch_compressed_export():
+    writes = ("author", "writes", "paper")
+    graph = Graph.hetero(
+        nodes={
+            "author": {"x": torch.tensor([[1.0], [2.0]])},
+            "paper": {"x": torch.tensor([[10.0], [20.0], [30.0]])},
+        },
+        edges={
+            writes: {"edge_index": torch.tensor([[1, 0], [2, 1]])},
+        },
+    )
+
+    csr = adj_external(graph, edge_type=writes, torch_fmt="csr")
+
+    assert csr.layout is torch.sparse_csr
+    assert tuple(csr.size()) == (2, 3)
+    assert torch.equal(csr.crow_indices(), torch.tensor([0, 1, 2]))
+    assert torch.equal(csr.col_indices(), torch.tensor([1, 2]))
+    assert torch.equal(csr.values(), torch.tensor([1.0, 1.0]))
+
+
+def test_adj_external_rejects_combined_torch_and_scipy_format_requests():
+    graph = Graph.homo(
+        edge_index=torch.tensor([[0, 1], [1, 2]]),
+        x=torch.tensor([[1.0], [2.0], [3.0]]),
+    )
+
+    with pytest.raises(ValueError, match="cannot both be set"):
+        adj_external(graph, scipy_fmt="coo", torch_fmt="csr")
