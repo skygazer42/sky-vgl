@@ -1,3 +1,4 @@
+import pytest
 import torch
 
 from vgl import Graph
@@ -73,6 +74,28 @@ def test_store_backed_graph_store_adapter_forwards_graph_queries(tmp_path):
     assert torch.equal(graph_store.edge_index(), torch.tensor([[0, 1], [1, 2]]))
     assert graph_store.edge_count() == 2
     assert adjacency.shape == (3, 3)
+
+
+def test_load_partitioned_stores_require_valid_partition_ids_for_multi_partition_queries(tmp_path):
+    graph = Graph.homo(
+        edge_index=torch.tensor([[0, 1, 2, 3], [1, 2, 3, 0]]),
+        x=torch.arange(8, dtype=torch.float32).view(4, 2),
+    )
+    write_partitioned_graph(graph, tmp_path, num_partitions=2)
+
+    _, feature_store, graph_store = load_partitioned_stores(tmp_path)
+
+    with pytest.raises(ValueError, match="partition_id is required"):
+        feature_store.fetch(NODE_KEY, torch.tensor([0]))
+
+    with pytest.raises(ValueError, match="partition_id is required"):
+        graph_store.edge_index()
+
+    with pytest.raises(KeyError, match="missing feature store for partition 9"):
+        feature_store.fetch(NODE_KEY, torch.tensor([0]), partition_id=9)
+
+    with pytest.raises(KeyError, match="missing graph store for partition 9"):
+        graph_store.edge_index(partition_id=9)
 
 
 def test_partitioned_feature_store_dispatches_partition_specific_fetches():
