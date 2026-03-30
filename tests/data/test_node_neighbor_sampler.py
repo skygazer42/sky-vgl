@@ -427,6 +427,44 @@ def test_node_neighbor_sampler_prefetch_option_aligns_partition_shard_features_t
     assert torch.equal(batch.graph.edata["edge_weight"], torch.tensor([10.0, 20.0]))
 
 
+def test_node_neighbor_sampler_prefetch_option_aligns_partition_shard_features_through_store_backed_coordinator(
+    tmp_path,
+):
+    graph = Graph.homo(
+        edge_index=torch.tensor([[0, 2], [1, 3]]),
+        x=torch.arange(4, dtype=torch.float32).view(4, 1),
+        y=torch.tensor([0, 1, 0, 1]),
+        edge_data={"edge_weight": torch.tensor([10.0, 20.0])},
+    )
+    write_partitioned_graph(graph, tmp_path, num_partitions=2)
+    shards = {
+        0: LocalGraphShard.from_partition_dir(tmp_path, partition_id=0),
+        1: LocalGraphShard.from_partition_dir(tmp_path, partition_id=1),
+    }
+    coordinator = _store_backed_coordinator(shards)
+    loader = Loader(
+        dataset=ListDataset(
+            [
+                (shards[0].graph, {"seed": 0, "sample_id": "part0"}),
+                (shards[1].graph, {"seed": 1, "sample_id": "part1"}),
+            ]
+        ),
+        sampler=NodeNeighborSampler(
+            num_neighbors=[-1],
+            node_feature_names=("x",),
+            edge_feature_names=("edge_weight",),
+        ),
+        batch_size=2,
+        feature_store=coordinator,
+    )
+
+    batch = next(iter(loader))
+
+    assert torch.equal(batch.graph.n_id, torch.tensor([0, 1, 2, 3]))
+    assert torch.equal(batch.graph.x, torch.arange(4, dtype=torch.float32).view(4, 1))
+    assert torch.equal(batch.graph.edata["edge_weight"], torch.tensor([10.0, 20.0]))
+
+
 
 def test_node_neighbor_sampler_stitched_hetero_sampling_crosses_partition_boundaries_through_coordinator(tmp_path):
     graph = Graph.hetero(
