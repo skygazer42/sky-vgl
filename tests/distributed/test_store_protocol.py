@@ -27,6 +27,21 @@ def test_local_feature_store_adapter_forwards_fetch_and_shape():
     assert torch.equal(fetched.values, torch.tensor([[3.0], [1.0]]))
 
 
+def test_store_backed_feature_store_adapter_forwards_fetch_and_shape(tmp_path):
+    graph = Graph.homo(
+        edge_index=torch.tensor([[0, 1], [1, 2]]),
+        x=torch.arange(6, dtype=torch.float32).view(3, 2),
+    )
+    write_partitioned_graph(graph, tmp_path, num_partitions=1)
+
+    _, feature_store, _ = load_partitioned_stores(tmp_path)
+    fetched = feature_store.fetch(NODE_KEY, torch.tensor([2, 0]))
+
+    assert feature_store.shape(NODE_KEY) == (3, 2)
+    assert torch.equal(fetched.index, torch.tensor([2, 0]))
+    assert torch.equal(fetched.values, torch.tensor([[4.0, 5.0], [0.0, 1.0]]))
+
+
 def test_local_graph_store_adapter_forwards_graph_queries():
     backend = InMemoryGraphStore(
         edges={("node", "to", "node"): torch.tensor([[0, 1], [1, 2]])},
