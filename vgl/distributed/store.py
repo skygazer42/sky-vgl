@@ -280,6 +280,16 @@ class _LazyPartitionFeatureStoreAdapter:
         self._partition = partition
         self._partition_id = int(partition.partition_id)
 
+    def _resolve_partition_id(self, partition_id: int | None) -> int:
+        if partition_id is None:
+            return self._partition_id
+        resolved = int(partition_id)
+        if resolved != self._partition_id:
+            raise KeyError(
+                f"partition {resolved} is not available from local partition adapter {self._partition_id}"
+            )
+        return resolved
+
     @property
     def _store(self) -> LocalFeatureStoreAdapter:
         return self._cache.bundle(self._partition_id).feature_store
@@ -291,7 +301,8 @@ class _LazyPartitionFeatureStoreAdapter:
         *,
         partition_id: int | None = None,
     ) -> TensorSlice:
-        return self._store.fetch(key, index, partition_id=self._partition_id if partition_id is None else partition_id)
+        resolved_partition_id = self._resolve_partition_id(partition_id)
+        return self._store.fetch(key, index, partition_id=resolved_partition_id)
 
     def fetch_boundary(
         self,
@@ -300,10 +311,11 @@ class _LazyPartitionFeatureStoreAdapter:
         *,
         partition_id: int | None = None,
     ) -> TensorSlice:
+        resolved_partition_id = self._resolve_partition_id(partition_id)
         return self._store.fetch_boundary(
             key,
             index,
-            partition_id=self._partition_id if partition_id is None else partition_id,
+            partition_id=resolved_partition_id,
         )
 
     def shape(
@@ -312,11 +324,12 @@ class _LazyPartitionFeatureStoreAdapter:
         *,
         partition_id: int | None = None,
     ) -> tuple[int, ...]:
+        resolved_partition_id = self._resolve_partition_id(partition_id)
         try:
             return self._partition.feature_shape(key)
         except KeyError:
             pass
-        return self._store.shape(key, partition_id=self._partition_id if partition_id is None else partition_id)
+        return self._store.shape(key, partition_id=resolved_partition_id)
 
 
 class _LazyPartitionGraphStoreAdapter:
@@ -332,6 +345,16 @@ class _LazyPartitionGraphStoreAdapter:
             str(node_type): int(end) - int(start)
             for node_type, (start, end) in partition.node_ranges.items()
         }
+
+    def _resolve_partition_id(self, partition_id: int | None) -> int:
+        if partition_id is None:
+            return self._partition_id
+        resolved = int(partition_id)
+        if resolved != self._partition_id:
+            raise KeyError(
+                f"partition {resolved} is not available from local partition adapter {self._partition_id}"
+            )
+        return resolved
 
     @property
     def _store(self) -> LocalGraphStoreAdapter:
@@ -357,6 +380,7 @@ class _LazyPartitionGraphStoreAdapter:
         *,
         partition_id: int | None = None,
     ) -> int:
+        self._resolve_partition_id(partition_id)
         try:
             return self._num_nodes_by_type[str(node_type)]
         except KeyError as exc:
@@ -368,9 +392,10 @@ class _LazyPartitionGraphStoreAdapter:
         *,
         partition_id: int | None = None,
     ) -> torch.Tensor:
+        resolved_partition_id = self._resolve_partition_id(partition_id)
         return self._store.edge_index(
             edge_type,
-            partition_id=self._partition_id if partition_id is None else partition_id,
+            partition_id=resolved_partition_id,
         )
 
     def edge_count(
@@ -379,6 +404,7 @@ class _LazyPartitionGraphStoreAdapter:
         *,
         partition_id: int | None = None,
     ) -> int:
+        self._resolve_partition_id(partition_id)
         resolved = self._resolve_edge_type(edge_type)
         return len(self._edge_ids_by_type.get(resolved, ()))
 
@@ -388,9 +414,10 @@ class _LazyPartitionGraphStoreAdapter:
         *,
         partition_id: int | None = None,
     ) -> torch.Tensor:
+        resolved_partition_id = self._resolve_partition_id(partition_id)
         return self._store.boundary_edge_index(
             edge_type,
-            partition_id=self._partition_id if partition_id is None else partition_id,
+            partition_id=resolved_partition_id,
         )
 
     def adjacency(
@@ -400,10 +427,11 @@ class _LazyPartitionGraphStoreAdapter:
         layout: SparseLayout | str = SparseLayout.COO,
         partition_id: int | None = None,
     ) -> SparseTensor:
+        resolved_partition_id = self._resolve_partition_id(partition_id)
         return self._store.adjacency(
             edge_type=edge_type,
             layout=layout,
-            partition_id=self._partition_id if partition_id is None else partition_id,
+            partition_id=resolved_partition_id,
         )
 
 

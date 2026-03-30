@@ -1,3 +1,4 @@
+import pytest
 import torch
 
 from vgl import Graph
@@ -23,6 +24,25 @@ def test_local_graph_shard_loads_partition_graph_and_store_view(tmp_path):
     assert torch.equal(shard.graph.n_id, torch.tensor([2, 3]))
     assert torch.equal(shard.graph_store.edge_index(), torch.tensor([[0], [1]]))
     assert torch.equal(fetched, torch.tensor([[4.0, 5.0], [6.0, 7.0]]))
+
+
+def test_local_graph_shard_store_views_reject_mismatched_partition_ids(tmp_path):
+    graph = Graph.homo(
+        edge_index=torch.tensor([[0, 1, 2, 3], [1, 2, 3, 0]]),
+        x=torch.arange(8, dtype=torch.float32).view(4, 2),
+    )
+    write_partitioned_graph(graph, tmp_path, num_partitions=2)
+
+    shard = LocalGraphShard.from_partition_dir(tmp_path, partition_id=0)
+
+    with pytest.raises(KeyError, match="partition"):
+        shard.feature_store.shape(("node", "node", "x"), partition_id=1)
+
+    with pytest.raises(KeyError, match="partition"):
+        shard.feature_store.fetch(("node", "node", "x"), torch.tensor([0]), partition_id=1)
+
+    with pytest.raises(KeyError, match="partition"):
+        shard.graph_store.edge_index(partition_id=1)
 
 
 def test_local_graph_shard_from_partition_dir_is_lazy_until_data_access(monkeypatch, tmp_path):
