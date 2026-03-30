@@ -195,6 +195,29 @@ def test_load_partitioned_stores_exposes_edge_count_and_adjacency_queries(tmp_pa
     assert adjacency.shape == (2, 2)
 
 
+def test_load_partitioned_stores_single_partition_supports_direct_feature_and_graph_queries(tmp_path):
+    graph = Graph.homo(
+        edge_index=torch.tensor([[0, 1], [1, 2]]),
+        x=torch.arange(6, dtype=torch.float32).view(3, 2),
+        edge_data={"weight": torch.tensor([1.0, 2.0])},
+    )
+    write_partitioned_graph(graph, tmp_path, num_partitions=1)
+
+    manifest, feature_store, graph_store = load_partitioned_stores(tmp_path)
+    fetched = feature_store.fetch(NODE_KEY, torch.tensor([2, 0]))
+    adjacency = graph_store.adjacency()
+
+    assert manifest.num_partitions == 1
+    assert feature_store.shape(NODE_KEY) == (3, 2)
+    assert torch.equal(fetched.index, torch.tensor([2, 0]))
+    assert torch.equal(fetched.values, torch.tensor([[4.0, 5.0], [0.0, 1.0]]))
+    assert graph_store.edge_types == (("node", "to", "node"),)
+    assert graph_store.num_nodes() == 3
+    assert torch.equal(graph_store.edge_index(), torch.tensor([[0, 1], [1, 2]]))
+    assert graph_store.edge_count() == 2
+    assert adjacency.shape == (3, 3)
+
+
 def test_load_partitioned_stores_lazily_loads_and_reuses_partition_payloads(monkeypatch, tmp_path):
     edge_type = ("node", "to", "node")
     weight_key = ("edge", edge_type, "weight")
