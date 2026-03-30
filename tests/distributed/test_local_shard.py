@@ -262,6 +262,38 @@ def test_local_graph_shard_reconstructs_heterogeneous_partition_graph_edge_ids(t
     assert torch.equal(shard.local_to_global_edge(torch.tensor([0, 1]), edge_type=cites), torch.tensor([2, 3]))
 
 
+def test_local_graph_shard_requires_edge_type_for_multi_relation_queries(tmp_path):
+    writes = ("author", "writes", "paper")
+    cites = ("paper", "cites", "paper")
+    graph = Graph.hetero(
+        nodes={
+            "author": {"x": torch.arange(8, dtype=torch.float32).view(4, 2)},
+            "paper": {"x": torch.arange(10, 18, dtype=torch.float32).view(4, 2)},
+        },
+        edges={
+            writes: {
+                "edge_index": torch.tensor([[0, 1, 2, 3, 0], [1, 0, 3, 2, 2]]),
+                "weight": torch.tensor([1.0, 2.0, 3.0, 4.0, 9.0]),
+            },
+            cites: {
+                "edge_index": torch.tensor([[0, 1, 2, 3, 1], [1, 0, 3, 2, 2]]),
+                "score": torch.tensor([0.1, 0.2, 0.3, 0.4, 0.9]),
+            },
+        },
+    )
+    write_partitioned_graph(graph, tmp_path, num_partitions=2)
+
+    shard = LocalGraphShard.from_partition_dir(tmp_path, partition_id=0)
+
+    with pytest.raises(KeyError, match="edge_type is required when multiple edge types exist"):
+        shard.edge_ids()
+
+    with pytest.raises(KeyError, match="edge_type is required when multiple edge types exist"):
+        shard.boundary_edge_ids()
+
+    with pytest.raises(KeyError, match="edge_type is required when multiple edge types exist"):
+        shard.incident_edge_index()
+
 
 def test_local_graph_shard_exposes_boundary_and_incident_edge_queries(tmp_path):
     graph = Graph.homo(
