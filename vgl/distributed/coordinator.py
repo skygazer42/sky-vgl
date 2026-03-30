@@ -128,18 +128,25 @@ class LocalSamplingCoordinator:
         first_shard = next(iter(self.shards.values()))
         self.manifest = first_shard.manifest
         self.feature_stores: dict[int, DistributedFeatureStore] = {
-            partition_id: LocalFeatureStoreAdapter(shard.feature_store)
+            partition_id: LocalFeatureStoreAdapter(
+                shard.feature_store,
+                boundary_edge_data_by_type=shard.boundary_edge_data_by_type,
+            )
             for partition_id, shard in self.shards.items()
         }
         self._edge_partition_by_type: dict[object, dict[int, int]] = {}
+        self._boundary_partition_by_type: dict[object, dict[int, int]] = {}
         for partition_id, shard in self.shards.items():
             for edge_type in shard.graph.edges:
                 owner = self._edge_partition_by_type.setdefault(edge_type, {})
+                boundary_owner = self._boundary_partition_by_type.setdefault(edge_type, {})
                 for edge_id in shard.edge_ids(edge_type=edge_type).tolist():
                     edge_id = int(edge_id)
                     if edge_id in owner:
                         raise ValueError(f"duplicate global edge id {edge_id} for edge type {edge_type!r}")
                     owner[edge_id] = partition_id
+                for edge_id in shard.boundary_edge_ids(edge_type=edge_type).tolist():
+                    boundary_owner.setdefault(int(edge_id), partition_id)
 
     def partition_ids(self) -> tuple[int, ...]:
         return tuple(sorted(self.shards))
@@ -276,14 +283,41 @@ class LocalSamplingCoordinator:
             raise ValueError("fetch_edge_features requires an edge feature key")
         edge_type = tuple(type_key)
         edge_ids = torch.as_tensor(edge_ids, dtype=torch.long)
-        routes = self.route_edge_ids(edge_ids, edge_type=edge_type)
         if edge_ids.numel() == 0:
             first_store = next(iter(self.feature_stores.values()))
             shape = first_store.shape(key)
             return TensorSlice(index=edge_ids, values=torch.empty((0,) + shape[1:]))
 
+        grouped_local: dict[int, dict[str, list[int]]] = {}
+        grouped_boundary: dict[int, dict[str, list[int]]] = {}
+        owners = self._edge_partition_by_type.get(edge_type, {})
+        boundary_owners = self._boundary_partition_by_type.get(edge_type, {})
+        for position, edge_id in enumerate(edge_ids.tolist()):
+            edge_id = int(edge_id)
+            partition_id = owners.get(edge_id)
+            if partition_id is not None:
+                shard = self._shard(partition_id)
+                bucket = grouped_local.setdefault(
+                    partition_id,
+                    {"global_ids": [], "local_ids": [], "positions": []},
+                )
+                bucket["global_ids"].append(edge_id)
+                bucket["local_ids"].append(int(shard.global_to_local_edge(torch.tensor([edge_id]), edge_type=edge_type).item()))
+                bucket["positions"].append(int(position))
+                continue
+            partition_id = boundary_owners.get(edge_id)
+            if partition_id is not None:
+                bucket = grouped_boundary.setdefault(
+                    partition_id,
+                    {"global_ids": [], "positions": []},
+                )
+                bucket["global_ids"].append(edge_id)
+                bucket["positions"].append(int(position))
+                continue
+            raise KeyError(f"edge {edge_id} is not present for edge type {edge_type!r}")
+
         values = None
-        for route in routes:
+        for route in _build_routes(grouped_local):
             fetched = self.feature_stores[route.partition_id].fetch(
                 key,
                 route.local_ids,
@@ -296,6 +330,20 @@ class LocalSamplingCoordinator:
                     device=fetched.values.device,
                 )
             values[route.positions] = fetched.values
+        for partition_id in sorted(grouped_boundary):
+            bucket = grouped_boundary[partition_id]
+            fetched = self.feature_stores[partition_id].fetch_boundary(
+                key,
+                torch.tensor(bucket["global_ids"], dtype=torch.long),
+                partition_id=partition_id,
+            )
+            if values is None:
+                values = torch.empty(
+                    (edge_ids.numel(),) + tuple(fetched.values.shape[1:]),
+                    dtype=fetched.values.dtype,
+                    device=fetched.values.device,
+                )
+            values[torch.tensor(bucket["positions"], dtype=torch.long)] = fetched.values
         return TensorSlice(index=edge_ids, values=values)
 
 

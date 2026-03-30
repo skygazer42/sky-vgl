@@ -248,9 +248,11 @@ def test_local_sampling_coordinator_routes_relation_edge_ids_and_fetches_edge_fe
     }
     coordinator = LocalSamplingCoordinator(shards)
     edge_ids = torch.tensor([3, 0, 2])
+    edge_ids_with_boundary = torch.tensor([4, 3, 0])
 
     routes = coordinator.route_edge_ids(edge_ids, edge_type=writes)
     fetched = coordinator.fetch_edge_features(WRITES_WEIGHT_KEY, edge_ids)
+    fetched_with_boundary = coordinator.fetch_edge_features(WRITES_WEIGHT_KEY, edge_ids_with_boundary)
     partition_edges = coordinator.partition_edge_ids(1, edge_type=writes)
     cites_scores = coordinator.fetch_edge_features(CITES_SCORE_KEY, torch.tensor([3, 0]))
 
@@ -263,6 +265,8 @@ def test_local_sampling_coordinator_routes_relation_edge_ids_and_fetches_edge_fe
     assert torch.equal(routes[1].local_ids, torch.tensor([1, 0]))
     assert torch.equal(fetched.index, edge_ids)
     assert torch.equal(fetched.values, torch.tensor([4.0, 1.0, 3.0]))
+    assert torch.equal(fetched_with_boundary.index, edge_ids_with_boundary)
+    assert torch.equal(fetched_with_boundary.values, torch.tensor([9.0, 4.0, 1.0]))
     assert torch.equal(partition_edges, torch.tensor([2, 3]))
     assert torch.equal(cites_scores.index, torch.tensor([3, 0]))
     assert torch.equal(cites_scores.values, torch.tensor([0.4, 0.1]))
