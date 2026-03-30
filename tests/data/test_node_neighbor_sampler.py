@@ -946,6 +946,37 @@ def test_node_neighbor_sampler_stitched_output_blocks_keep_fixed_hop_count_when_
     assert torch.equal(batch.blocks[1].dst_n_id, torch.tensor([1]))
 
 
+def test_node_neighbor_sampler_stitched_output_blocks_keep_fixed_hop_count_when_frontier_exhausts_through_store_backed_coordinator(
+    tmp_path,
+):
+    graph = Graph.homo(
+        edge_index=torch.tensor([[0], [1]], dtype=torch.long),
+        x=torch.arange(2, dtype=torch.float32).view(2, 1),
+        y=torch.tensor([0, 1]),
+    )
+    write_partitioned_graph(graph, tmp_path, num_partitions=2)
+    shards = {
+        0: LocalGraphShard.from_partition_dir(tmp_path, partition_id=0),
+        1: LocalGraphShard.from_partition_dir(tmp_path, partition_id=1),
+    }
+    coordinator = _store_backed_coordinator(shards)
+    loader = Loader(
+        dataset=ListDataset([(shards[1].graph, {"seed": 0, "sample_id": "stitched_short_store"})]),
+        sampler=NodeNeighborSampler(num_neighbors=[-1, -1], output_blocks=True),
+        batch_size=1,
+        feature_store=coordinator,
+    )
+
+    batch = next(iter(loader))
+
+    assert isinstance(batch, NodeBatch)
+    assert batch.blocks is not None
+    assert len(batch.blocks) == 2
+    assert torch.equal(batch.graph.n_id, torch.tensor([0, 1]))
+    assert torch.equal(batch.blocks[0].dst_n_id, torch.tensor([0, 1]))
+    assert torch.equal(batch.blocks[1].dst_n_id, torch.tensor([1]))
+
+
 
 def test_node_neighbor_sampler_output_blocks_preserve_order_and_global_ids():
     graph = Graph.homo(
