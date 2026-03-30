@@ -58,6 +58,23 @@ def test_local_graph_store_adapter_forwards_graph_queries():
     assert adjacency.shape == (3, 3)
 
 
+def test_store_backed_graph_store_adapter_forwards_graph_queries(tmp_path):
+    graph = Graph.homo(
+        edge_index=torch.tensor([[0, 1], [1, 2]]),
+        x=torch.arange(6, dtype=torch.float32).view(3, 2),
+    )
+    write_partitioned_graph(graph, tmp_path, num_partitions=1)
+
+    _, _, graph_store = load_partitioned_stores(tmp_path)
+    adjacency = graph_store.adjacency()
+
+    assert graph_store.edge_types == (("node", "to", "node"),)
+    assert graph_store.num_nodes() == 3
+    assert torch.equal(graph_store.edge_index(), torch.tensor([[0, 1], [1, 2]]))
+    assert graph_store.edge_count() == 2
+    assert adjacency.shape == (3, 3)
+
+
 def test_partitioned_feature_store_dispatches_partition_specific_fetches():
     part0 = LocalFeatureStoreAdapter(
         FeatureStore({NODE_KEY: InMemoryTensorStore(torch.tensor([[1.0], [2.0]]))})
