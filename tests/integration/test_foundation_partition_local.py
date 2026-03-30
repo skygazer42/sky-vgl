@@ -13,7 +13,7 @@ from vgl.dataloading import (
     TemporalEventRecord,
     TemporalNeighborSampler,
 )
-from vgl.distributed import LocalGraphShard, LocalSamplingCoordinator
+from vgl.distributed import LocalGraphShard, LocalSamplingCoordinator, StoreBackedSamplingCoordinator
 from vgl.distributed import write_partitioned_graph
 from vgl.engine import Trainer
 from vgl.tasks import LinkPredictionTask, NodeClassificationTask, TemporalEventPredictionTask
@@ -347,6 +347,47 @@ def test_local_partition_sampled_training_uses_public_loader_path_for_coordinato
     assert history["completed_epochs"] == 1
 
 
+def test_store_backed_partition_sampled_training_uses_public_loader_path_for_coordinator_feature_fetch(
+    tmp_path,
+):
+    graph = Graph.homo(
+        edge_index=torch.tensor([[0, 2], [1, 3]]),
+        x=torch.arange(4, dtype=torch.float32).view(4, 1),
+        y=torch.tensor([0, 1, 0, 1]),
+        train_mask=torch.tensor([True, True, True, True]),
+        val_mask=torch.tensor([True, True, True, True]),
+        test_mask=torch.tensor([True, True, True, True]),
+    )
+    write_partitioned_graph(graph, tmp_path, num_partitions=2)
+    shards = {
+        0: LocalGraphShard.from_partition_dir(tmp_path, partition_id=0),
+        1: LocalGraphShard.from_partition_dir(tmp_path, partition_id=1),
+    }
+    coordinator = StoreBackedSamplingCoordinator.from_partition_dir(tmp_path)
+    loader = DataLoader(
+        dataset=ListDataset(
+            [
+                (shards[0].graph, {"seed": 0, "sample_id": "part0_store"}),
+                (shards[1].graph, {"seed": 1, "sample_id": "part1_store"}),
+            ]
+        ),
+        sampler=NodeNeighborSampler(num_neighbors=[-1], node_feature_names=("x",)),
+        batch_size=2,
+        feature_store=coordinator,
+    )
+    trainer = Trainer(
+        model=TinyCoordinatorFeatureAlignedNodeClassifier(),
+        task=NodeClassificationTask(target="y", split=("train_mask", "val_mask", "test_mask")),
+        optimizer=torch.optim.Adam,
+        lr=1e-2,
+        max_epochs=1,
+    )
+
+    history = trainer.fit(loader)
+
+    assert history["completed_epochs"] == 1
+
+
 
 class TinyStitchedPartitionHeteroNodeClassifier(nn.Module):
     def __init__(self):
@@ -399,6 +440,75 @@ def test_local_partition_sampled_training_stitched_hetero_sampling_crosses_parti
     coordinator = LocalSamplingCoordinator(shards)
     loader = DataLoader(
         dataset=ListDataset([(shards[0].graph, {"seed": 1, "node_type": "paper", "sample_id": "stitched_hetero"})]),
+        sampler=NodeNeighborSampler(
+            num_neighbors=[-1],
+            node_feature_names={"paper": ("x",), "author": ("x",)},
+            edge_feature_names={writes: ("edge_weight",), written_by: ("edge_weight",)},
+        ),
+        batch_size=1,
+        feature_store=coordinator,
+    )
+    trainer = Trainer(
+        model=TinyStitchedPartitionHeteroNodeClassifier(),
+        task=NodeClassificationTask(
+            target="y",
+            split=("train_mask", "val_mask", "test_mask"),
+            node_type="paper",
+        ),
+        optimizer=torch.optim.Adam,
+        lr=1e-2,
+        max_epochs=1,
+    )
+
+    history = trainer.fit(loader)
+
+    assert history["completed_epochs"] == 1
+
+
+def test_store_backed_partition_sampled_training_stitched_hetero_sampling_crosses_partition_boundaries(
+    tmp_path,
+):
+    writes = ("author", "writes", "paper")
+    written_by = ("paper", "written_by", "author")
+    graph = Graph.hetero(
+        nodes={
+            "paper": {
+                "x": torch.tensor([[1.0], [2.0], [3.0], [4.0]]),
+                "y": torch.tensor([0, 1, 0, 1]),
+                "train_mask": torch.tensor([True, True, True, True]),
+                "val_mask": torch.tensor([True, True, True, True]),
+                "test_mask": torch.tensor([True, True, True, True]),
+            },
+            "author": {
+                "x": torch.tensor([[10.0], [20.0], [30.0], [40.0]]),
+            },
+        },
+        edges={
+            writes: {
+                "edge_index": torch.tensor([[0, 2], [0, 1]]),
+                "edge_weight": torch.tensor([10.0, 20.0]),
+            },
+            written_by: {
+                "edge_index": torch.tensor([[0, 1], [0, 2]]),
+                "edge_weight": torch.tensor([100.0, 200.0]),
+            },
+        },
+    )
+    write_partitioned_graph(graph, tmp_path, num_partitions=2)
+    shards = {
+        0: LocalGraphShard.from_partition_dir(tmp_path, partition_id=0),
+        1: LocalGraphShard.from_partition_dir(tmp_path, partition_id=1),
+    }
+    coordinator = StoreBackedSamplingCoordinator.from_partition_dir(tmp_path)
+    loader = DataLoader(
+        dataset=ListDataset(
+            [
+                (
+                    shards[0].graph,
+                    {"seed": 1, "node_type": "paper", "sample_id": "stitched_hetero_store"},
+                )
+            ]
+        ),
         sampler=NodeNeighborSampler(
             num_neighbors=[-1],
             node_feature_names={"paper": ("x",), "author": ("x",)},
