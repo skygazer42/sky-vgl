@@ -476,6 +476,54 @@ def test_local_hetero_partition_edge_feature_routing_round_trips_across_shards(t
     assert torch.equal(partition_writes_index, torch.tensor([[2, 3], [3, 2]]))
 
 
+def test_store_backed_hetero_partition_edge_feature_routing_round_trips_across_shards(tmp_path):
+    writes = ("author", "writes", "paper")
+    cites = ("paper", "cites", "paper")
+    writes_key = ("edge", writes, "weight")
+    cites_key = ("edge", cites, "score")
+    graph = Graph.hetero(
+        nodes={
+            "author": {"x": torch.arange(8, dtype=torch.float32).view(4, 2)},
+            "paper": {"x": torch.arange(10, 18, dtype=torch.float32).view(4, 2)},
+        },
+        edges={
+            writes: {
+                "edge_index": torch.tensor([[0, 1, 2, 3, 0], [1, 0, 3, 2, 2]]),
+                "weight": torch.tensor([1.0, 2.0, 3.0, 4.0, 9.0]),
+            },
+            cites: {
+                "edge_index": torch.tensor([[0, 1, 2, 3, 1], [1, 0, 3, 2, 2]]),
+                "score": torch.tensor([0.1, 0.2, 0.3, 0.4, 0.9]),
+            },
+        },
+    )
+    write_partitioned_graph(graph, tmp_path, num_partitions=2)
+    coordinator = StoreBackedSamplingCoordinator.from_partition_dir(tmp_path)
+
+    writes_edge_ids = torch.tensor([3, 0, 2])
+    cites_edge_ids = torch.tensor([3, 0])
+
+    writes_routes = coordinator.route_edge_ids(writes_edge_ids, edge_type=writes)
+    writes_features = coordinator.fetch_edge_features(writes_key, writes_edge_ids)
+    cites_features = coordinator.fetch_edge_features(cites_key, cites_edge_ids)
+    partition_writes = coordinator.partition_edge_ids(1, edge_type=writes)
+    partition_writes_index = coordinator.fetch_partition_edge_index(1, edge_type=writes, global_ids=True)
+
+    assert len(writes_routes) == 2
+    assert writes_routes[0].partition_id == 0
+    assert torch.equal(writes_routes[0].global_ids, torch.tensor([0]))
+    assert torch.equal(writes_routes[0].local_ids, torch.tensor([0]))
+    assert writes_routes[1].partition_id == 1
+    assert torch.equal(writes_routes[1].global_ids, torch.tensor([3, 2]))
+    assert torch.equal(writes_routes[1].local_ids, torch.tensor([1, 0]))
+    assert torch.equal(writes_features.index, writes_edge_ids)
+    assert torch.equal(writes_features.values, torch.tensor([4.0, 1.0, 3.0]))
+    assert torch.equal(cites_features.index, cites_edge_ids)
+    assert torch.equal(cites_features.values, torch.tensor([0.4, 0.1]))
+    assert torch.equal(partition_writes, torch.tensor([2, 3]))
+    assert torch.equal(partition_writes_index, torch.tensor([[2, 3], [3, 2]]))
+
+
 
 class TinyCoordinatorFeatureAlignedNodeClassifier(nn.Module):
     def __init__(self):
