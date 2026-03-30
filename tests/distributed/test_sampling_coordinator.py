@@ -4,12 +4,6 @@ from vgl import Graph
 import vgl.distributed.store as distributed_store_module
 from vgl.distributed.coordinator import LocalSamplingCoordinator, StoreBackedSamplingCoordinator
 from vgl.distributed.shard import LocalGraphShard
-from vgl.distributed.store import (
-    LocalFeatureStoreAdapter,
-    LocalGraphStoreAdapter,
-    PartitionedFeatureStore,
-    PartitionedGraphStore,
-)
 from vgl.distributed.writer import write_partitioned_graph
 
 
@@ -18,37 +12,6 @@ PAPER_KEY = ("node", "paper", "x")
 FOLLOWS_WEIGHT_KEY = ("edge", ("node", "follows", "node"), "weight")
 WRITES_WEIGHT_KEY = ("edge", ("author", "writes", "paper"), "weight")
 CITES_SCORE_KEY = ("edge", ("paper", "cites", "paper"), "score")
-
-
-def _store_backed_coordinator(shards):
-    feature_store = PartitionedFeatureStore(
-        {
-            partition_id: LocalFeatureStoreAdapter(
-                shard.feature_store,
-                boundary_edge_data_by_type=shard.boundary_edge_data_by_type,
-            )
-            for partition_id, shard in shards.items()
-        }
-    )
-    graph_store = PartitionedGraphStore(
-        {
-            partition_id: LocalGraphStoreAdapter(
-                shard.graph_store,
-                boundary_edge_index_by_type={
-                    edge_type: shard.boundary_edge_index(edge_type=edge_type)
-                    for edge_type in shard.graph.edges
-                },
-            )
-            for partition_id, shard in shards.items()
-        }
-    )
-    manifest = next(iter(shards.values())).manifest
-    return StoreBackedSamplingCoordinator(
-        manifest=manifest,
-        feature_store=feature_store,
-        graph_store=graph_store,
-    )
-
 
 def test_local_sampling_coordinator_routes_seeds_and_fetches_features(tmp_path):
     graph = Graph.homo(
@@ -83,11 +46,7 @@ def test_store_backed_sampling_coordinator_routes_seeds_and_fetches_features(tmp
         x=torch.arange(8, dtype=torch.float32).view(4, 2),
     )
     write_partitioned_graph(graph, tmp_path, num_partitions=2)
-    shards = {
-        0: LocalGraphShard.from_partition_dir(tmp_path, partition_id=0),
-        1: LocalGraphShard.from_partition_dir(tmp_path, partition_id=1),
-    }
-    coordinator = _store_backed_coordinator(shards)
+    coordinator = StoreBackedSamplingCoordinator.from_partition_dir(tmp_path)
     node_ids = torch.tensor([3, 0, 2])
 
     routes = coordinator.route_node_ids(node_ids)
@@ -340,18 +299,16 @@ def test_store_backed_sampling_coordinator_routes_typed_node_ids_edges_and_bound
         },
     )
     write_partitioned_graph(graph, tmp_path, num_partitions=2)
-    shards = {
-        0: LocalGraphShard.from_partition_dir(tmp_path, partition_id=0),
-        1: LocalGraphShard.from_partition_dir(tmp_path, partition_id=1),
-    }
-    coordinator = _store_backed_coordinator(shards)
+    coordinator = StoreBackedSamplingCoordinator.from_partition_dir(tmp_path)
     paper_ids = torch.tensor([3, 0, 2])
     edge_ids = torch.tensor([3, 0, 2])
+    edge_ids_with_boundary = torch.tensor([4, 3, 0])
 
     node_routes = coordinator.route_node_ids(paper_ids, node_type="paper")
     edge_routes = coordinator.route_edge_ids(edge_ids, edge_type=writes)
     fetched_papers = coordinator.fetch_node_features(PAPER_KEY, paper_ids)
     fetched_writes = coordinator.fetch_edge_features(WRITES_WEIGHT_KEY, edge_ids)
+    fetched_writes_with_boundary = coordinator.fetch_edge_features(WRITES_WEIGHT_KEY, edge_ids_with_boundary)
     partition_papers = coordinator.partition_node_ids(1, node_type="paper")
     partition_writes = coordinator.partition_edge_ids(1, edge_type=writes)
     writes_boundary_ids = coordinator.partition_boundary_edge_ids(0, edge_type=writes)
@@ -367,6 +324,8 @@ def test_store_backed_sampling_coordinator_routes_typed_node_ids_edges_and_bound
     assert torch.equal(edge_routes[1].global_ids, torch.tensor([3, 2]))
     assert torch.equal(fetched_papers.values, torch.tensor([[16.0, 17.0], [10.0, 11.0], [14.0, 15.0]]))
     assert torch.equal(fetched_writes.values, torch.tensor([4.0, 1.0, 3.0]))
+    assert torch.equal(fetched_writes_with_boundary.index, edge_ids_with_boundary)
+    assert torch.equal(fetched_writes_with_boundary.values, torch.tensor([9.0, 4.0, 1.0]))
     assert torch.equal(partition_papers, torch.tensor([2, 3]))
     assert torch.equal(partition_writes, torch.tensor([2, 3]))
     assert torch.equal(writes_boundary_ids, torch.tensor([4]))
