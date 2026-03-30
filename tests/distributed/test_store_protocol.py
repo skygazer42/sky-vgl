@@ -132,6 +132,51 @@ def test_load_partitioned_stores_builds_partition_aware_stores_from_partition_di
     assert torch.equal(boundary_edge_index, torch.tensor([[1, 3], [2, 0]]))
 
 
+def test_load_partitioned_stores_exposes_typed_boundary_feature_and_graph_queries(tmp_path):
+    writes = ("author", "writes", "paper")
+    cites = ("paper", "cites", "paper")
+    graph = Graph.hetero(
+        nodes={
+            "author": {"x": torch.arange(8, dtype=torch.float32).view(4, 2)},
+            "paper": {"x": torch.arange(10, 18, dtype=torch.float32).view(4, 2)},
+        },
+        edges={
+            writes: {
+                "edge_index": torch.tensor([[0, 1, 2, 3, 0], [1, 0, 3, 2, 2]]),
+                "weight": torch.tensor([1.0, 2.0, 3.0, 4.0, 9.0]),
+            },
+            cites: {
+                "edge_index": torch.tensor([[0, 1, 2, 3, 1], [1, 0, 3, 2, 2]]),
+                "score": torch.tensor([0.1, 0.2, 0.3, 0.4, 0.9]),
+            },
+        },
+    )
+    write_partitioned_graph(graph, tmp_path, num_partitions=2)
+
+    manifest, feature_store, graph_store = load_partitioned_stores(tmp_path)
+    fetched_writes_boundary = feature_store.fetch_boundary(
+        ("edge", writes, "weight"),
+        torch.tensor([4]),
+        partition_id=0,
+    )
+    fetched_cites_boundary = feature_store.fetch_boundary(
+        ("edge", cites, "score"),
+        torch.tensor([4]),
+        partition_id=0,
+    )
+
+    assert manifest.num_partitions == 2
+    assert graph_store.edge_types == (writes, cites)
+    assert graph_store.num_nodes("author", partition_id=0) == 2
+    assert graph_store.num_nodes("paper", partition_id=0) == 2
+    assert torch.equal(graph_store.boundary_edge_index(writes, partition_id=0), torch.tensor([[0], [2]]))
+    assert torch.equal(graph_store.boundary_edge_index(cites, partition_id=0), torch.tensor([[1], [2]]))
+    assert torch.equal(fetched_writes_boundary.index, torch.tensor([4]))
+    assert torch.equal(fetched_writes_boundary.values, torch.tensor([9.0]))
+    assert torch.equal(fetched_cites_boundary.index, torch.tensor([4]))
+    assert torch.equal(fetched_cites_boundary.values, torch.tensor([0.9]))
+
+
 def test_load_partitioned_stores_lazily_loads_and_reuses_partition_payloads(monkeypatch, tmp_path):
     edge_type = ("node", "to", "node")
     weight_key = ("edge", edge_type, "weight")
