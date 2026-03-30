@@ -93,6 +93,23 @@ def test_local_feature_store_adapter_fetches_boundary_edge_features():
     assert torch.equal(fetched.values, torch.tensor([2.5, 1.5]))
 
 
+def test_store_backed_feature_store_adapter_fetches_boundary_edge_features(tmp_path):
+    edge_type = ("node", "to", "node")
+    key = ("edge", edge_type, "weight")
+    graph = Graph.homo(
+        edge_index=torch.tensor([[0, 1, 2, 3], [1, 2, 3, 0]]),
+        x=torch.arange(8, dtype=torch.float32).view(4, 2),
+        edge_data={"weight": torch.tensor([1.0, 2.0, 3.0, 4.0])},
+    )
+    write_partitioned_graph(graph, tmp_path, num_partitions=2)
+
+    _, feature_store, _ = load_partitioned_stores(tmp_path)
+    fetched = feature_store.fetch_boundary(key, torch.tensor([3, 1]), partition_id=0)
+
+    assert torch.equal(fetched.index, torch.tensor([3, 1]))
+    assert torch.equal(fetched.values, torch.tensor([4.0, 2.0]))
+
+
 def test_partitioned_graph_store_dispatches_local_and_boundary_edge_queries():
     edge_type = ("node", "to", "node")
     part0 = LocalGraphStoreAdapter(
