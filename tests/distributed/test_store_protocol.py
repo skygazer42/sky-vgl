@@ -177,6 +177,24 @@ def test_load_partitioned_stores_exposes_typed_boundary_feature_and_graph_querie
     assert torch.equal(fetched_cites_boundary.values, torch.tensor([0.9]))
 
 
+def test_load_partitioned_stores_exposes_edge_count_and_adjacency_queries(tmp_path):
+    graph = Graph.homo(
+        edge_index=torch.tensor([[0, 1, 2, 3], [1, 2, 3, 0]]),
+        x=torch.arange(8, dtype=torch.float32).view(4, 2),
+    )
+    write_partitioned_graph(graph, tmp_path, num_partitions=2)
+
+    manifest, _, graph_store = load_partitioned_stores(tmp_path)
+    adjacency = graph_store.adjacency(partition_id=1)
+
+    assert manifest.num_partitions == 2
+    assert graph_store.edge_types == (("node", "to", "node"),)
+    assert graph_store.num_nodes(partition_id=1) == 2
+    assert torch.equal(graph_store.edge_index(partition_id=1), torch.tensor([[0], [1]]))
+    assert graph_store.edge_count(partition_id=1) == 1
+    assert adjacency.shape == (2, 2)
+
+
 def test_load_partitioned_stores_lazily_loads_and_reuses_partition_payloads(monkeypatch, tmp_path):
     edge_type = ("node", "to", "node")
     weight_key = ("edge", edge_type, "weight")
