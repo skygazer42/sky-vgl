@@ -99,6 +99,39 @@ def test_local_partition_metadata_drives_shard_aware_sampled_training(tmp_path):
     assert history["completed_epochs"] == 1
 
 
+def test_store_backed_partition_metadata_drives_shard_aware_sampled_training(tmp_path):
+    graph = Graph.homo(
+        edge_index=torch.tensor([[0, 1, 2, 3], [1, 2, 3, 0]]),
+        x=torch.randn(4, 4),
+        y=torch.tensor([0, 1, 0, 1]),
+    )
+    write_partitioned_graph(graph, tmp_path, num_partitions=2)
+    shards = {
+        0: LocalGraphShard.from_partition_dir(tmp_path, partition_id=0),
+        1: LocalGraphShard.from_partition_dir(tmp_path, partition_id=1),
+    }
+    coordinator = StoreBackedSamplingCoordinator.from_partition_dir(tmp_path)
+    dataset = ListDataset(
+        [
+            (shards[0].graph, {"seed": 0}),
+            (shards[1].graph, {"seed": 1}),
+        ]
+    )
+    base_loader = DataLoader(dataset=dataset, sampler=NodeNeighborSampler(num_neighbors=[-1]), batch_size=2)
+    loader = RoutedNodeLoader(base_loader, coordinator, node_ids=torch.tensor([0, 3]))
+    trainer = Trainer(
+        model=TinyShardAwareNodeClassifier(),
+        task=NodeClassificationTask(target="y", split=("train_mask", "val_mask", "test_mask")),
+        optimizer=torch.optim.Adam,
+        lr=1e-2,
+        max_epochs=1,
+    )
+
+    history = trainer.fit(loader)
+
+    assert history["completed_epochs"] == 1
+
+
 def test_local_temporal_partition_metadata_drives_shard_aware_sampled_training(tmp_path):
     graph = Graph.temporal(
         nodes={"node": {"x": torch.randn(4, 4), "y": torch.tensor([0, 1, 0, 1])}},
@@ -116,6 +149,45 @@ def test_local_temporal_partition_metadata_drives_shard_aware_sampled_training(t
         1: LocalGraphShard.from_partition_dir(tmp_path, partition_id=1),
     }
     coordinator = LocalSamplingCoordinator(shards)
+    dataset = ListDataset(
+        [
+            (shards[0].graph, {"seed": 0}),
+            (shards[1].graph, {"seed": 1}),
+        ]
+    )
+    base_loader = DataLoader(dataset=dataset, sampler=NodeNeighborSampler(num_neighbors=[-1]), batch_size=2)
+    loader = RoutedNodeLoader(base_loader, coordinator, node_ids=torch.tensor([0, 3]))
+    trainer = Trainer(
+        model=TinyShardAwareNodeClassifier(),
+        task=NodeClassificationTask(target="y", split=("train_mask", "val_mask", "test_mask")),
+        optimizer=torch.optim.Adam,
+        lr=1e-2,
+        max_epochs=1,
+    )
+
+    history = trainer.fit(loader)
+
+    assert all(shard.graph.schema.time_attr == "timestamp" for shard in shards.values())
+    assert history["completed_epochs"] == 1
+
+
+def test_store_backed_temporal_partition_metadata_drives_shard_aware_sampled_training(tmp_path):
+    graph = Graph.temporal(
+        nodes={"node": {"x": torch.randn(4, 4), "y": torch.tensor([0, 1, 0, 1])}},
+        edges={
+            ("node", "to", "node"): {
+                "edge_index": torch.tensor([[0, 1, 2, 3], [1, 2, 3, 0]]),
+                "timestamp": torch.tensor([3, 5, 7, 11]),
+            }
+        },
+        time_attr="timestamp",
+    )
+    write_partitioned_graph(graph, tmp_path, num_partitions=2)
+    shards = {
+        0: LocalGraphShard.from_partition_dir(tmp_path, partition_id=0),
+        1: LocalGraphShard.from_partition_dir(tmp_path, partition_id=1),
+    }
+    coordinator = StoreBackedSamplingCoordinator.from_partition_dir(tmp_path)
     dataset = ListDataset(
         [
             (shards[0].graph, {"seed": 0}),
@@ -182,6 +254,50 @@ def test_local_multi_relation_partition_metadata_drives_shard_aware_sampled_trai
     assert history["completed_epochs"] == 1
 
 
+def test_store_backed_multi_relation_partition_metadata_drives_shard_aware_sampled_training(tmp_path):
+    follows = ("node", "follows", "node")
+    likes = ("node", "likes", "node")
+    graph = Graph.hetero(
+        nodes={"node": {"x": torch.randn(4, 4), "y": torch.tensor([0, 1, 0, 1])}},
+        edges={
+            follows: {
+                "edge_index": torch.tensor([[0, 1, 2, 3], [1, 2, 3, 2]]),
+                "weight": torch.tensor([1.0, 2.0, 3.0, 4.0]),
+            },
+            likes: {
+                "edge_index": torch.tensor([[1, 0, 3], [0, 1, 2]]),
+                "score": torch.tensor([0.5, 0.6, 0.7]),
+            },
+        },
+    )
+    write_partitioned_graph(graph, tmp_path, num_partitions=2)
+    shards = {
+        0: LocalGraphShard.from_partition_dir(tmp_path, partition_id=0),
+        1: LocalGraphShard.from_partition_dir(tmp_path, partition_id=1),
+    }
+    coordinator = StoreBackedSamplingCoordinator.from_partition_dir(tmp_path)
+    dataset = ListDataset(
+        [
+            (shards[0].graph, {"seed": 0, "node_type": "node"}),
+            (shards[1].graph, {"seed": 1, "node_type": "node"}),
+        ]
+    )
+    base_loader = DataLoader(dataset=dataset, sampler=NodeNeighborSampler(num_neighbors=[-1]), batch_size=2)
+    loader = RoutedNodeLoader(base_loader, coordinator, node_ids=torch.tensor([0, 3]))
+    trainer = Trainer(
+        model=TinyShardAwareNodeClassifier(),
+        task=NodeClassificationTask(target="y", split=("train_mask", "val_mask", "test_mask")),
+        optimizer=torch.optim.Adam,
+        lr=1e-2,
+        max_epochs=1,
+    )
+
+    history = trainer.fit(loader)
+
+    assert all(set(shard.graph.edges) == {follows, likes} for shard in shards.values())
+    assert history["completed_epochs"] == 1
+
+
 def test_local_hetero_partition_metadata_drives_shard_aware_sampled_training(tmp_path):
     writes = ("author", "writes", "paper")
     cites = ("paper", "cites", "paper")
@@ -213,6 +329,69 @@ def test_local_hetero_partition_metadata_drives_shard_aware_sampled_training(tmp
         1: LocalGraphShard.from_partition_dir(tmp_path, partition_id=1),
     }
     coordinator = LocalSamplingCoordinator(shards)
+    dataset = ListDataset(
+        [
+            (shards[0].graph, {"seed": 0, "node_type": "paper"}),
+            (shards[1].graph, {"seed": 1, "node_type": "paper"}),
+        ]
+    )
+    base_loader = DataLoader(dataset=dataset, sampler=NodeNeighborSampler(num_neighbors=[-1]), batch_size=2)
+    loader = RoutedNodeLoader(
+        base_loader,
+        coordinator,
+        node_ids=torch.tensor([0, 3]),
+        node_type="paper",
+    )
+    trainer = Trainer(
+        model=TinyShardAwarePaperClassifier(),
+        task=NodeClassificationTask(
+            target="y",
+            split=("train_mask", "val_mask", "test_mask"),
+            node_type="paper",
+        ),
+        optimizer=torch.optim.Adam,
+        lr=1e-2,
+        max_epochs=1,
+    )
+
+    history = trainer.fit(loader)
+
+    assert all(set(shard.graph.nodes) == {"author", "paper"} for shard in shards.values())
+    assert all(set(shard.graph.edges) == {writes, cites} for shard in shards.values())
+    assert history["completed_epochs"] == 1
+
+
+def test_store_backed_hetero_partition_metadata_drives_shard_aware_sampled_training(tmp_path):
+    writes = ("author", "writes", "paper")
+    cites = ("paper", "cites", "paper")
+    graph = Graph.hetero(
+        nodes={
+            "author": {"x": torch.randn(4, 4)},
+            "paper": {
+                "x": torch.randn(4, 4),
+                "y": torch.tensor([0, 1, 0, 1]),
+                "train_mask": torch.tensor([True, True, True, True]),
+                "val_mask": torch.tensor([True, True, True, True]),
+                "test_mask": torch.tensor([True, True, True, True]),
+            },
+        },
+        edges={
+            writes: {
+                "edge_index": torch.tensor([[0, 1, 2, 3, 0], [1, 0, 3, 2, 2]]),
+                "weight": torch.tensor([1.0, 2.0, 3.0, 4.0, 9.0]),
+            },
+            cites: {
+                "edge_index": torch.tensor([[0, 1, 2, 3, 1], [1, 0, 3, 2, 2]]),
+                "score": torch.tensor([0.1, 0.2, 0.3, 0.4, 0.9]),
+            },
+        },
+    )
+    write_partitioned_graph(graph, tmp_path, num_partitions=2)
+    shards = {
+        0: LocalGraphShard.from_partition_dir(tmp_path, partition_id=0),
+        1: LocalGraphShard.from_partition_dir(tmp_path, partition_id=1),
+    }
+    coordinator = StoreBackedSamplingCoordinator.from_partition_dir(tmp_path)
     dataset = ListDataset(
         [
             (shards[0].graph, {"seed": 0, "node_type": "paper"}),
