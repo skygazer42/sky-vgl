@@ -1061,3 +1061,64 @@ def test_node_neighbor_sampler_stitched_hetero_output_blocks_materialize_multi_r
     assert torch.equal(outer_block.edata(WRITES)["edge_weight"], torch.tensor([10.0, 20.0]))
     assert torch.equal(outer_block.edata(CITES)["edge_weight"], torch.tensor([100.0, 200.0]))
     assert torch.equal(inner_block.dst_n_id["paper"], torch.tensor([1], dtype=torch.long))
+
+
+def test_node_neighbor_sampler_stitched_hetero_output_blocks_materialize_multi_relation_blocks_through_store_backed_coordinator(
+    tmp_path,
+):
+    graph = Graph.hetero(
+        nodes={
+            "paper": {
+                "x": torch.tensor([[1.0], [2.0], [3.0]]),
+                "y": torch.tensor([0, 1, 0]),
+            },
+            "author": {
+                "x": torch.tensor([[10.0], [20.0]]),
+            },
+        },
+        edges={
+            WRITES: {
+                "edge_index": torch.tensor([[0, 1], [1, 2]], dtype=torch.long),
+                "edge_weight": torch.tensor([10.0, 20.0]),
+            },
+            CITES: {
+                "edge_index": torch.tensor([[0, 1], [1, 2]], dtype=torch.long),
+                "edge_weight": torch.tensor([100.0, 200.0]),
+            },
+        },
+    )
+    write_partitioned_graph(graph, tmp_path, num_partitions=2)
+    shards = {
+        0: LocalGraphShard.from_partition_dir(tmp_path, partition_id=0),
+        1: LocalGraphShard.from_partition_dir(tmp_path, partition_id=1),
+    }
+    coordinator = _store_backed_coordinator(shards)
+    loader = Loader(
+        dataset=ListDataset(
+            [(shards[0].graph, {"seed": 1, "node_type": "paper", "sample_id": "stitched_multi_relation_store"})]
+        ),
+        sampler=NodeNeighborSampler(
+            num_neighbors=[-1, -1],
+            node_feature_names={"author": ("x",), "paper": ("x",)},
+            edge_feature_names={WRITES: ("edge_weight",), CITES: ("edge_weight",)},
+            output_blocks=True,
+        ),
+        batch_size=1,
+        feature_store=coordinator,
+    )
+
+    batch = next(iter(loader))
+
+    assert isinstance(batch, NodeBatch)
+    assert batch.blocks is not None
+    assert len(batch.blocks) == 2
+    outer_block, inner_block = batch.blocks
+    assert isinstance(outer_block, HeteroBlock)
+    assert isinstance(inner_block, HeteroBlock)
+    assert outer_block.edge_types == (WRITES, CITES)
+    assert torch.equal(batch.graph.nodes["paper"].n_id, torch.tensor([0, 1, 2], dtype=torch.long))
+    assert torch.equal(batch.graph.nodes["author"].n_id, torch.tensor([0, 1], dtype=torch.long))
+    assert torch.equal(outer_block.dst_n_id["paper"], torch.tensor([0, 1, 2], dtype=torch.long))
+    assert torch.equal(outer_block.edata(WRITES)["edge_weight"], torch.tensor([10.0, 20.0]))
+    assert torch.equal(outer_block.edata(CITES)["edge_weight"], torch.tensor([100.0, 200.0]))
+    assert torch.equal(inner_block.dst_n_id["paper"], torch.tensor([1], dtype=torch.long))
