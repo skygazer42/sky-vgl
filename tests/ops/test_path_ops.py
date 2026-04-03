@@ -18,6 +18,22 @@ def test_line_graph_turns_edges_into_nodes_and_connects_composable_edges():
     assert torch.equal(transformed.edge_index, torch.tensor([[0, 0, 2], [1, 2, 0]]))
 
 
+def test_line_graph_avoids_tensor_tolist(monkeypatch):
+    graph = Graph.homo(
+        edge_index=torch.tensor([[0, 1, 1], [1, 2, 0]]),
+        x=torch.tensor([[1.0], [2.0], [3.0]]),
+    )
+
+    def fail_tolist(self):
+        raise AssertionError("line_graph should stay on tensors")
+
+    monkeypatch.setattr(torch.Tensor, "tolist", fail_tolist)
+
+    transformed = line_graph(graph, copy_edata=False)
+
+    assert torch.equal(transformed.edge_index, torch.tensor([[0, 0, 2], [1, 2, 0]]))
+
+
 def test_line_graph_can_drop_immediate_backtracking_pairs():
     graph = Graph.homo(
         edge_index=torch.tensor([[0, 1, 1], [1, 0, 2]]),
@@ -71,6 +87,32 @@ def test_metapath_reachable_graph_deduplicates_hetero_reachable_pairs():
     assert torch.equal(transformed.edges[edge_type].edge_index, torch.tensor([[0, 1], [0, 0]]))
 
 
+def test_metapath_reachable_graph_avoids_tensor_tolist(monkeypatch):
+    writes = ("author", "writes", "paper")
+    published_in = ("paper", "published_in", "venue")
+    graph = Graph.hetero(
+        nodes={
+            "author": {"x": torch.tensor([[1.0], [2.0]])},
+            "paper": {"x": torch.tensor([[10.0], [20.0]])},
+            "venue": {"x": torch.tensor([[100.0]])},
+        },
+        edges={
+            writes: {"edge_index": torch.tensor([[0, 0, 1], [0, 1, 1]])},
+            published_in: {"edge_index": torch.tensor([[0, 1], [0, 0]])},
+        },
+    )
+
+    def fail_tolist(self):
+        raise AssertionError("metapath_reachable_graph should stay on tensors")
+
+    monkeypatch.setattr(torch.Tensor, "tolist", fail_tolist)
+
+    transformed = metapath_reachable_graph(graph, [writes, published_in])
+    edge_type = ("author", "writes__published_in", "venue")
+
+    assert torch.equal(transformed.edges[edge_type].edge_index, torch.tensor([[0, 1], [0, 0]]))
+
+
 def test_metapath_reachable_graph_supports_single_node_type_multi_relation():
     follows = ("node", "follows", "node")
     likes = ("node", "likes", "node")
@@ -118,6 +160,22 @@ def test_random_walk_follows_homogeneous_edges_and_includes_seeds():
     )
 
     assert hasattr(graph_ops, "random_walk")
+    traces = graph_ops.random_walk(graph, torch.tensor([0, 2]), length=3)
+
+    assert torch.equal(traces, torch.tensor([[0, 1, 2, 0], [2, 0, 1, 2]]))
+
+
+def test_random_walk_avoids_tensor_tolist(monkeypatch):
+    graph = Graph.homo(
+        edge_index=torch.tensor([[0, 1, 2], [1, 2, 0]]),
+        x=torch.tensor([[1.0], [2.0], [3.0]]),
+    )
+
+    def fail_tolist(self):
+        raise AssertionError("random_walk should stay on tensors")
+
+    monkeypatch.setattr(torch.Tensor, "tolist", fail_tolist)
+
     traces = graph_ops.random_walk(graph, torch.tensor([0, 2]), length=3)
 
     assert torch.equal(traces, torch.tensor([[0, 1, 2, 0], [2, 0, 1, 2]]))
@@ -183,6 +241,31 @@ def test_metapath_random_walk_follows_typed_relation_sequence():
     )
 
     assert hasattr(graph_ops, "metapath_random_walk")
+    traces = graph_ops.metapath_random_walk(graph, torch.tensor([0, 1]), [writes, published_in])
+
+    assert torch.equal(traces, torch.tensor([[0, 0, 0], [1, 1, 0]]))
+
+
+def test_metapath_random_walk_avoids_tensor_tolist(monkeypatch):
+    writes = ("author", "writes", "paper")
+    published_in = ("paper", "published_in", "venue")
+    graph = Graph.hetero(
+        nodes={
+            "author": {"x": torch.tensor([[1.0], [2.0]])},
+            "paper": {"x": torch.tensor([[10.0], [20.0]])},
+            "venue": {"x": torch.tensor([[100.0]])},
+        },
+        edges={
+            writes: {"edge_index": torch.tensor([[0, 1], [0, 1]])},
+            published_in: {"edge_index": torch.tensor([[0, 1], [0, 0]])},
+        },
+    )
+
+    def fail_tolist(self):
+        raise AssertionError("metapath_random_walk should stay on tensors")
+
+    monkeypatch.setattr(torch.Tensor, "tolist", fail_tolist)
+
     traces = graph_ops.metapath_random_walk(graph, torch.tensor([0, 1]), [writes, published_in])
 
     assert torch.equal(traces, torch.tensor([[0, 0, 0], [1, 1, 0]]))

@@ -2,7 +2,13 @@ import torch
 
 from vgl.graph.block import Block, HeteroBlock
 from vgl.graph.graph import Graph
-from vgl.ops.subgraph import _ordered_unique, _relabel_bipartite_edge_index, _resolve_edge_type, _slice_edge_store, _slice_node_data
+from vgl.ops.subgraph import (
+    _ordered_unique,
+    _positions_for_endpoint_values,
+    _resolve_edge_type,
+    _slice_edge_store,
+    _slice_node_data,
+)
 
 
 def _validate_destination_nodes(dst_nodes, count: int) -> torch.Tensor:
@@ -18,16 +24,46 @@ def _validate_destination_nodes(dst_nodes, count: int) -> torch.Tensor:
 def _ordered_prefix_union(prefix: torch.Tensor, values: torch.Tensor) -> torch.Tensor:
     prefix = torch.as_tensor(prefix, dtype=torch.long).view(-1)
     values = torch.as_tensor(values, dtype=torch.long).view(-1)
-    ordered = []
-    seen = set()
-    for tensor in (prefix, values):
-        for value in tensor.tolist():
-            value = int(value)
-            if value in seen:
-                continue
-            seen.add(value)
-            ordered.append(value)
-    return torch.tensor(ordered, dtype=torch.long, device=prefix.device if prefix.numel() > 0 else values.device)
+    combined = torch.cat((prefix, values))
+    if combined.numel() == 0:
+        return torch.empty((0,), dtype=torch.long, device=prefix.device if prefix.numel() > 0 else values.device)
+    order = torch.argsort(combined, stable=True)
+    sorted_values = combined[order]
+    keep = torch.ones(sorted_values.numel(), dtype=torch.bool, device=combined.device)
+    if sorted_values.numel() > 1:
+        keep[1:] = sorted_values[1:] != sorted_values[:-1]
+    first_occurrences = torch.sort(order[keep], stable=True).values
+    return combined[first_occurrences]
+
+
+def _lookup_positions(index_ids: torch.Tensor, values: torch.Tensor, *, entity_name: str) -> torch.Tensor:
+    index_ids = torch.as_tensor(index_ids, dtype=torch.long).view(-1)
+    values = torch.as_tensor(values, dtype=torch.long, device=index_ids.device).view(-1)
+    if values.numel() == 0:
+        return torch.empty((0,), dtype=torch.long, device=index_ids.device)
+
+    sorted_index_ids, sort_perm = torch.sort(index_ids, stable=True)
+    positions = torch.searchsorted(sorted_index_ids, values)
+    if bool((positions >= sorted_index_ids.numel()).any()):
+        missing_value = int(values[positions >= sorted_index_ids.numel()][0].item())
+        raise KeyError(f"missing {entity_name} id {missing_value}")
+    matched_values = sorted_index_ids[positions]
+    if bool((matched_values != values).any()):
+        missing_value = int(values[matched_values != values][0].item())
+        raise KeyError(f"missing {entity_name} id {missing_value}")
+    return sort_perm[positions]
+
+
+def _relabel_block_edge_index(edge_index: torch.Tensor, src_node_ids: torch.Tensor, dst_node_ids: torch.Tensor) -> torch.Tensor:
+    if edge_index.numel() == 0:
+        return edge_index
+    return torch.stack(
+        (
+            _lookup_positions(src_node_ids, edge_index[0], entity_name="block source node"),
+            _lookup_positions(dst_node_ids, edge_index[1], entity_name="block destination node"),
+        ),
+        dim=0,
+    )
 
 
 def _block_store_types(src_type: str, dst_type: str) -> tuple[str, str]:
@@ -105,6 +141,17 @@ def _public_edge_ids(store, edge_ids: torch.Tensor) -> torch.Tensor:
     return public_ids[edge_ids]
 
 
+def _edge_ids_for_block_destinations(store, dst_local_n_id: torch.Tensor) -> torch.Tensor:
+    dst_local_n_id = torch.as_tensor(
+        dst_local_n_id,
+        dtype=torch.long,
+        device=store.edge_index.device,
+    ).view(-1)
+    if dst_local_n_id.numel() == 0:
+        return torch.empty((0,), dtype=torch.long, device=store.edge_index.device)
+    return _positions_for_endpoint_values(store, dst_local_n_id, endpoint=1)
+
+
 def to_block(graph: Graph, dst_nodes, *, edge_type=None, include_dst_in_src: bool = True) -> Block:
     try:
         edge_type = _resolve_edge_type(graph, edge_type)
@@ -115,8 +162,7 @@ def to_block(graph: Graph, dst_nodes, *, edge_type=None, include_dst_in_src: boo
     dst_local_n_id = _validate_destination_nodes(dst_nodes, graph._node_count(dst_type))
 
     edge_index = store.edge_index
-    dst_mask = torch.isin(edge_index[1], dst_local_n_id.to(device=edge_index.device))
-    edge_ids = torch.nonzero(dst_mask, as_tuple=False).view(-1)
+    edge_ids = _edge_ids_for_block_destinations(store, dst_local_n_id)
     selected_edge_index = edge_index[:, edge_ids] if edge_ids.numel() > 0 else edge_index[:, :0]
     predecessor_ids = (
         _ordered_unique(selected_edge_index[0])
@@ -130,8 +176,6 @@ def to_block(graph: Graph, dst_nodes, *, edge_type=None, include_dst_in_src: boo
         src_local_n_id = predecessor_ids
 
     src_store_type, dst_store_type = _block_store_types(src_type, dst_type)
-    src_mapping = {int(node_id): index for index, node_id in enumerate(src_local_n_id.tolist())}
-    dst_mapping = {int(node_id): index for index, node_id in enumerate(dst_local_n_id.tolist())}
     src_n_id = _public_node_ids(graph, node_type=src_type, local_node_ids=src_local_n_id)
     dst_n_id = _public_node_ids(graph, node_type=dst_type, local_node_ids=dst_local_n_id)
 
@@ -142,7 +186,7 @@ def to_block(graph: Graph, dst_nodes, *, edge_type=None, include_dst_in_src: boo
 
     edge_data = _slice_edge_store(store, edge_ids)
     edge_data["e_id"] = _public_edge_ids(store, edge_ids)
-    edge_data["edge_index"] = _relabel_bipartite_edge_index(edge_data["edge_index"], src_mapping, dst_mapping)
+    edge_data["edge_index"] = _relabel_block_edge_index(edge_data["edge_index"], src_local_n_id, dst_local_n_id)
 
     nodes = {src_store_type: src_node_data, dst_store_type: dst_node_data}
     edges = {(src_store_type, edge_type[1], dst_store_type): edge_data}
@@ -186,10 +230,7 @@ def to_hetero_block(
 
         store = graph.edges[edge_type]
         edge_index = store.edge_index
-        edge_ids = torch.nonzero(
-            torch.isin(edge_index[1], dst_local_n_id.to(device=edge_index.device)),
-            as_tuple=False,
-        ).view(-1)
+        edge_ids = _edge_ids_for_block_destinations(store, dst_local_n_id)
         selected_edge_index = edge_index[:, edge_ids] if edge_ids.numel() > 0 else edge_index[:, :0]
         predecessor_ids = (
             _ordered_unique(selected_edge_index[0])
@@ -224,19 +265,14 @@ def to_hetero_block(
             dst_type,
             torch.empty((0,), dtype=torch.long, device=store.edge_index.device),
         )
-        edge_ids = torch.nonzero(
-            torch.isin(store.edge_index[1], dst_local_n_id.to(device=store.edge_index.device)),
-            as_tuple=False,
-        ).view(-1)
+        edge_ids = _edge_ids_for_block_destinations(store, dst_local_n_id)
         edge_data = _slice_edge_store(store, edge_ids)
         edge_data["e_id"] = _public_edge_ids(store, edge_ids)
-        src_mapping = {
-            int(node_id): index for index, node_id in enumerate(torch.as_tensor(src_nodes_by_type[src_type], dtype=torch.long).tolist())
-        }
-        dst_mapping = {
-            int(node_id): index for index, node_id in enumerate(torch.as_tensor(normalized_dst_nodes[dst_type], dtype=torch.long).tolist())
-        }
-        edge_data["edge_index"] = _relabel_bipartite_edge_index(edge_data["edge_index"], src_mapping, dst_mapping)
+        edge_data["edge_index"] = _relabel_block_edge_index(
+            edge_data["edge_index"],
+            torch.as_tensor(src_nodes_by_type[src_type], dtype=torch.long),
+            torch.as_tensor(normalized_dst_nodes[dst_type], dtype=torch.long),
+        )
         edges[(src_store_types[src_type], rel_type, dst_store_types[dst_type])] = edge_data
 
     if graph.schema.time_attr is None:

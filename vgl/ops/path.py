@@ -27,26 +27,71 @@ def _normalize_seed_nodes(seeds, *, count: int, device: torch.device) -> torch.T
     return seed_tensor
 
 
-def _successor_map(edge_index: torch.Tensor) -> dict[int, torch.Tensor]:
-    successors: dict[int, list[int]] = {}
-    for src, dst in edge_index.t().tolist():
-        successors.setdefault(int(src), []).append(int(dst))
-    return {
-        src: torch.tensor(dst_list, dtype=torch.long, device=edge_index.device)
-        for src, dst_list in successors.items()
-    }
+def _successor_state(edge_index: torch.Tensor, *, num_src_nodes: int) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+    device = edge_index.device
+    counts = torch.zeros(num_src_nodes, dtype=torch.long, device=device)
+    if edge_index.numel() == 0:
+        return torch.empty(0, dtype=torch.long, device=device), counts, torch.empty(0, dtype=torch.long, device=device)
+
+    sort_perm = torch.argsort(edge_index[0], stable=True)
+    sorted_src = edge_index[0].index_select(0, sort_perm)
+    sorted_dst = edge_index[1].index_select(0, sort_perm)
+    counts = torch.bincount(sorted_src, minlength=num_src_nodes)
+    starts = torch.cumsum(counts, dim=0) - counts
+    return starts, counts, sorted_dst
 
 
-def _sample_successors(current: torch.Tensor, successors: dict[int, torch.Tensor]) -> torch.Tensor:
+def _source_edge_state(edge_index: torch.Tensor, *, num_src_nodes: int) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+    device = edge_index.device
+    counts = torch.zeros(num_src_nodes, dtype=torch.long, device=device)
+    if edge_index.numel() == 0:
+        return torch.empty(0, dtype=torch.long, device=device), torch.empty(0, dtype=torch.long, device=device), counts
+    sort_perm = torch.argsort(edge_index[0], stable=True)
+    sorted_src = edge_index[0].index_select(0, sort_perm)
+    counts = torch.bincount(sorted_src, minlength=num_src_nodes)
+    starts = torch.cumsum(counts, dim=0) - counts
+    return sort_perm, starts, counts
+
+
+def _edge_pairs(edge_index: torch.Tensor) -> list[tuple[int, int]]:
+    return [
+        (int(src.item()), int(dst.item()))
+        for src, dst in zip(edge_index[0], edge_index[1])
+    ]
+
+
+def _sample_offsets(counts: torch.Tensor) -> torch.Tensor:
+    offsets = torch.empty_like(counts)
+    for degree_tensor in torch.unique(counts, sorted=True):
+        degree = int(degree_tensor.item())
+        if degree <= 0:
+            continue
+        mask = counts == degree_tensor
+        offsets[mask] = torch.randint(degree, (int(mask.sum().item()),), device=counts.device)
+    return offsets
+
+
+def _sample_successors(current: torch.Tensor, successor_state: tuple[torch.Tensor, torch.Tensor, torch.Tensor]) -> torch.Tensor:
+    starts, counts, sorted_dst = successor_state
     next_nodes = torch.full_like(current, -1)
-    for index, node in enumerate(current.tolist()):
-        if node < 0:
-            continue
-        neighbors = successors.get(int(node))
-        if neighbors is None or neighbors.numel() == 0:
-            continue
-        choice = int(torch.randint(neighbors.numel(), (1,), device=neighbors.device).item())
-        next_nodes[index] = neighbors[choice]
+    if current.numel() == 0 or counts.numel() == 0:
+        return next_nodes
+
+    valid_positions = torch.nonzero(current >= 0, as_tuple=False).view(-1)
+    if valid_positions.numel() == 0:
+        return next_nodes
+
+    valid_nodes = current.index_select(0, valid_positions)
+    neighbor_counts = counts.index_select(0, valid_nodes)
+    has_neighbors = neighbor_counts > 0
+    if not bool(has_neighbors.any()):
+        return next_nodes
+
+    target_positions = valid_positions[has_neighbors]
+    target_nodes = valid_nodes[has_neighbors]
+    target_counts = neighbor_counts[has_neighbors]
+    target_offsets = starts.index_select(0, target_nodes) + _sample_offsets(target_counts)
+    next_nodes[target_positions] = sorted_dst.index_select(0, target_offsets)
     return next_nodes
 
 
@@ -58,19 +103,29 @@ def line_graph(graph: Graph, *, edge_type=None, backtracking: bool = True, copy_
 
     store = graph.edges[edge_type]
     edge_index = store.edge_index
-    edge_pairs = [(int(src), int(dst)) for src, dst in edge_index.t().tolist()]
-
-    line_edges = []
-    for source_edge_id, (src, dst) in enumerate(edge_pairs):
-        for target_edge_id, (next_src, next_dst) in enumerate(edge_pairs):
-            if dst != next_src:
+    sorted_edge_ids, starts, counts = _source_edge_state(edge_index, num_src_nodes=graph._node_count(src_type))
+    line_sources = []
+    line_targets = []
+    src_nodes = edge_index[0].to(dtype=torch.long)
+    dst_nodes = edge_index[1].to(dtype=torch.long)
+    for source_edge_id in range(edge_index.size(1)):
+        dst = int(dst_nodes[source_edge_id].item())
+        degree = int(counts[dst].item())
+        if degree == 0:
+            continue
+        start = int(starts[dst].item())
+        target_edge_ids = sorted_edge_ids[start : start + degree]
+        if not backtracking:
+            target_edge_ids = target_edge_ids[dst_nodes.index_select(0, target_edge_ids) != src_nodes[source_edge_id]]
+            if target_edge_ids.numel() == 0:
                 continue
-            if not backtracking and src == next_dst:
-                continue
-            line_edges.append((source_edge_id, target_edge_id))
+        line_sources.append(
+            torch.full((target_edge_ids.numel(),), source_edge_id, dtype=torch.long, device=edge_index.device)
+        )
+        line_targets.append(target_edge_ids.to(dtype=torch.long, device=edge_index.device))
 
-    if line_edges:
-        line_edge_index = torch.tensor(line_edges, dtype=torch.long, device=edge_index.device).t().contiguous()
+    if line_sources:
+        line_edge_index = torch.stack((torch.cat(line_sources), torch.cat(line_targets)), dim=0)
     else:
         line_edge_index = torch.empty((2, 0), dtype=torch.long, device=edge_index.device)
 
@@ -109,7 +164,7 @@ def random_walk(graph: Graph, seeds, *, length: int, edge_type=None) -> torch.Te
     if length == 0:
         return traces
 
-    successors = _successor_map(store.edge_index)
+    successors = _successor_state(store.edge_index, num_src_nodes=graph._node_count(src_type))
     current = seed_tensor
     for step in range(length):
         current = _sample_successors(current, successors)
@@ -131,17 +186,14 @@ def _normalize_metapath(graph: Graph, metapath) -> tuple[tuple[str, str, str], .
 
 
 def _metapath_pairs(graph: Graph, metapath: tuple[tuple[str, str, str], ...]) -> list[tuple[int, int]]:
-    current_pairs = [
-        (int(src), int(dst))
-        for src, dst in graph.edges[metapath[0]].edge_index.t().tolist()
-    ]
+    current_pairs = _edge_pairs(graph.edges[metapath[0]].edge_index)
     for edge_type in metapath[1:]:
         next_edges = {}
-        for src, dst in graph.edges[edge_type].edge_index.t().tolist():
+        for src, dst in _edge_pairs(graph.edges[edge_type].edge_index):
             next_edges.setdefault(int(src), []).append(int(dst))
         expanded = []
         for start, middle in current_pairs:
-            for dst in next_edges.get(int(middle), ()): 
+            for dst in next_edges.get(int(middle), ()):
                 expanded.append((int(start), int(dst)))
         current_pairs = expanded
 
@@ -187,6 +239,9 @@ def metapath_random_walk(graph: Graph, seeds, metapath) -> torch.Tensor:
     traces[:, 0] = seed_tensor
     current = seed_tensor
     for step, edge_type in enumerate(normalized, start=1):
-        current = _sample_successors(current, _successor_map(graph.edges[edge_type].edge_index))
+        current = _sample_successors(
+            current,
+            _successor_state(graph.edges[edge_type].edge_index, num_src_nodes=graph._node_count(edge_type[0])),
+        )
         traces[:, step] = current
     return traces

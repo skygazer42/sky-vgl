@@ -10,6 +10,11 @@ from vgl.graph.graph import Graph
 DEFAULT_EDGE_TYPE = ("node", "to", "node")
 
 
+def _tensor_int_tuple(values) -> tuple[int, ...]:
+    tensor = torch.as_tensor(values, dtype=torch.long).view(-1)
+    return tuple(int(value.item()) for value in tensor)
+
+
 def _slice_node_data(graph: Graph, node_type: str, start: int, end: int, *, device) -> tuple[dict, torch.Tensor]:
     node_count = graph._node_count(node_type)
     node_data = {}
@@ -136,10 +141,7 @@ def write_partitioned_graph(graph: Graph, root, *, num_partitions: int) -> Parti
             for node_type in shard_graph.nodes
         }
         edge_ids_by_type = {
-            tuple(edge_type): tuple(
-                int(edge_id)
-                for edge_id in torch.as_tensor(shard_graph.edges[tuple(edge_type)].data["e_id"], dtype=torch.long).tolist()
-            )
+            tuple(edge_type): _tensor_int_tuple(shard_graph.edges[tuple(edge_type)].data["e_id"])
             for edge_type in shard_graph.edges
         }
         edge_feature_shapes = {
@@ -151,10 +153,7 @@ def write_partitioned_graph(graph: Graph, root, *, num_partitions: int) -> Parti
             for edge_type in shard_graph.edges
         }
         boundary_edge_ids_by_type = {
-            tuple(edge_type): tuple(
-                int(edge_id)
-                for edge_id in torch.as_tensor(boundary_edges[tuple(edge_type)]["e_id"], dtype=torch.long).tolist()
-            )
+            tuple(edge_type): _tensor_int_tuple(boundary_edges[tuple(edge_type)]["e_id"])
             for edge_type in shard_graph.edges
         }
         torch.save(

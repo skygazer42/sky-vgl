@@ -28,6 +28,22 @@ def test_select_rows_returns_reindexed_sparse_tensor():
     assert torch.equal(torch.stack((selected.row, selected.col)), torch.tensor([[0, 0, 1], [1, 2, 0]]))
 
 
+def test_select_rows_avoids_tensor_tolist(monkeypatch):
+    sparse = from_edge_index(
+        torch.tensor([[0, 0, 2], [1, 2, 0]]),
+        shape=(3, 3),
+    )
+
+    def fail_tolist(self):
+        raise AssertionError("select_rows should stay on tensors")
+
+    monkeypatch.setattr(torch.Tensor, "tolist", fail_tolist)
+
+    selected = select_rows(sparse, torch.tensor([0, 2]))
+
+    assert torch.equal(torch.stack((selected.row, selected.col)), torch.tensor([[0, 0, 1], [1, 2, 0]]))
+
+
 def test_spmm_multiplies_sparse_by_dense_features():
     sparse = from_edge_index(
         torch.tensor([[0, 0, 2], [1, 2, 0]]),
@@ -51,6 +67,24 @@ def test_select_cols_returns_reindexed_sparse_tensor_with_values():
 
     assert selected.layout is SparseLayout.COO
     assert selected.shape == (3, 2)
+    assert torch.equal(torch.stack((selected.row, selected.col)), torch.tensor([[0, 2], [0, 1]]))
+    assert torch.equal(selected.values, torch.tensor([2.0, 3.0]))
+
+
+def test_select_cols_avoids_tensor_tolist(monkeypatch):
+    sparse = from_edge_index(
+        torch.tensor([[0, 0, 2], [1, 2, 0]]),
+        shape=(3, 3),
+        values=torch.tensor([1.0, 2.0, 3.0]),
+    )
+
+    def fail_tolist(self):
+        raise AssertionError("select_cols should stay on tensors")
+
+    monkeypatch.setattr(torch.Tensor, "tolist", fail_tolist)
+
+    selected = select_cols(sparse, torch.tensor([2, 0]))
+
     assert torch.equal(torch.stack((selected.row, selected.col)), torch.tensor([[0, 2], [0, 1]]))
     assert torch.equal(selected.values, torch.tensor([2.0, 3.0]))
 

@@ -2,7 +2,7 @@ from dataclasses import replace
 
 import torch
 
-from vgl.dataloading.executor import MaterializationContext
+from vgl.dataloading.executor import MaterializationContext, _lookup_positions
 from vgl.dataloading.records import LinkPredictionRecord, SampleRecord, TemporalEventRecord
 from vgl.graph.batch import (
     GraphBatch,
@@ -14,6 +14,7 @@ from vgl.graph.batch import (
 )
 from vgl.graph.graph import Graph
 from vgl.ops.block import to_block, to_hetero_block
+from vgl.ops.subgraph import _membership_mask, _positions_for_endpoint_values, _relabel_bipartite_edge_index
 
 
 def _align_tensor_slice(index: torch.Tensor, tensor_slice) -> torch.Tensor:
@@ -23,15 +24,8 @@ def _align_tensor_slice(index: torch.Tensor, tensor_slice) -> torch.Tensor:
         return tensor_slice.values.new_empty((0,) + tuple(tensor_slice.values.shape[1:]))
     if torch.equal(index, slice_index):
         return tensor_slice.values
-    positions = {int(value): current for current, value in enumerate(slice_index.tolist())}
-    order = []
-    for value in index.tolist():
-        value = int(value)
-        if value not in positions:
-            raise KeyError(f"fetched feature slice is missing id {value}")
-        order.append(positions[value])
-    order_index = torch.tensor(order, dtype=torch.long, device=tensor_slice.values.device)
-    return tensor_slice.values[order_index]
+    order_index = _lookup_positions(slice_index, index, entity_name="feature slice")
+    return tensor_slice.values[order_index.to(device=tensor_slice.values.device)]
 
 
 def _subgraph(
@@ -44,13 +38,20 @@ def _subgraph(
     node_ids = node_ids.to(dtype=torch.long)
     num_nodes = int(graph.x.size(0))
     edge_index = graph.edge_index
-    node_mask = torch.zeros(num_nodes, dtype=torch.bool, device=edge_index.device)
-    node_mask[node_ids] = True
-    edge_mask = node_mask[edge_index[0]] & node_mask[edge_index[1]]
-
-    node_mapping = torch.full((num_nodes,), -1, dtype=torch.long, device=edge_index.device)
-    node_mapping[node_ids] = torch.arange(node_ids.size(0), dtype=torch.long, device=edge_index.device)
-    subgraph_edge_index = node_mapping[edge_index[:, edge_mask]]
+    edge_store = graph.edges[graph._default_edge_type()]
+    node_ids_device = node_ids.to(device=edge_index.device)
+    candidate_edge_ids = _positions_for_endpoint_values(edge_store, node_ids_device, endpoint=0)
+    edge_ids = candidate_edge_ids[
+        _membership_mask(edge_index[1, candidate_edge_ids], node_ids_device)
+    ]
+    if edge_ids.numel() == 0:
+        subgraph_edge_index = edge_index[:, :0]
+    else:
+        subgraph_edge_index = _relabel_bipartite_edge_index(
+            edge_index[:, edge_ids],
+            node_ids,
+            node_ids,
+        )
 
     node_data = {}
     for key, value in graph.nodes["node"].data.items():
@@ -64,22 +65,20 @@ def _subgraph(
         node_data[feature_name] = _align_tensor_slice(node_ids, tensor_slice)
 
     edge_type = graph._default_edge_type()
-    edge_store = graph.edges[edge_type]
     edge_count = int(edge_store.edge_index.size(1))
     edge_data = {}
-    edge_ids = torch.arange(edge_count, dtype=torch.long, device=edge_index.device)[edge_mask]
     for key, value in edge_store.data.items():
         if key == "edge_index":
             continue
         if isinstance(value, torch.Tensor) and value.ndim > 0 and value.size(0) == edge_count:
-            edge_data[key] = value[edge_mask]
+            edge_data[key] = value[edge_ids]
         else:
             edge_data[key] = value
     if "e_id" not in edge_data:
         edge_data["e_id"] = edge_ids
     for feature_name, tensor_slice in (fetched_edge_features or {}).get(edge_type, {}).items():
         edge_data[feature_name] = _align_tensor_slice(edge_ids, tensor_slice)
-    return Graph.homo(edge_index=subgraph_edge_index, edge_data=edge_data, **node_data), node_mapping
+    return Graph.homo(edge_index=subgraph_edge_index, edge_data=edge_data, **node_data), node_ids
 
 
 def _hetero_subgraph(
@@ -89,19 +88,10 @@ def _hetero_subgraph(
     fetched_node_features: dict[str, dict[str, object]] | None = None,
     fetched_edge_features: dict[object, dict[str, object]] | None = None,
 ):
-    node_masks = {}
-    node_mappings = {}
     nodes = {}
     for node_type, store in graph.nodes.items():
-        node_ids = node_ids_by_type[node_type]
+        node_ids = node_ids_by_type[node_type].to(dtype=torch.long)
         num_nodes = store.x.size(0)
-        node_mask = torch.zeros(num_nodes, dtype=torch.bool, device=store.x.device)
-        if node_ids.numel() > 0:
-            node_mask[node_ids] = True
-        node_mapping = torch.full((num_nodes,), -1, dtype=torch.long, device=store.x.device)
-        node_mapping[node_ids] = torch.arange(node_ids.numel(), dtype=torch.long, device=store.x.device)
-        node_masks[node_type] = node_mask
-        node_mappings[node_type] = node_mapping
 
         node_data = {}
         for key, value in store.data.items():
@@ -119,22 +109,27 @@ def _hetero_subgraph(
     for edge_type, store in graph.edges.items():
         src_type, _, dst_type = edge_type
         edge_index = store.edge_index
-        edge_mask = node_masks[src_type][edge_index[0]] & node_masks[dst_type][edge_index[1]]
-        subgraph_edge_index = torch.stack(
-            [
-                node_mappings[src_type][edge_index[0, edge_mask]],
-                node_mappings[dst_type][edge_index[1, edge_mask]],
-            ],
-            dim=0,
-        )
+        src_node_ids = node_ids_by_type[src_type].to(dtype=torch.long, device=store.edge_index.device)
+        dst_node_ids = node_ids_by_type[dst_type].to(dtype=torch.long, device=store.edge_index.device)
+        candidate_edge_ids = _positions_for_endpoint_values(store, src_node_ids, endpoint=0)
+        edge_ids = candidate_edge_ids[
+            _membership_mask(store.edge_index[1, candidate_edge_ids], dst_node_ids)
+        ]
+        if edge_ids.numel() == 0:
+            subgraph_edge_index = store.edge_index[:, :0]
+        else:
+            subgraph_edge_index = _relabel_bipartite_edge_index(
+                store.edge_index[:, edge_ids],
+                node_ids_by_type[src_type],
+                node_ids_by_type[dst_type],
+            )
         edge_count = int(edge_index.size(1))
         edge_data = {"edge_index": subgraph_edge_index}
-        edge_ids = torch.arange(edge_count, dtype=torch.long, device=edge_index.device)[edge_mask]
         for key, value in store.data.items():
             if key == "edge_index":
                 continue
             if isinstance(value, torch.Tensor) and value.ndim > 0 and value.size(0) == edge_count:
-                edge_data[key] = value[edge_mask]
+                edge_data[key] = value[edge_ids]
             else:
                 edge_data[key] = value
         if "e_id" not in edge_data:
@@ -142,7 +137,10 @@ def _hetero_subgraph(
         for feature_name, tensor_slice in (fetched_edge_features or {}).get(edge_type, {}).items():
             edge_data[feature_name] = _align_tensor_slice(edge_ids, tensor_slice)
         edges[edge_type] = edge_data
-    return Graph.hetero(nodes=nodes, edges=edges, time_attr=graph.schema.time_attr), node_mappings
+    return Graph.hetero(nodes=nodes, edges=edges, time_attr=graph.schema.time_attr), {
+        node_type: node_ids_by_type[node_type].to(dtype=torch.long)
+        for node_type in graph.nodes
+    }
 
 
 def _node_store_shape(store) -> tuple[int, torch.device]:
@@ -213,26 +211,13 @@ def _graph_with_materialized_features(
     return materialized
 
 
-def _build_homo_blocks(subgraph: Graph, node_mapping: torch.Tensor, node_hops: list[torch.Tensor]):
-    subgraph_hops = []
-    for hop_node_ids in node_hops:
-        hop_node_ids = torch.as_tensor(hop_node_ids, dtype=torch.long, device=node_mapping.device).view(-1)
-        subgraph_hops.append(node_mapping[hop_node_ids])
-    return [to_block(subgraph, dst_nodes) for dst_nodes in subgraph_hops[-2::-1]]
-
-
 def _build_homo_blocks_from_local_ids(subgraph: Graph, node_ids_local: torch.Tensor, node_hops: list[torch.Tensor]):
     node_ids_local = torch.as_tensor(node_ids_local, dtype=torch.long).view(-1)
-    positions = {int(node_id): index for index, node_id in enumerate(node_ids_local.tolist())}
     subgraph_hops = []
     for hop_node_ids in node_hops:
         hop_node_ids = torch.as_tensor(hop_node_ids, dtype=torch.long).view(-1)
         subgraph_hops.append(
-            torch.tensor(
-                [positions[int(node_id)] for node_id in hop_node_ids.tolist()],
-                dtype=torch.long,
-                device=node_ids_local.device,
-            )
+            _lookup_positions(node_ids_local, hop_node_ids, entity_name="block node").to(device=node_ids_local.device)
         )
     return [to_block(subgraph, dst_nodes) for dst_nodes in subgraph_hops[-2::-1]]
 
@@ -250,15 +235,12 @@ def _build_hetero_blocks_from_local_ids(
         device = next(iter(subgraph.nodes[dst_type].data.values())).device
         dst_node_ids = torch.arange(node_count, dtype=torch.long, device=device)
     dst_node_ids = torch.as_tensor(dst_node_ids, dtype=torch.long).view(-1)
-    positions = {int(node_id): index for index, node_id in enumerate(dst_node_ids.tolist())}
     subgraph_hops = []
     for hop_nodes in node_hops_by_type:
         hop_node_ids = torch.as_tensor(hop_nodes.get(dst_type, ()), dtype=torch.long).view(-1)
         subgraph_hops.append(
-            torch.tensor(
-                [positions[int(node_id)] for node_id in hop_node_ids.tolist()],
-                dtype=torch.long,
-                device=dst_node_ids.device,
+            _lookup_positions(dst_node_ids, hop_node_ids, entity_name=f"{dst_type} block node").to(
+                device=dst_node_ids.device
             )
         )
     return [to_block(subgraph, dst_nodes, edge_type=edge_type) for dst_nodes in subgraph_hops[-2::-1]]
@@ -268,7 +250,6 @@ def _build_full_hetero_blocks_from_local_ids(
     subgraph: Graph,
     node_hops_by_type: list[dict[str, torch.Tensor]],
 ):
-    positions_by_type = {}
     devices_by_type = {}
     for node_type, store in subgraph.nodes.items():
         node_ids = store.data.get("n_id")
@@ -277,18 +258,20 @@ def _build_full_hetero_blocks_from_local_ids(
             device = next(iter(store.data.values())).device
             node_ids = torch.arange(node_count, dtype=torch.long, device=device)
         node_ids = torch.as_tensor(node_ids, dtype=torch.long).view(-1)
-        positions_by_type[node_type] = {int(node_id): index for index, node_id in enumerate(node_ids.tolist())}
-        devices_by_type[node_type] = node_ids.device
+        devices_by_type[node_type] = node_ids
 
     subgraph_hops = []
     for hop_nodes in node_hops_by_type:
         dst_nodes_by_type = {}
         for node_type in subgraph.schema.node_types:
             hop_node_ids = torch.as_tensor(hop_nodes.get(node_type, ()), dtype=torch.long).view(-1)
-            dst_nodes_by_type[node_type] = torch.tensor(
-                [positions_by_type[node_type][int(node_id)] for node_id in hop_node_ids.tolist()],
-                dtype=torch.long,
-                device=devices_by_type[node_type],
+            node_ids = devices_by_type[node_type]
+            dst_nodes_by_type[node_type] = _lookup_positions(
+                node_ids,
+                hop_node_ids,
+                entity_name=f"{node_type} block node",
+            ).to(
+                device=node_ids.device,
             )
         subgraph_hops.append(dst_nodes_by_type)
     return [
@@ -436,8 +419,8 @@ def _node_context_to_sample(context: MaterializationContext) -> SampleRecord | l
     metadata = dict(getattr(request, "metadata", {}))
     sample_id = context.metadata.get("sample_id", metadata.get("sample_id"))
     source_graph_id = context.metadata.get("source_graph_id", metadata.get("source_graph_id"))
-    seeds = [int(value) for value in request.node_ids.reshape(-1).tolist()]
-    if not seeds:
+    seeds = torch.as_tensor(request.node_ids, dtype=torch.long).view(-1)
+    if seeds.numel() == 0:
         raise ValueError("node context requires at least one seed for materialization")
 
     fetched_node_features = context.state.get("_materialized_node_features")
@@ -450,7 +433,11 @@ def _node_context_to_sample(context: MaterializationContext) -> SampleRecord | l
             fetched_node_features=fetched_node_features,
             fetched_edge_features=fetched_edge_features,
         )
-        subgraph_seeds = [int(node_mapping[seed].item()) for seed in seeds]
+        subgraph_seeds = _lookup_positions(
+            node_mapping,
+            seeds.to(device=node_mapping.device),
+            entity_name="seed node",
+        )
         node_type = "node"
     elif "node_ids_by_type" in context.state:
         node_type = request.node_type
@@ -460,7 +447,11 @@ def _node_context_to_sample(context: MaterializationContext) -> SampleRecord | l
             fetched_node_features=fetched_node_features,
             fetched_edge_features=fetched_edge_features,
         )
-        subgraph_seeds = [int(node_mapping[node_type][seed].item()) for seed in seeds]
+        subgraph_seeds = _lookup_positions(
+            node_mapping[node_type],
+            seeds.to(device=node_mapping[node_type].device),
+            entity_name=f"{node_type} seed node",
+        )
     else:
         raise ValueError("node context must contain expanded node ids for materialization")
 
@@ -468,7 +459,7 @@ def _node_context_to_sample(context: MaterializationContext) -> SampleRecord | l
     if "node_hops" in context.state:
         if node_type != "node":
             raise ValueError("node block materialization currently supports homogeneous graphs only")
-        blocks = _build_homo_blocks(subgraph, node_mapping, context.state["node_hops"])
+        blocks = _build_homo_blocks_from_local_ids(subgraph, node_mapping, context.state["node_hops"])
     elif "node_hops_by_type" in context.state:
         if context.state.get("node_block_edge_type") is not None:
             blocks = _build_hetero_blocks_from_local_ids(
@@ -483,9 +474,9 @@ def _node_context_to_sample(context: MaterializationContext) -> SampleRecord | l
             )
 
     samples = []
-    for seed, subgraph_seed in zip(seeds, subgraph_seeds):
+    for index in range(seeds.numel()):
         sample_metadata = dict(metadata)
-        sample_metadata["seed"] = seed
+        sample_metadata["seed"] = int(seeds[index].item())
         if node_type != "node":
             sample_metadata.setdefault("node_type", node_type)
         samples.append(
@@ -494,7 +485,7 @@ def _node_context_to_sample(context: MaterializationContext) -> SampleRecord | l
                 metadata=sample_metadata,
                 sample_id=sample_id,
                 source_graph_id=source_graph_id,
-                subgraph_seed=subgraph_seed,
+                subgraph_seed=int(subgraph_seeds[index].item()),
                 blocks=blocks,
             )
         )

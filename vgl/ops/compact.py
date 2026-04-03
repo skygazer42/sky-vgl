@@ -1,7 +1,7 @@
 import torch
 
 from vgl.graph.graph import Graph
-from vgl.ops.subgraph import _ordered_unique
+from vgl.ops.subgraph import _lookup_positions, _ordered_unique
 
 
 def _slice_node_data(graph: Graph, node_ids: torch.Tensor, *, node_type: str) -> dict[str, torch.Tensor]:
@@ -16,6 +16,23 @@ def _slice_node_data(graph: Graph, node_ids: torch.Tensor, *, node_type: str) ->
     return data
 
 
+def _mapping_dict(node_ids: torch.Tensor) -> dict[int, int]:
+    return {int(node_id.item()): index for index, node_id in enumerate(node_ids)}
+
+
+def _relabel_edge_index(edge_index: torch.Tensor, src_node_ids: torch.Tensor, dst_node_ids: torch.Tensor) -> torch.Tensor:
+    if edge_index.numel() == 0:
+        return edge_index
+    relabelled = torch.stack(
+        (
+            _lookup_positions(src_node_ids, edge_index[0], entity_name="source node"),
+            _lookup_positions(dst_node_ids, edge_index[1], entity_name="destination node"),
+        ),
+        dim=0,
+    )
+    return relabelled.to(dtype=edge_index.dtype)
+
+
 def compact_nodes(graph: Graph, node_ids, *, edge_type=None):
     if edge_type is None:
         edge_type = graph._default_edge_type()
@@ -26,12 +43,8 @@ def compact_nodes(graph: Graph, node_ids, *, edge_type=None):
 
     if src_type == dst_type and src_type == "node" and len(graph.nodes) == 1 and len(graph.edges) == 1:
         node_ids = _ordered_unique(node_ids)
-        mapping = {int(node_id): index for index, node_id in enumerate(node_ids.tolist())}
-        relabelled = torch.tensor(
-            [[mapping[int(src)], mapping[int(dst)]] for src, dst in edge_index.t().tolist()],
-            dtype=edge_index.dtype,
-            device=edge_index.device,
-        ).t().contiguous()
+        mapping = _mapping_dict(node_ids)
+        relabelled = _relabel_edge_index(edge_index, node_ids, node_ids)
         node_data = _slice_node_data(graph, node_ids, node_type="node")
         edge_data = {}
         edge_count = int(edge_index.size(1))
@@ -54,13 +67,9 @@ def compact_nodes(graph: Graph, node_ids, *, edge_type=None):
     for node_type in dict.fromkeys((src_type, dst_type)):
         ids = _ordered_unique(node_ids[node_type])
         selected_node_ids[node_type] = ids
-        mappings[node_type] = {int(node_id): index for index, node_id in enumerate(ids.tolist())}
+        mappings[node_type] = _mapping_dict(ids)
 
-    relabelled = torch.tensor(
-        [[mappings[src_type][int(src)], mappings[dst_type][int(dst)]] for src, dst in edge_index.t().tolist()],
-        dtype=edge_index.dtype,
-        device=edge_index.device,
-    ).t().contiguous()
+    relabelled = _relabel_edge_index(edge_index, selected_node_ids[src_type], selected_node_ids[dst_type])
 
     edge_data = {}
     edge_count = int(edge_index.size(1))

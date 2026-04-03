@@ -37,6 +37,36 @@ def _public_edge_ids(store: EdgeStore) -> torch.Tensor:
     return torch.as_tensor(public_ids, dtype=torch.long, device=store.edge_index.device).view(-1)
 
 
+def _edge_pair_keys(edge_index: torch.Tensor, *, dst_count: int) -> torch.Tensor:
+    if edge_index.numel() == 0:
+        return torch.empty(0, dtype=torch.long, device=edge_index.device)
+    return edge_index[0].to(dtype=torch.long) * int(dst_count) + edge_index[1].to(dtype=torch.long)
+
+
+def _stable_unique_positions(keys: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
+    if keys.numel() == 0:
+        empty = torch.empty(0, dtype=torch.long, device=keys.device)
+        return empty, empty
+
+    unique_keys, inverse, counts = torch.unique(keys, sorted=True, return_inverse=True, return_counts=True)
+    positions = torch.arange(keys.numel(), dtype=torch.long, device=keys.device)
+    first_positions = torch.full((unique_keys.numel(),), keys.numel(), dtype=torch.long, device=keys.device)
+    first_positions.scatter_reduce_(0, inverse, positions, reduce="amin", include_self=True)
+    order = torch.argsort(first_positions, stable=True)
+    return first_positions.index_select(0, order), counts.index_select(0, order)
+
+
+def _membership_mask(values: torch.Tensor, allowed: torch.Tensor) -> torch.Tensor:
+    values = torch.as_tensor(values, dtype=torch.long).view(-1)
+    allowed = torch.as_tensor(allowed, dtype=torch.long, device=values.device).view(-1)
+    if values.numel() == 0 or allowed.numel() == 0:
+        return torch.zeros(values.numel(), dtype=torch.bool, device=values.device)
+    sorted_allowed = torch.sort(allowed, stable=True).values
+    positions = torch.searchsorted(sorted_allowed, values, right=False)
+    capped_positions = positions.clamp_max(sorted_allowed.numel() - 1)
+    return (positions < sorted_allowed.numel()) & (sorted_allowed[capped_positions] == values)
+
+
 def _preserved_time_attr(graph: Graph, node_features: dict[str, tuple[str, ...]], edge_features: dict[tuple[str, str, str], tuple[str, ...]]) -> str | None:
     time_attr = graph.schema.time_attr
     if time_attr is None:
@@ -83,11 +113,14 @@ def add_self_loops(graph: Graph, *, edge_type=None) -> Graph:
     store = graph.edges[edge_type]
     edge_index = store.edge_index
     num_nodes = graph._node_count(src_type)
-    existing_self = {(int(src), int(dst)) for src, dst in edge_index.t().tolist() if int(src) == int(dst)}
-    missing = [node for node in range(num_nodes) if (node, node) not in existing_self]
-    if not missing:
+    has_self_loop = torch.zeros(num_nodes, dtype=torch.bool, device=edge_index.device)
+    self_mask = edge_index[0] == edge_index[1]
+    if bool(self_mask.any()):
+        has_self_loop[edge_index[0, self_mask].to(dtype=torch.long)] = True
+    missing = torch.nonzero(~has_self_loop, as_tuple=False).view(-1).to(dtype=edge_index.dtype)
+    if missing.numel() == 0:
         return Graph(schema=graph.schema, nodes=graph.nodes, edges=dict(graph.edges))
-    loops = torch.tensor([missing, missing], dtype=edge_index.dtype, device=edge_index.device)
+    loops = torch.stack((missing, missing), dim=0)
     updated_index = torch.cat((edge_index, loops), dim=1)
     edges = dict(graph.edges)
     edges[edge_type] = _edge_store_with_index(store, updated_index)
@@ -111,16 +144,13 @@ def to_bidirected(graph: Graph, *, edge_type=None) -> Graph:
         raise ValueError("to_bidirected requires matching source and destination node types")
     store = graph.edges[edge_type]
     edge_index = store.edge_index
-    existing = {tuple(edge) for edge in edge_index.t().tolist()}
-    reverse_edges = []
-    for src, dst in edge_index.t().tolist():
-        reverse = (int(dst), int(src))
-        if reverse not in existing:
-            reverse_edges.append(reverse)
-    if not reverse_edges:
+    pair_keys = _edge_pair_keys(edge_index, dst_count=graph._node_count(dst_type))
+    reverse_index = edge_index[[1, 0]].contiguous()
+    reverse_keys = _edge_pair_keys(reverse_index, dst_count=graph._node_count(src_type))
+    missing_mask = ~_membership_mask(reverse_keys, pair_keys)
+    if not bool(missing_mask.any()):
         return Graph(schema=graph.schema, nodes=graph.nodes, edges=dict(graph.edges))
-    reverse_index = torch.tensor(reverse_edges, dtype=edge_index.dtype, device=edge_index.device).t().contiguous()
-    updated_index = torch.cat((edge_index, reverse_index), dim=1)
+    updated_index = torch.cat((edge_index, reverse_index[:, missing_mask]), dim=1)
     edges = dict(graph.edges)
     edges[edge_type] = _edge_store_with_index(store, updated_index)
     return Graph(schema=graph.schema, nodes=graph.nodes, edges=edges)
@@ -131,21 +161,10 @@ def to_simple(graph: Graph, *, edge_type=None, count_attr=None) -> Graph:
     store = graph.edges[edge_type]
     edge_index = store.edge_index
     device = edge_index.device
-
-    representative_positions: list[int] = []
-    pair_to_position: dict[tuple[int, int], int] = {}
-    counts: list[int] = []
-    for index, (src, dst) in enumerate(edge_index.t().tolist()):
-        pair = (int(src), int(dst))
-        output_index = pair_to_position.get(pair)
-        if output_index is None:
-            pair_to_position[pair] = len(representative_positions)
-            representative_positions.append(index)
-            counts.append(1)
-            continue
-        counts[output_index] += 1
-
-    representative_tensor = torch.tensor(representative_positions, dtype=torch.long, device=device)
+    _, _, dst_type = edge_type
+    representative_tensor, counts = _stable_unique_positions(
+        _edge_pair_keys(edge_index, dst_count=graph._node_count(dst_type))
+    )
     simple_edge_index = edge_index[:, representative_tensor] if representative_tensor.numel() > 0 else edge_index[:, :0]
 
     edge_count = int(edge_index.size(1))
@@ -158,7 +177,7 @@ def to_simple(graph: Graph, *, edge_type=None, count_attr=None) -> Graph:
         else:
             edge_data[key] = value
     if count_attr is not None:
-        edge_data[str(count_attr)] = torch.tensor(counts, dtype=torch.long, device=device)
+        edge_data[str(count_attr)] = counts.to(device=device, dtype=torch.long)
 
     return _graph_with_updated_edges(graph, {edge_type: EdgeStore(edge_type, edge_data)})
 

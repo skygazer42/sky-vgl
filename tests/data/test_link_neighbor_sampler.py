@@ -1,4 +1,5 @@
 import torch
+import inspect
 
 from vgl import Graph, HeteroBlock
 from vgl.data.dataset import ListDataset
@@ -33,6 +34,70 @@ def test_link_neighbor_sampler_extracts_local_subgraph_with_global_node_ids():
     assert torch.equal(record.graph.edge_index, torch.tensor([[0, 1, 3], [1, 2, 1]]))
     assert record.src_index == 0
     assert record.dst_index == 1
+
+
+def test_link_neighbor_sampler_homo_frontier_expansion_avoids_tensor_tolist(monkeypatch):
+    graph = Graph.homo(
+        edge_index=torch.tensor([[0, 1, 3], [1, 2, 1]]),
+        x=torch.arange(12, dtype=torch.float32).view(4, 3),
+    )
+    sampler = LinkNeighborSampler(num_neighbors=[-1])
+    record = LinkPredictionRecord(graph=graph, src_index=0, dst_index=1, label=1)
+
+    def fail_tolist(self):
+        raise AssertionError("homo frontier expansion should stay on tensors")
+
+    monkeypatch.setattr(torch.Tensor, "tolist", fail_tolist)
+
+    sampled = sampler._sample_node_ids(graph, [record])
+
+    assert torch.equal(sampled, torch.tensor([0, 1, 2, 3]))
+
+
+def test_link_neighbor_sampler_homo_local_subgraph_avoids_dense_bool_masks(monkeypatch):
+    graph = Graph.homo(
+        edge_index=torch.tensor([[0, 1, 3], [1, 2, 1]]),
+        x=torch.arange(12, dtype=torch.float32).view(4, 3),
+    )
+    sampler = LinkNeighborSampler(num_neighbors=[-1])
+    original_zeros = torch.zeros
+
+    def guarded_zeros(*args, **kwargs):
+        size = args[0] if args else kwargs.get("size")
+        caller = inspect.currentframe().f_back
+        if kwargs.get("dtype") is torch.bool and size == graph.x.size(0) and caller is not None and caller.f_code.co_name == "_subgraph":
+            raise AssertionError("homo local subgraph extraction should avoid dense bool node masks")
+        return original_zeros(*args, **kwargs)
+
+    monkeypatch.setattr(torch, "zeros", guarded_zeros)
+
+    subgraph, node_mapping = sampler._subgraph(graph, torch.tensor([0, 1, 2, 3]))
+
+    assert torch.equal(subgraph.edge_index, torch.tensor([[0, 1, 3], [1, 2, 1]]))
+    assert torch.equal(node_mapping, torch.tensor([0, 1, 2, 3]))
+
+
+def test_link_neighbor_sampler_homo_local_subgraph_avoids_dense_node_mappings(monkeypatch):
+    graph = Graph.homo(
+        edge_index=torch.tensor([[0, 1, 3], [1, 2, 1]]),
+        x=torch.arange(12, dtype=torch.float32).view(4, 3),
+    )
+    sampler = LinkNeighborSampler(num_neighbors=[-1])
+    original_full = torch.full
+
+    def guarded_full(*args, **kwargs):
+        size = args[0] if args else kwargs.get("size")
+        caller = inspect.currentframe().f_back
+        if size == (graph.x.size(0),) and caller is not None and caller.f_code.co_name == "_subgraph":
+            raise AssertionError("homo local subgraph extraction should avoid dense node mappings")
+        return original_full(*args, **kwargs)
+
+    monkeypatch.setattr(torch, "full", guarded_full)
+
+    subgraph, node_mapping = sampler._subgraph(graph, torch.tensor([0, 1, 2, 3]))
+
+    assert torch.equal(subgraph.edge_index, torch.tensor([[0, 1, 3], [1, 2, 1]]))
+    assert torch.equal(node_mapping, torch.tensor([0, 1, 2, 3]))
 
 
 def test_link_neighbor_sampler_can_wrap_uniform_negative_sampling():
@@ -96,6 +161,123 @@ def test_link_neighbor_sampler_extracts_hetero_local_subgraph_for_single_edge_ty
     )
     assert record.src_index == 0
     assert record.dst_index == 0
+
+
+def test_link_neighbor_sampler_hetero_frontier_expansion_avoids_tensor_tolist(monkeypatch):
+    graph = Graph.hetero(
+        nodes={
+            "author": {"x": torch.randn(3, 4)},
+            "paper": {"x": torch.randn(3, 4)},
+        },
+        edges={
+            ("author", "writes", "paper"): {
+                "edge_index": torch.tensor([[0, 2], [1, 1]])
+            },
+            ("paper", "written_by", "author"): {
+                "edge_index": torch.tensor([[1, 1], [0, 2]])
+            },
+        },
+    )
+    sampler = LinkNeighborSampler(num_neighbors=[-1])
+    record = LinkPredictionRecord(
+        graph=graph,
+        src_index=0,
+        dst_index=1,
+        label=1,
+        edge_type=("author", "writes", "paper"),
+    )
+
+    def fail_tolist(self):
+        raise AssertionError("hetero frontier expansion should stay on tensors")
+
+    monkeypatch.setattr(torch.Tensor, "tolist", fail_tolist)
+
+    sampled = sampler._hetero_sample_node_ids(graph, [record])
+
+    assert torch.equal(sampled["author"], torch.tensor([0, 2]))
+    assert torch.equal(sampled["paper"], torch.tensor([1]))
+
+
+def test_link_neighbor_sampler_hetero_local_subgraph_avoids_dense_bool_masks(monkeypatch):
+    graph = Graph.hetero(
+        nodes={
+            "author": {"x": torch.randn(2, 4)},
+            "paper": {"x": torch.randn(3, 4)},
+        },
+        edges={
+            ("author", "writes", "paper"): {
+                "edge_index": torch.tensor([[0, 1], [1, 2]])
+            },
+            ("paper", "written_by", "author"): {
+                "edge_index": torch.tensor([[1, 2], [0, 1]])
+            },
+        },
+    )
+    sampler = LinkNeighborSampler(num_neighbors=[-1])
+    original_zeros = torch.zeros
+
+    def guarded_zeros(*args, **kwargs):
+        size = args[0] if args else kwargs.get("size")
+        caller = inspect.currentframe().f_back
+        if kwargs.get("dtype") is torch.bool and size in {2, 3} and caller is not None and caller.f_code.co_name == "_hetero_subgraph":
+            raise AssertionError("hetero local subgraph extraction should avoid dense bool node masks")
+        return original_zeros(*args, **kwargs)
+
+    monkeypatch.setattr(torch, "zeros", guarded_zeros)
+
+    subgraph, node_mapping = sampler._hetero_subgraph(
+        graph,
+        {
+            "author": torch.tensor([0]),
+            "paper": torch.tensor([1]),
+        },
+    )
+
+    assert torch.equal(subgraph.edges[("author", "writes", "paper")].edge_index, torch.tensor([[0], [0]]))
+    assert torch.equal(subgraph.edges[("paper", "written_by", "author")].edge_index, torch.tensor([[0], [0]]))
+    assert torch.equal(node_mapping["author"], torch.tensor([0]))
+    assert torch.equal(node_mapping["paper"], torch.tensor([1]))
+
+
+def test_link_neighbor_sampler_hetero_local_subgraph_avoids_dense_node_mappings(monkeypatch):
+    graph = Graph.hetero(
+        nodes={
+            "author": {"x": torch.randn(2, 4)},
+            "paper": {"x": torch.randn(3, 4)},
+        },
+        edges={
+            ("author", "writes", "paper"): {
+                "edge_index": torch.tensor([[0, 1], [1, 2]])
+            },
+            ("paper", "written_by", "author"): {
+                "edge_index": torch.tensor([[1, 2], [0, 1]])
+            },
+        },
+    )
+    sampler = LinkNeighborSampler(num_neighbors=[-1])
+    original_full = torch.full
+
+    def guarded_full(*args, **kwargs):
+        size = args[0] if args else kwargs.get("size")
+        caller = inspect.currentframe().f_back
+        if size in {(2,), (3,)} and caller is not None and caller.f_code.co_name == "_hetero_subgraph":
+            raise AssertionError("hetero local subgraph extraction should avoid dense node mappings")
+        return original_full(*args, **kwargs)
+
+    monkeypatch.setattr(torch, "full", guarded_full)
+
+    subgraph, node_mapping = sampler._hetero_subgraph(
+        graph,
+        {
+            "author": torch.tensor([0]),
+            "paper": torch.tensor([1]),
+        },
+    )
+
+    assert torch.equal(subgraph.edges[("author", "writes", "paper")].edge_index, torch.tensor([[0], [0]]))
+    assert torch.equal(subgraph.edges[("paper", "written_by", "author")].edge_index, torch.tensor([[0], [0]]))
+    assert torch.equal(node_mapping["author"], torch.tensor([0]))
+    assert torch.equal(node_mapping["paper"], torch.tensor([1]))
 
 
 def test_link_neighbor_sampler_supports_mixed_hetero_edge_types_from_base_sampler():
@@ -436,7 +618,7 @@ def test_link_neighbor_sampler_prefetch_option_keeps_sampled_shard_global_ids_al
 
 
 
-def test_link_neighbor_sampler_stitched_link_sampling_crosses_partition_boundaries_through_coordinator(tmp_path):
+def test_link_neighbor_sampler_stitched_link_sampling_crosses_partition_boundaries_through_coordinator(monkeypatch, tmp_path):
     graph = Graph.homo(
         edge_index=torch.tensor([[0, 1, 2], [1, 2, 3]]),
         x=torch.arange(4, dtype=torch.float32).view(4, 1),
@@ -467,6 +649,11 @@ def test_link_neighbor_sampler_stitched_link_sampling_crosses_partition_boundari
         batch_size=1,
         feature_store=coordinator,
     )
+
+    def fail_tolist(self):
+        raise AssertionError("stitched homo link materialization should stay on tensors")
+
+    monkeypatch.setattr(torch.Tensor, "tolist", fail_tolist)
 
     batch = next(iter(loader))
 
@@ -715,7 +902,7 @@ def test_link_neighbor_sampler_stitched_output_blocks_exclude_seed_edges_from_me
 
 
 
-def test_link_neighbor_sampler_stitched_hetero_link_sampling_crosses_partition_boundaries_through_coordinator(tmp_path):
+def test_link_neighbor_sampler_stitched_hetero_link_sampling_crosses_partition_boundaries_through_coordinator(monkeypatch, tmp_path):
     graph = Graph.hetero(
         nodes={
             "author": {"x": torch.tensor([[10.0], [20.0], [30.0]])},
@@ -758,6 +945,11 @@ def test_link_neighbor_sampler_stitched_hetero_link_sampling_crosses_partition_b
         batch_size=1,
         feature_store=coordinator,
     )
+
+    def fail_tolist(self):
+        raise AssertionError("stitched hetero link materialization should stay on tensors")
+
+    monkeypatch.setattr(torch.Tensor, "tolist", fail_tolist)
 
     batch = next(iter(loader))
 
@@ -857,7 +1049,10 @@ def test_link_neighbor_sampler_stitched_hetero_link_sampling_crosses_partition_b
     assert torch.equal(batch.labels, torch.tensor([1.0]))
 
 
-def test_link_neighbor_sampler_stitched_hetero_output_blocks_materialize_relation_local_blocks_through_coordinator(tmp_path):
+def test_link_neighbor_sampler_stitched_hetero_output_blocks_materialize_relation_local_blocks_through_coordinator(
+    monkeypatch,
+    tmp_path,
+):
     graph = Graph.hetero(
         nodes={
             "author": {"x": torch.tensor([[10.0], [20.0], [30.0]])},
@@ -901,6 +1096,11 @@ def test_link_neighbor_sampler_stitched_hetero_output_blocks_materialize_relatio
         batch_size=1,
         feature_store=coordinator,
     )
+
+    def fail_tolist(self):
+        raise AssertionError("stitched hetero relation-local blocks should stay on tensors")
+
+    monkeypatch.setattr(torch.Tensor, "tolist", fail_tolist)
 
     batch = next(iter(loader))
 
@@ -1000,6 +1200,7 @@ def test_link_neighbor_sampler_stitched_hetero_output_blocks_materialize_relatio
 
 
 def test_link_neighbor_sampler_stitched_hetero_output_blocks_materialize_multi_relation_blocks_through_coordinator(
+    monkeypatch,
     tmp_path,
 ):
     cites = ("paper", "cites", "paper")
@@ -1066,6 +1267,11 @@ def test_link_neighbor_sampler_stitched_hetero_output_blocks_materialize_multi_r
         batch_size=1,
         feature_store=coordinator,
     )
+
+    def fail_tolist(self):
+        raise AssertionError("stitched hetero multi-relation blocks should stay on tensors")
+
+    monkeypatch.setattr(torch.Tensor, "tolist", fail_tolist)
 
     batch = next(iter(loader))
 

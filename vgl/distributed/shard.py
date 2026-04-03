@@ -17,6 +17,37 @@ from vgl.graph.schema import GraphSchema
 EdgeType = tuple[str, str, str]
 
 
+def _sorted_lookup_state(ids: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
+    ids = torch.as_tensor(ids, dtype=torch.long).view(-1)
+    if ids.numel() == 0:
+        empty = torch.empty((0,), dtype=torch.long, device=ids.device)
+        return empty, empty
+    sorted_ids, sort_perm = torch.sort(ids, stable=True)
+    return sorted_ids, sort_perm
+
+
+def _lookup_local_positions(
+    sorted_ids: torch.Tensor,
+    sort_perm: torch.Tensor,
+    ids: torch.Tensor,
+    *,
+    missing_message: str,
+) -> torch.Tensor:
+    ids = torch.as_tensor(ids, dtype=torch.long, device=sorted_ids.device).view(-1)
+    if ids.numel() == 0:
+        return torch.empty((0,), dtype=torch.long, device=sorted_ids.device)
+
+    positions = torch.searchsorted(sorted_ids, ids)
+    if bool((positions >= sorted_ids.numel()).any()):
+        missing_id = int(ids[positions >= sorted_ids.numel()][0].item())
+        raise KeyError(missing_message.format(id=missing_id))
+    matched_ids = sorted_ids[positions]
+    if bool((matched_ids != ids).any()):
+        missing_id = int(ids[matched_ids != ids][0].item())
+        raise KeyError(missing_message.format(id=missing_id))
+    return sort_perm[positions]
+
+
 def _manifest_node_ids_by_type(partition: PartitionShard) -> dict[str, torch.Tensor]:
     return {
         str(node_type): torch.arange(int(start), int(end), dtype=torch.long)
@@ -69,18 +100,18 @@ class LocalGraphShard:
     graph: Graph
     _cache: _PartitionStoreBundleCache = field(repr=False)
     _edge_types: tuple[EdgeType, ...] = field(default_factory=tuple, repr=False)
-    _global_to_local_by_type: dict[str, dict[int, int]] = field(default_factory=dict, repr=False)
-    _global_to_local_edge_by_type: dict[EdgeType, dict[int, int]] = field(default_factory=dict, repr=False)
+    _global_to_local_by_type: dict[str, tuple[torch.Tensor, torch.Tensor]] = field(default_factory=dict, repr=False)
+    _global_to_local_edge_by_type: dict[EdgeType, tuple[torch.Tensor, torch.Tensor]] = field(default_factory=dict, repr=False)
 
     def __post_init__(self) -> None:
         self.root = Path(self.root)
         self._global_to_local_by_type = {
-            node_type: {int(node_id): index for index, node_id in enumerate(node_ids.tolist())}
+            node_type: _sorted_lookup_state(node_ids)
             for node_type, node_ids in self.node_ids_by_type.items()
         }
         edge_ids_by_type = self.partition.edge_ids_by_type
         self._global_to_local_edge_by_type = {
-            edge_type: {int(edge_id): index for index, edge_id in enumerate(edge_ids_by_type[edge_type])}
+            edge_type: _sorted_lookup_state(torch.as_tensor(edge_ids_by_type[edge_type], dtype=torch.long))
             for edge_type in self._edge_types
             if edge_type in edge_ids_by_type
         }
@@ -149,18 +180,18 @@ class LocalGraphShard:
     def global_to_local(self, node_ids: torch.Tensor, *, node_type: str = "node") -> torch.Tensor:
         node_type = str(node_type)
         try:
-            index = self._global_to_local_by_type[node_type]
+            sorted_ids, sort_perm = self._global_to_local_by_type[node_type]
         except KeyError as exc:
             raise KeyError(node_type) from exc
-        values = []
-        for node_id in torch.as_tensor(node_ids, dtype=torch.long).tolist():
-            try:
-                values.append(index[int(node_id)])
-            except KeyError as exc:
-                raise KeyError(
-                    f"node {node_id} is not present in partition {self.partition.partition_id} for node type {node_type!r}"
-                ) from exc
-        return torch.tensor(values, dtype=torch.long)
+        return _lookup_local_positions(
+            sorted_ids,
+            sort_perm,
+            node_ids,
+            missing_message=(
+                f"node {{id}} is not present in partition {self.partition.partition_id} "
+                f"for node type {node_type!r}"
+            ),
+        )
 
     def local_to_global(self, node_ids: torch.Tensor, *, node_type: str = "node") -> torch.Tensor:
         global_ids = self.node_ids_for(node_type)
@@ -190,22 +221,20 @@ class LocalGraphShard:
 
     def global_to_local_edge(self, edge_ids: torch.Tensor, *, edge_type=None) -> torch.Tensor:
         resolved = self._resolve_edge_type(edge_type)
-        index = self._global_to_local_edge_by_type.get(resolved)
-        if index is None:
-            index = {
-                int(edge_id): position
-                for position, edge_id in enumerate(self.edge_ids(edge_type=resolved).tolist())
-            }
-            self._global_to_local_edge_by_type[resolved] = index
-        values = []
-        for edge_id in torch.as_tensor(edge_ids, dtype=torch.long).tolist():
-            try:
-                values.append(index[int(edge_id)])
-            except KeyError as exc:
-                raise KeyError(
-                    f"edge {edge_id} is not present in partition {self.partition.partition_id} for edge type {resolved!r}"
-                ) from exc
-        return torch.tensor(values, dtype=torch.long)
+        lookup_state = self._global_to_local_edge_by_type.get(resolved)
+        if lookup_state is None:
+            lookup_state = _sorted_lookup_state(self.edge_ids(edge_type=resolved))
+            self._global_to_local_edge_by_type[resolved] = lookup_state
+        sorted_ids, sort_perm = lookup_state
+        return _lookup_local_positions(
+            sorted_ids,
+            sort_perm,
+            edge_ids,
+            missing_message=(
+                f"edge {{id}} is not present in partition {self.partition.partition_id} "
+                f"for edge type {resolved!r}"
+            ),
+        )
 
     def local_to_global_edge(self, edge_ids: torch.Tensor, *, edge_type=None) -> torch.Tensor:
         resolved = self._resolve_edge_type(edge_type)

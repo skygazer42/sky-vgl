@@ -21,19 +21,135 @@ def _public_edge_ids(store) -> torch.Tensor:
     return torch.as_tensor(public_ids, dtype=torch.long, device=store.edge_index.device).view(-1)
 
 
-def _edge_positions_by_public_id(store) -> dict[int, int]:
-    return {int(edge_id): index for index, edge_id in enumerate(_public_edge_ids(store).tolist())}
+def _tensor_signature(tensor: torch.Tensor) -> tuple[object, ...]:
+    return (
+        int(tensor.data_ptr()) if tensor.numel() > 0 else 0,
+        tuple(int(dim) for dim in tensor.shape),
+        str(tensor.dtype),
+        str(tensor.device),
+    )
 
 
-def _pair_positions(store) -> dict[tuple[int, int], list[int]]:
-    positions: dict[tuple[int, int], list[int]] = {}
-    for index, (src, dst) in enumerate(store.edge_index.t().tolist()):
-        positions.setdefault((int(src), int(dst)), []).append(index)
-    return positions
+def _public_id_lookup(store) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+    if hasattr(store, "query_cache"):
+        cache = store.query_cache
+    else:
+        cache = {}
+
+    raw_public_ids = store.data.get("e_id")
+    if raw_public_ids is None:
+        signature = ("implicit", int(store.edge_index.size(1)), str(store.edge_index.device))
+    else:
+        signature = ("explicit", _tensor_signature(torch.as_tensor(raw_public_ids)))
+
+    entry = cache.get("public_id_lookup")
+    if entry is not None and entry["signature"] == signature:
+        return entry["public_ids"], entry["sorted_ids"], entry["sorted_positions"]
+
+    public_ids = _public_edge_ids(store)
+    positions = torch.arange(public_ids.numel(), dtype=torch.long, device=public_ids.device)
+    order = torch.argsort(public_ids, stable=True)
+    entry = {
+        "signature": signature,
+        "public_ids": public_ids,
+        "sorted_ids": public_ids[order],
+        "sorted_positions": positions[order],
+    }
+    cache["public_id_lookup"] = entry
+    if hasattr(store, "query_cache"):
+        store.query_cache = cache
+    return entry["public_ids"], entry["sorted_ids"], entry["sorted_positions"]
+
+
+def _pair_lookup(graph: Graph, edge_type, store) -> tuple[torch.Tensor, torch.Tensor]:
+    if hasattr(store, "query_cache"):
+        cache = store.query_cache
+    else:
+        cache = {}
+
+    stride = max(graph._node_count(edge_type[2]), 1)
+    cache_key = ("pair_lookup", int(stride))
+    signature = (_tensor_signature(store.edge_index), int(stride))
+    entry = cache.get(cache_key)
+    if entry is not None and entry["signature"] == signature:
+        return entry["sorted_pair_keys"], entry["sorted_positions"]
+
+    pair_keys = store.edge_index[0].to(dtype=torch.long) * stride + store.edge_index[1].to(dtype=torch.long)
+    positions = torch.arange(pair_keys.numel(), dtype=torch.long, device=pair_keys.device)
+    order = torch.argsort(pair_keys, stable=True)
+    entry = {
+        "signature": signature,
+        "sorted_pair_keys": pair_keys[order],
+        "sorted_positions": positions[order],
+    }
+    cache[cache_key] = entry
+    if hasattr(store, "query_cache"):
+        store.query_cache = cache
+    return entry["sorted_pair_keys"], entry["sorted_positions"]
+
+
+def _endpoint_lookup(store, *, endpoint: int) -> tuple[torch.Tensor, torch.Tensor]:
+    if hasattr(store, "query_cache"):
+        cache = store.query_cache
+    else:
+        cache = {}
+
+    cache_key = ("endpoint_lookup", int(endpoint))
+    signature = (_tensor_signature(store.edge_index), int(endpoint))
+    entry = cache.get(cache_key)
+    if entry is not None and entry["signature"] == signature:
+        return entry["sorted_endpoint_ids"], entry["sorted_positions"]
+
+    endpoint_ids = store.edge_index[endpoint].to(dtype=torch.long)
+    positions = torch.arange(endpoint_ids.numel(), dtype=torch.long, device=endpoint_ids.device)
+    order = torch.argsort(endpoint_ids, stable=True)
+    entry = {
+        "signature": signature,
+        "sorted_endpoint_ids": endpoint_ids[order],
+        "sorted_positions": positions[order],
+    }
+    cache[cache_key] = entry
+    if hasattr(store, "query_cache"):
+        store.query_cache = cache
+    return entry["sorted_endpoint_ids"], entry["sorted_positions"]
 
 
 def _normalize_edge_ids(edge_ids) -> torch.Tensor:
     return torch.as_tensor(edge_ids, dtype=torch.long).view(-1)
+
+
+def _left_searchsorted_matches(sorted_values: torch.Tensor, requested: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
+    positions = torch.searchsorted(sorted_values, requested, right=False)
+    if sorted_values.numel() == 0:
+        return positions, torch.zeros_like(requested, dtype=torch.bool)
+    capped_positions = positions.clamp_max(sorted_values.numel() - 1)
+    in_range = positions < sorted_values.numel()
+    return positions, in_range & (sorted_values[capped_positions] == requested)
+
+
+def _expand_interval_values(values: torch.Tensor, counts: torch.Tensor, *, step: int) -> torch.Tensor:
+    if values.numel() == 0:
+        return values.new_empty(0)
+
+    positive = counts > 0
+    if not bool(positive.all()):
+        values = values[positive]
+        counts = counts[positive]
+        if values.numel() == 0:
+            return values.new_empty(0)
+
+    offsets = torch.cumsum(counts, dim=0) - counts
+    base = values - step * offsets
+    deltas = torch.empty_like(base)
+    deltas[0] = base[0]
+    if base.numel() > 1:
+        deltas[1:] = base[1:] - base[:-1]
+    markers = torch.zeros(counts.sum(), dtype=values.dtype, device=values.device)
+    markers[offsets] = deltas
+    expanded = torch.cumsum(markers, dim=0)
+    if step != 0:
+        expanded = expanded + step * torch.arange(counts.sum(), dtype=values.dtype, device=values.device)
+    return expanded
 
 
 def _normalize_node_pairs(u, v) -> tuple[torch.Tensor, torch.Tensor, bool]:
@@ -85,9 +201,18 @@ def _edge_positions_for_endpoint(graph: Graph, edge_type, nodes, *, endpoint: in
     _validate_node_ids(graph, node_type, node_ids, role=role)
     if node_ids.numel() == 0:
         return store, torch.empty(0, dtype=torch.long, device=store.edge_index.device)
-    device_nodes = node_ids.to(device=store.edge_index.device)
-    mask = torch.isin(store.edge_index[endpoint], device_nodes)
-    return store, torch.nonzero(mask, as_tuple=False).view(-1)
+    query_nodes = torch.unique(node_ids.to(device=store.edge_index.device))
+    sorted_endpoint_ids, sorted_positions = _endpoint_lookup(store, endpoint=endpoint)
+    starts, found = _left_searchsorted_matches(sorted_endpoint_ids, query_nodes)
+    if not bool(found.any()):
+        return store, torch.empty(0, dtype=torch.long, device=store.edge_index.device)
+
+    starts = starts[found]
+    query_nodes = query_nodes[found]
+    ends = torch.searchsorted(sorted_endpoint_ids, query_nodes, right=True)
+    counts = ends - starts
+    matched_positions = sorted_positions[_expand_interval_values(starts, counts, step=1)]
+    return store, torch.sort(matched_positions, stable=True).values
 
 
 def _format_edge_selection(store, positions: torch.Tensor, *, form: str):
@@ -118,8 +243,8 @@ def _ordered_edge_positions(store, *, order) -> torch.Tensor:
     positions = torch.arange(count, dtype=torch.long, device=device)
     if order is None or count == 0:
         return positions
-    public_ids = _public_edge_ids(store)
-    positions = positions[torch.argsort(public_ids[positions], stable=True)]
+    _, _, sorted_positions = _public_id_lookup(store)
+    positions = sorted_positions
     if order == "eid":
         return positions
     positions = positions[torch.argsort(store.edge_index[1, positions], stable=True)]
@@ -334,17 +459,19 @@ def find_edges(graph: Graph, eids, *, edge_type=None) -> tuple[torch.Tensor, tor
     edge_type = _resolve_edge_type(graph, edge_type)
     store = graph.edges[edge_type]
     requested = _normalize_edge_ids(eids)
-    positions_by_id = _edge_positions_by_public_id(store)
-    positions: list[int] = []
-    for edge_id in requested.tolist():
-        try:
-            positions.append(positions_by_id[int(edge_id)])
-        except KeyError as exc:
-            raise ValueError(f"unknown edge id {edge_id}") from exc
-    if not positions:
+    if requested.numel() == 0:
         empty = torch.empty(0, dtype=store.edge_index.dtype, device=store.edge_index.device)
         return empty, empty
-    position_tensor = torch.tensor(positions, dtype=torch.long, device=store.edge_index.device)
+
+    _, sorted_ids, sorted_positions = _public_id_lookup(store)
+    requested = requested.to(device=sorted_ids.device)
+    starts, found = _left_searchsorted_matches(sorted_ids, requested)
+    missing = ~found
+    if bool(missing.any()):
+        edge_id = int(requested[missing][0].item())
+        raise ValueError(f"unknown edge id {edge_id}")
+
+    position_tensor = sorted_positions[starts]
     edge_index = store.edge_index[:, position_tensor]
     return edge_index[0], edge_index[1]
 
@@ -354,35 +481,33 @@ def edge_ids(graph: Graph, u, v, *, return_uv: bool = False, edge_type=None):
     store = graph.edges[edge_type]
     u_ids, v_ids, _ = _normalize_node_pairs(u, v)
     _validate_node_pairs(graph, edge_type, u_ids, v_ids)
-    positions = _pair_positions(store)
-    public_ids = _public_edge_ids(store).tolist()
+    public_ids, _, _ = _public_id_lookup(store)
+    sorted_pair_keys, sorted_positions = _pair_lookup(graph, edge_type, store)
     device = store.edge_index.device
+    stride = max(graph._node_count(edge_type[2]), 1)
+    query_u = u_ids.to(device=device)
+    query_v = v_ids.to(device=device)
+    query_keys = query_u * stride + query_v
+    starts, found = _left_searchsorted_matches(sorted_pair_keys, query_keys)
+    missing = ~found
+    if bool(missing.any()):
+        missing_index = int(torch.nonzero(missing, as_tuple=False).view(-1)[0].item())
+        raise ValueError(f"no edge exists between {int(u_ids[missing_index])} and {int(v_ids[missing_index])}")
 
     if return_uv:
-        matched_src: list[int] = []
-        matched_dst: list[int] = []
-        matched_eids: list[int] = []
-        for src, dst in zip(u_ids.tolist(), v_ids.tolist()):
-            matches = positions.get((int(src), int(dst)))
-            if not matches:
-                raise ValueError(f"no edge exists between {src} and {dst}")
-            for index in matches:
-                matched_src.append(int(src))
-                matched_dst.append(int(dst))
-                matched_eids.append(int(public_ids[index]))
+        ends = torch.searchsorted(sorted_pair_keys, query_keys, right=True)
+        counts = ends - starts
+        query_positions = torch.arange(counts.numel(), dtype=torch.long, device=device)
+        expanded_queries = _expand_interval_values(query_positions, counts, step=0)
+        matched_positions = sorted_positions[_expand_interval_values(starts, counts, step=1)]
         return (
-            torch.tensor(matched_src, dtype=torch.long, device=device),
-            torch.tensor(matched_dst, dtype=torch.long, device=device),
-            torch.tensor(matched_eids, dtype=torch.long, device=device),
+            query_u[expanded_queries],
+            query_v[expanded_queries],
+            public_ids[matched_positions],
         )
 
-    matched: list[int] = []
-    for src, dst in zip(u_ids.tolist(), v_ids.tolist()):
-        matches = positions.get((int(src), int(dst)))
-        if not matches:
-            raise ValueError(f"no edge exists between {src} and {dst}")
-        matched.append(int(public_ids[matches[0]]))
-    return torch.tensor(matched, dtype=torch.long, device=device)
+    matched_positions = sorted_positions[starts]
+    return public_ids[matched_positions]
 
 
 def has_edges_between(graph: Graph, u, v, *, edge_type=None):
@@ -390,11 +515,13 @@ def has_edges_between(graph: Graph, u, v, *, edge_type=None):
     store = graph.edges[edge_type]
     u_ids, v_ids, scalar_input = _normalize_node_pairs(u, v)
     _validate_node_pairs(graph, edge_type, u_ids, v_ids)
-    positions = _pair_positions(store)
-    exists = [((int(src), int(dst)) in positions) for src, dst in zip(u_ids.tolist(), v_ids.tolist())]
+    sorted_pair_keys, _ = _pair_lookup(graph, edge_type, store)
+    stride = max(graph._node_count(edge_type[2]), 1)
+    query_keys = u_ids.to(device=store.edge_index.device) * stride + v_ids.to(device=store.edge_index.device)
+    _, exists = _left_searchsorted_matches(sorted_pair_keys, query_keys)
     if scalar_input:
-        return bool(exists[0])
-    return torch.tensor(exists, dtype=torch.bool, device=store.edge_index.device)
+        return bool(exists[0].item())
+    return exists.to(dtype=torch.bool, device=store.edge_index.device)
 
 
 def num_nodes(graph: Graph, node_type=None) -> int:

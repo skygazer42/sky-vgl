@@ -100,6 +100,23 @@ def test_to_block_handles_empty_incoming_frontier():
     assert torch.equal(block.edge_index, torch.empty((2, 0), dtype=torch.long))
 
 
+def test_to_block_avoids_torch_isin_scans(monkeypatch):
+    graph = Graph.homo(
+        edge_index=torch.tensor([[0, 1, 2, 1], [1, 2, 1, 0]]),
+        x=torch.tensor([[1.0], [2.0], [3.0]]),
+    )
+
+    def fail_isin(*args, **kwargs):
+        raise AssertionError("to_block should avoid torch.isin scans")
+
+    monkeypatch.setattr(torch, "isin", fail_isin)
+
+    block = to_block(graph, torch.tensor([1, 2]))
+
+    assert torch.equal(block.edata["e_id"], torch.tensor([0, 1, 2]))
+    assert torch.equal(block.edge_index, torch.tensor([[2, 0, 1], [0, 1, 0]]))
+
+
 def test_to_block_uses_graph_store_counts_for_featureless_storage_backed_graph():
     edge_type = ("node", "to", "node")
     schema = GraphSchema(
@@ -228,6 +245,37 @@ def test_to_hetero_block_builds_multi_relation_block_layer():
     assert torch.equal(block.edata(cites)["e_id"], torch.tensor([0, 1, 2]))
     assert torch.equal(block.edata(cites)["weight"], torch.tensor([5.0, 6.0, 7.0]))
     assert torch.equal(block.edge_index(cites), torch.tensor([[0, 2, 1], [1, 1, 0]]))
+
+
+def test_to_hetero_block_avoids_torch_isin_scans(monkeypatch):
+    writes = ("author", "writes", "paper")
+    cites = ("paper", "cites", "paper")
+    graph = Graph.hetero(
+        nodes={
+            "author": {"x": torch.tensor([[10.0], [20.0]])},
+            "paper": {"x": torch.tensor([[1.0], [2.0], [3.0]])},
+        },
+        edges={
+            writes: {
+                "edge_index": torch.tensor([[0, 1, 1], [1, 0, 2]]),
+                "weight": torch.tensor([1.0, 2.0, 3.0]),
+            },
+            cites: {
+                "edge_index": torch.tensor([[0, 1, 2], [2, 2, 0]]),
+                "weight": torch.tensor([5.0, 6.0, 7.0]),
+            },
+        },
+    )
+
+    def fail_isin(*args, **kwargs):
+        raise AssertionError("to_hetero_block should avoid torch.isin scans")
+
+    monkeypatch.setattr(torch, "isin", fail_isin)
+
+    block = to_hetero_block(graph, {"paper": torch.tensor([0, 2])})
+
+    assert torch.equal(block.edata(writes)["e_id"], torch.tensor([1, 2]))
+    assert torch.equal(block.edata(cites)["e_id"], torch.tensor([0, 1, 2]))
 
 
 def test_to_hetero_block_respects_relation_subset():

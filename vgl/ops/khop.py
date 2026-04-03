@@ -1,5 +1,11 @@
 import torch
 
+from vgl._neighbor_sampling import (
+    _directional_neighbor_candidates,
+    _relation_neighbor_candidates,
+    _sample_fanout,
+    _sample_homo_node_ids,
+)
 from vgl.graph.graph import Graph
 from vgl.ops.subgraph import _ordered_unique, node_subgraph
 
@@ -19,61 +25,6 @@ def _normalize_fanouts(num_neighbors) -> list[int]:
     if any(value < -1 or value == 0 for value in fanouts):
         raise ValueError("num_neighbors entries must be positive integers or -1")
     return fanouts
-
-
-def _next_frontier_from_edge_index(edge_index, frontier, visited, fanout, *, generator=None):
-    if not frontier or edge_index.numel() == 0:
-        return set()
-    frontier_tensor = torch.tensor(sorted(frontier), dtype=torch.long, device=edge_index.device)
-    incident_mask = torch.isin(edge_index[0], frontier_tensor) | torch.isin(edge_index[1], frontier_tensor)
-    if not incident_mask.any():
-        return set()
-    candidate_nodes = torch.unique(edge_index[:, incident_mask]).tolist()
-    candidate_nodes = [int(node) for node in candidate_nodes if int(node) not in visited]
-    if fanout != -1 and len(candidate_nodes) > fanout:
-        permutation = torch.randperm(len(candidate_nodes), generator=generator)[:fanout].tolist()
-        candidate_nodes = [candidate_nodes[index] for index in permutation]
-    return set(candidate_nodes)
-
-
-def _hetero_next_frontier(graph, frontier, visited, fanout, *, generator=None):
-    candidates = {node_type: set() for node_type in graph.schema.node_types}
-    for edge_type, store in graph.edges.items():
-        src_type, _, dst_type = edge_type
-        src_frontier = frontier.get(src_type, set())
-        dst_frontier = frontier.get(dst_type, set())
-        if not src_frontier and not dst_frontier:
-            continue
-        edge_index = store.edge_index
-        incident_mask = torch.zeros(edge_index.size(1), dtype=torch.bool, device=edge_index.device)
-        if src_frontier:
-            src_tensor = torch.tensor(sorted(src_frontier), dtype=torch.long, device=edge_index.device)
-            incident_mask |= torch.isin(edge_index[0], src_tensor)
-        if dst_frontier:
-            dst_tensor = torch.tensor(sorted(dst_frontier), dtype=torch.long, device=edge_index.device)
-            incident_mask |= torch.isin(edge_index[1], dst_tensor)
-        if not incident_mask.any():
-            continue
-        candidates[src_type].update(
-            int(node)
-            for node in edge_index[0, incident_mask].tolist()
-            if int(node) not in visited[src_type]
-        )
-        candidates[dst_type].update(
-            int(node)
-            for node in edge_index[1, incident_mask].tolist()
-            if int(node) not in visited[dst_type]
-        )
-
-    next_frontier = {}
-    for node_type, values in candidates.items():
-        candidate_list = sorted(values)
-        if fanout != -1 and len(candidate_list) > fanout:
-            permutation = torch.randperm(len(candidate_list), generator=generator)[:fanout].tolist()
-            candidate_list = [candidate_list[index] for index in permutation]
-        if candidate_list:
-            next_frontier[node_type] = set(candidate_list)
-    return next_frontier
 
 
 def _normalize_hetero_khop_seeds(seeds, *, edge_type, device):
@@ -100,40 +51,48 @@ def _hetero_directional_khop_nodes(graph: Graph, seeds, *, num_hops: int, direct
     normalized_seeds = _normalize_hetero_khop_seeds(seeds, edge_type=edge_type, device=device)
     edge_index = graph.edges[edge_type].edge_index
 
-    visited = {node_type: set(int(node) for node in node_ids.tolist()) for node_type, node_ids in normalized_seeds.items()}
-    frontier = {node_type: set(values) for node_type, values in visited.items()}
+    visited = {
+        node_type: torch.unique(node_ids.to(device=device))
+        for node_type, node_ids in normalized_seeds.items()
+    }
+    frontier = {
+        node_type: node_ids.clone()
+        for node_type, node_ids in visited.items()
+        if node_ids.numel() > 0
+    }
 
     for _ in range(num_hops):
-        next_frontier = {node_type: set() for node_type in dict.fromkeys((src_type, dst_type))}
         if direction == "out":
-            current = frontier.get(src_type, set())
-            if current and edge_index.numel() > 0:
-                src_tensor = torch.tensor(sorted(current), dtype=torch.long, device=device)
-                mask = torch.isin(edge_index[0], src_tensor)
-                next_frontier[dst_type].update(
-                    int(node)
-                    for node in torch.unique(edge_index[1, mask]).tolist()
-                    if int(node) not in visited[dst_type]
-                )
+            current = frontier.get(src_type)
+            if current is None or current.numel() == 0 or edge_index.numel() == 0:
+                break
+            next_dst = _directional_neighbor_candidates(
+                edge_index,
+                current.to(device=device),
+                visited[dst_type],
+                endpoint=0,
+            )
+            if next_dst.numel() == 0:
+                break
+            frontier = {dst_type: next_dst}
+            visited[dst_type] = torch.unique(torch.cat((visited[dst_type], next_dst)))
         else:
-            current = frontier.get(dst_type, set())
-            if current and edge_index.numel() > 0:
-                dst_tensor = torch.tensor(sorted(current), dtype=torch.long, device=device)
-                mask = torch.isin(edge_index[1], dst_tensor)
-                next_frontier[src_type].update(
-                    int(node)
-                    for node in torch.unique(edge_index[0, mask]).tolist()
-                    if int(node) not in visited[src_type]
-                )
-
-        if not any(next_frontier.values()):
-            break
-        for node_type, node_ids in next_frontier.items():
-            visited[node_type].update(node_ids)
-        frontier = next_frontier
+            current = frontier.get(dst_type)
+            if current is None or current.numel() == 0 or edge_index.numel() == 0:
+                break
+            next_src = _directional_neighbor_candidates(
+                edge_index,
+                current.to(device=device),
+                visited[src_type],
+                endpoint=1,
+            )
+            if next_src.numel() == 0:
+                break
+            frontier = {src_type: next_src}
+            visited[src_type] = torch.unique(torch.cat((visited[src_type], next_src)))
 
     return {
-        node_type: torch.tensor(sorted(visited[node_type]), dtype=torch.long, device=device)
+        node_type: visited[node_type].clone()
         for node_type in dict.fromkeys((src_type, dst_type))
     }
 
@@ -151,28 +110,13 @@ def expand_neighbors(
     seed_tensor = torch.as_tensor(seeds, dtype=torch.long).view(-1)
 
     if set(graph.nodes) == {"node"} and len(graph.edges) == 1:
-        visited = {int(node) for node in seed_tensor.tolist()}
-        frontier = set(visited)
-        hop_nodes = None
-        if return_hops:
-            hop_nodes = [torch.tensor(sorted(visited), dtype=torch.long, device=graph.edge_index.device)]
-        for fanout in fanouts:
-            frontier = _next_frontier_from_edge_index(
-                graph.edge_index,
-                frontier,
-                visited,
-                fanout,
-                generator=generator,
-            )
-            visited.update(frontier)
-            if hop_nodes is not None:
-                hop_nodes.append(torch.tensor(sorted(visited), dtype=torch.long, device=graph.edge_index.device))
-            elif not frontier:
-                break
-        expanded = torch.tensor(sorted(visited), dtype=torch.long, device=graph.edge_index.device)
-        if hop_nodes is not None:
-            return expanded, hop_nodes
-        return expanded
+        return _sample_homo_node_ids(
+            graph.edge_index,
+            seed_tensor,
+            fanouts,
+            generator=generator,
+            return_hops=return_hops,
+        )
 
     if node_type is None:
         raise ValueError("node_type is required for heterogeneous neighbor expansion")
@@ -181,34 +125,59 @@ def expand_neighbors(
 
     def _snapshot(visited_by_type):
         return {
-            current_type: torch.tensor(
-                sorted(node_ids),
-                dtype=torch.long,
-                device=next(iter(graph.nodes[current_type].data.values())).device,
-            )
+            current_type: node_ids.clone()
             for current_type, node_ids in visited_by_type.items()
         }
 
-    visited = {current_type: set() for current_type in graph.schema.node_types}
-    frontier = {current_type: set() for current_type in graph.schema.node_types}
-    visited[node_type].update(int(node) for node in seed_tensor.tolist())
-    frontier[node_type].update(int(node) for node in seed_tensor.tolist())
-    hop_nodes = [_snapshot(visited)] if return_hops else None
-    for fanout in fanouts:
-        frontier = _hetero_next_frontier(graph, frontier, visited, fanout, generator=generator)
-        for current_type, node_ids in frontier.items():
-            visited[current_type].update(node_ids)
-        if hop_nodes is not None:
-            hop_nodes.append(_snapshot(visited))
-        elif not any(frontier.values()):
-            break
-    expanded = {
-        current_type: torch.tensor(
-            sorted(visited[current_type]),
+    visited = {
+        current_type: torch.empty(
+            0,
             dtype=torch.long,
             device=next(iter(graph.nodes[current_type].data.values())).device,
         )
         for current_type in graph.schema.node_types
+    }
+    visited[node_type] = torch.unique(seed_tensor.to(device=visited[node_type].device))
+    frontier = {node_type: visited[node_type].clone()}
+    hop_nodes = [_snapshot(visited)] if return_hops else None
+    for fanout in fanouts:
+        candidates = {current_type: [] for current_type in graph.schema.node_types}
+        for edge_type, store in graph.edges.items():
+            src_type, _, dst_type = edge_type
+            src_frontier = frontier.get(src_type)
+            dst_frontier = frontier.get(dst_type)
+            if (src_frontier is None or src_frontier.numel() == 0) and (
+                dst_frontier is None or dst_frontier.numel() == 0
+            ):
+                continue
+            relation_candidates = _relation_neighbor_candidates(
+                store.edge_index,
+                frontier,
+                visited,
+                src_type=src_type,
+                dst_type=dst_type,
+            )
+            for current_type, node_ids in relation_candidates.items():
+                if node_ids.numel() > 0:
+                    candidates[current_type].append(node_ids)
+
+        next_frontier = {}
+        for current_type, node_ids_list in candidates.items():
+            if not node_ids_list:
+                continue
+            candidate_tensor = torch.unique(torch.cat(node_ids_list))
+            candidate_tensor = _sample_fanout(candidate_tensor, fanout, generator=generator)
+            if candidate_tensor.numel() > 0:
+                next_frontier[current_type] = candidate_tensor
+                visited[current_type] = torch.unique(torch.cat((visited[current_type], candidate_tensor)))
+        if hop_nodes is not None:
+            hop_nodes.append(_snapshot(visited))
+        elif not next_frontier:
+            break
+        frontier = next_frontier
+    expanded = {
+        current_type: node_ids.clone()
+        for current_type, node_ids in visited.items()
     }
     if hop_nodes is not None:
         return expanded, hop_nodes
@@ -233,26 +202,30 @@ def khop_nodes(graph: Graph, seeds, *, num_hops: int, direction: str = "out", ed
             edge_type=edge_type,
         )
 
-    frontier = torch.as_tensor(seeds, dtype=torch.long).view(-1)
-    visited = set(int(node) for node in frontier.tolist())
+    frontier = torch.unique(torch.as_tensor(seeds, dtype=torch.long, device=edge_index.device).view(-1))
+    visited = frontier.clone()
     for _ in range(num_hops):
-        frontier_set = set(int(node) for node in frontier.tolist())
-        next_nodes = []
-        for src, dst in edge_index.t().tolist():
-            src = int(src)
-            dst = int(dst)
-            candidate = None
-            if direction == "out" and src in frontier_set:
-                candidate = dst
-            if direction == "in" and dst in frontier_set:
-                candidate = src
-            if candidate is not None and candidate not in visited:
-                visited.add(candidate)
-                next_nodes.append(candidate)
-        frontier = torch.tensor(next_nodes, dtype=torch.long, device=edge_index.device)
-        if frontier.numel() == 0:
+        if frontier.numel() == 0 or edge_index.numel() == 0:
             break
-    return torch.tensor(sorted(visited), dtype=torch.long, device=edge_index.device)
+        if direction == "out":
+            next_nodes = _directional_neighbor_candidates(
+                edge_index,
+                frontier,
+                visited,
+                endpoint=0,
+            )
+        else:
+            next_nodes = _directional_neighbor_candidates(
+                edge_index,
+                frontier,
+                visited,
+                endpoint=1,
+            )
+        if next_nodes.numel() == 0:
+            break
+        frontier = next_nodes
+        visited = torch.unique(torch.cat((visited, next_nodes)))
+    return visited
 
 
 def khop_subgraph(graph: Graph, seeds, *, num_hops: int, direction: str = "out", edge_type=None) -> Graph:

@@ -98,15 +98,20 @@ class LocalFeatureStoreAdapter:
             }
             for edge_type, edge_data in dict(boundary_edge_data_by_type or {}).items()
         }
-        self._boundary_edge_local_id_by_type = {
-            edge_type: {
-                int(edge_id): index
-                for index, edge_id in enumerate(
-                    torch.as_tensor(edge_data.get("e_id", torch.empty((0,), dtype=torch.long)), dtype=torch.long).tolist()
-                )
-            }
+        self._boundary_edge_lookup_by_type = {
+            edge_type: self._boundary_edge_lookup(edge_data)
             for edge_type, edge_data in self._boundary_edge_data_by_type.items()
         }
+
+    @staticmethod
+    def _boundary_edge_lookup(edge_data: dict) -> tuple[torch.Tensor, torch.Tensor]:
+        edge_ids = torch.as_tensor(edge_data.get("e_id", torch.empty((0,), dtype=torch.long)), dtype=torch.long).view(-1)
+        if edge_ids.numel() == 0:
+            empty = torch.empty((0,), dtype=torch.long)
+            return empty, empty
+        local_ids = torch.arange(edge_ids.numel(), dtype=torch.long)
+        order = torch.argsort(edge_ids, stable=True)
+        return edge_ids.index_select(0, order), local_ids.index_select(0, order)
 
     def fetch(
         self,
@@ -130,7 +135,7 @@ class LocalFeatureStoreAdapter:
         edge_type = tuple(type_key)
         try:
             edge_data = self._boundary_edge_data_by_type[edge_type]
-            positions = self._boundary_edge_local_id_by_type[edge_type]
+            boundary_edge_ids, boundary_local_ids = self._boundary_edge_lookup_by_type[edge_type]
         except KeyError as exc:
             raise KeyError(key) from exc
         feature = edge_data.get(feature_name)
@@ -140,11 +145,18 @@ class LocalFeatureStoreAdapter:
         index = torch.as_tensor(index, dtype=torch.long).view(-1)
         if index.numel() == 0:
             return TensorSlice(index=index, values=feature.new_empty((0,) + tuple(feature.shape[1:])))
-        try:
-            local_ids = [positions[int(edge_id)] for edge_id in index.tolist()]
-        except KeyError as exc:
-            raise KeyError(key) from exc
-        return TensorSlice(index=index, values=feature[torch.tensor(local_ids, dtype=torch.long)])
+        if boundary_edge_ids.numel() == 0:
+            raise KeyError(key)
+
+        positions = torch.searchsorted(boundary_edge_ids, index.contiguous())
+        missing = positions >= boundary_edge_ids.numel()
+        if bool(missing.any()):
+            raise KeyError(key)
+        matched = boundary_edge_ids.index_select(0, positions)
+        if bool((matched != index).any()):
+            raise KeyError(key)
+        local_ids = boundary_local_ids.index_select(0, positions)
+        return TensorSlice(index=index, values=feature[local_ids])
 
     def shape(
         self,

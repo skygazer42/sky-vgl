@@ -2,6 +2,13 @@ from dataclasses import replace
 
 import torch
 
+from vgl._neighbor_sampling import (
+    _exclude_members,
+    _relation_neighbor_candidates,
+    _sample_fanout,
+    _sample_homo_next_frontier,
+    _sample_homo_node_ids,
+)
 from vgl.dataloading.executor import PlanExecutor
 from vgl.dataloading.materialize import materialize_context
 from vgl.dataloading.plan import PlanStage, SamplingPlan
@@ -10,6 +17,15 @@ from vgl.dataloading.records import SampleRecord
 from vgl.dataloading.records import TemporalEventRecord
 from vgl.dataloading.requests import LinkSeedRequest, NodeSeedRequest, TemporalSeedRequest
 from vgl.graph.graph import Graph
+from vgl.ops.subgraph import (
+    _expand_interval_values,
+    _lookup_positions,
+    _membership_mask,
+    _positions_for_endpoint_values,
+    _relabel_bipartite_edge_index,
+    _slice_edge_store,
+    node_subgraph,
+)
 
 
 def _resolve_link_edge_type(record):
@@ -58,6 +74,216 @@ def _single_inbound_node_block_edge_type(graph: Graph, *, node_type: str, contex
     return None
 
 
+def _history_edge_positions(history_edge_index: torch.Tensor, src_node_ids: torch.Tensor, dst_node_ids: torch.Tensor) -> torch.Tensor:
+    history_edge_index = torch.as_tensor(history_edge_index, dtype=torch.long)
+    if history_edge_index.numel() == 0:
+        return torch.empty(0, dtype=torch.long, device=history_edge_index.device)
+
+    class _HistoryStore:
+        def __init__(self, edge_index):
+            self.edge_index = edge_index
+            self.query_cache = {}
+
+    store = _HistoryStore(history_edge_index)
+    src_node_ids = torch.as_tensor(src_node_ids, dtype=torch.long, device=history_edge_index.device).view(-1)
+    dst_node_ids = torch.as_tensor(dst_node_ids, dtype=torch.long, device=history_edge_index.device).view(-1)
+    candidate_positions = _positions_for_endpoint_values(store, src_node_ids, endpoint=0)
+    if candidate_positions.numel() == 0:
+        return candidate_positions
+    return candidate_positions[
+        _membership_mask(history_edge_index[1, candidate_positions], dst_node_ids)
+    ]
+
+
+def _history_neighbor_candidates(edge_store, history_edge_ids: torch.Tensor, frontier, *, endpoint: int) -> torch.Tensor:
+    history_edge_ids = torch.as_tensor(history_edge_ids, dtype=torch.long, device=edge_store.edge_index.device).view(-1)
+    frontier = torch.as_tensor(frontier, dtype=torch.long, device=edge_store.edge_index.device).view(-1)
+    if history_edge_ids.numel() == 0 or frontier.numel() == 0:
+        return torch.empty(0, dtype=torch.long, device=edge_store.edge_index.device)
+
+    candidate_edge_ids = _positions_for_endpoint_values(edge_store, frontier, endpoint=endpoint)
+    if candidate_edge_ids.numel() == 0:
+        return torch.empty(0, dtype=torch.long, device=edge_store.edge_index.device)
+    kept = _sorted_membership_mask(candidate_edge_ids, history_edge_ids)
+    if not bool(kept.any()):
+        return torch.empty(0, dtype=torch.long, device=edge_store.edge_index.device)
+    return edge_store.edge_index[1 - endpoint, candidate_edge_ids[kept]]
+
+
+def _sample_homo_history_node_ids(
+    edge_store,
+    history_edge_ids: torch.Tensor,
+    seed_nodes,
+    num_neighbors,
+    *,
+    generator,
+) -> torch.Tensor:
+    edge_index = edge_store.edge_index
+    visited = torch.unique(
+        torch.as_tensor(seed_nodes, dtype=torch.long, device=edge_index.device).view(-1)
+    )
+    frontier = visited
+    for fanout in num_neighbors:
+        neighbor_chunks = []
+        src_neighbors = _history_neighbor_candidates(edge_store, history_edge_ids, frontier, endpoint=0)
+        if src_neighbors.numel() > 0:
+            neighbor_chunks.append(src_neighbors)
+        dst_neighbors = _history_neighbor_candidates(edge_store, history_edge_ids, frontier, endpoint=1)
+        if dst_neighbors.numel() > 0:
+            neighbor_chunks.append(dst_neighbors)
+        if not neighbor_chunks:
+            break
+
+        frontier = _sample_fanout(
+            _exclude_members(torch.cat(neighbor_chunks), visited),
+            fanout,
+            generator=generator,
+        )
+        if frontier.numel() == 0:
+            break
+        visited = torch.unique(torch.cat((visited, frontier)))
+    return visited
+
+
+def _history_relation_neighbor_candidates(
+    edge_store,
+    history_edge_ids: torch.Tensor,
+    frontier,
+    visited,
+    *,
+    src_type,
+    dst_type,
+):
+    edge_index = edge_store.edge_index
+    unique_types = tuple(dict.fromkeys((src_type, dst_type)))
+    empty = {
+        node_type: torch.empty(0, dtype=torch.long, device=edge_index.device)
+        for node_type in unique_types
+    }
+    history_edge_ids = torch.as_tensor(history_edge_ids, dtype=torch.long, device=edge_index.device).view(-1)
+    if history_edge_ids.numel() == 0:
+        return empty
+
+    src_frontier = frontier.get(src_type)
+    dst_frontier = frontier.get(dst_type)
+    if src_type == dst_type:
+        candidate_chunks = []
+        if src_frontier is not None and src_frontier.numel() > 0:
+            src_frontier = src_frontier.to(device=edge_index.device)
+            src_candidates = _history_neighbor_candidates(edge_store, history_edge_ids, src_frontier, endpoint=0)
+            if src_candidates.numel() > 0:
+                candidate_chunks.append(src_candidates)
+            dst_candidates = _history_neighbor_candidates(edge_store, history_edge_ids, src_frontier, endpoint=1)
+            if dst_candidates.numel() > 0:
+                candidate_chunks.append(dst_candidates)
+        if not candidate_chunks:
+            return empty
+        candidates = torch.cat(candidate_chunks)
+        visited_tensor = visited.get(src_type)
+        if visited_tensor is None:
+            visited_tensor = torch.empty(0, dtype=torch.long, device=edge_index.device)
+        return {src_type: _exclude_members(candidates, visited_tensor)}
+
+    if dst_frontier is not None and dst_frontier.numel() > 0:
+        src_candidates = _history_neighbor_candidates(
+            edge_store,
+            history_edge_ids,
+            dst_frontier.to(device=edge_index.device),
+            endpoint=1,
+        )
+    else:
+        src_candidates = torch.empty(0, dtype=torch.long, device=edge_index.device)
+    if src_frontier is not None and src_frontier.numel() > 0:
+        dst_candidates = _history_neighbor_candidates(
+            edge_store,
+            history_edge_ids,
+            src_frontier.to(device=edge_index.device),
+            endpoint=0,
+        )
+    else:
+        dst_candidates = torch.empty(0, dtype=torch.long, device=edge_index.device)
+
+    visited_src = visited.get(src_type)
+    if visited_src is None:
+        visited_src = torch.empty(0, dtype=torch.long, device=edge_index.device)
+    visited_dst = visited.get(dst_type)
+    if visited_dst is None:
+        visited_dst = torch.empty(0, dtype=torch.long, device=edge_index.device)
+    return {
+        src_type: _exclude_members(src_candidates, visited_src),
+        dst_type: _exclude_members(dst_candidates, visited_dst),
+    }
+
+
+def _history_edge_ids_for_nodes(edge_store, history_edge_ids: torch.Tensor, src_node_ids, dst_node_ids) -> torch.Tensor:
+    history_edge_ids = torch.as_tensor(history_edge_ids, dtype=torch.long, device=edge_store.edge_index.device).view(-1)
+    if history_edge_ids.numel() == 0:
+        return history_edge_ids
+    candidate_edge_ids = _positions_for_endpoint_values(edge_store, src_node_ids, endpoint=0)
+    if candidate_edge_ids.numel() == 0:
+        return candidate_edge_ids
+    candidate_edge_ids = candidate_edge_ids[_sorted_membership_mask(candidate_edge_ids, history_edge_ids)]
+    if candidate_edge_ids.numel() == 0:
+        return candidate_edge_ids
+    return candidate_edge_ids[
+        _sorted_membership_mask(edge_store.edge_index[1, candidate_edge_ids], dst_node_ids)
+    ]
+
+
+def _tensor_signature(tensor: torch.Tensor) -> tuple[object, ...]:
+    return (
+        int(tensor.data_ptr()) if tensor.numel() > 0 else 0,
+        tuple(int(dim) for dim in tensor.shape),
+        str(tensor.dtype),
+        str(tensor.device),
+        int(getattr(tensor, "_version", 0)),
+    )
+
+
+def _sorted_membership_mask(values: torch.Tensor, sorted_allowed_ids: torch.Tensor) -> torch.Tensor:
+    values = torch.as_tensor(values, dtype=torch.long).view(-1)
+    sorted_allowed_ids = torch.as_tensor(sorted_allowed_ids, dtype=torch.long, device=values.device).view(-1)
+    if values.numel() == 0 or sorted_allowed_ids.numel() == 0:
+        return torch.zeros(values.numel(), dtype=torch.bool, device=values.device)
+    lower = sorted_allowed_ids[0]
+    upper = sorted_allowed_ids[-1]
+    if (upper - lower + 1) == sorted_allowed_ids.numel():
+        return (values >= lower) & (values <= upper)
+    positions = torch.searchsorted(sorted_allowed_ids, values, right=False)
+    capped_positions = positions.clamp_max(sorted_allowed_ids.numel() - 1)
+    return (positions < sorted_allowed_ids.numel()) & (sorted_allowed_ids[capped_positions] == values)
+
+
+def _temporal_history_lookup(edge_store, *, time_attr: str) -> tuple[torch.Tensor, torch.Tensor, bool]:
+    if hasattr(edge_store, "query_cache"):
+        cache = edge_store.query_cache
+    else:
+        cache = {}
+
+    cache_key = ("temporal_history_lookup", str(time_attr))
+    timestamps = torch.as_tensor(
+        edge_store.data[time_attr],
+        device=edge_store.edge_index.device,
+    ).view(-1)
+    signature = _tensor_signature(timestamps)
+    entry = cache.get(cache_key)
+    if entry is not None and entry["signature"] == signature:
+        return entry["sorted_timestamps"], entry["sorted_edge_ids"], entry["edge_ids_are_sorted"]
+
+    edge_ids = torch.arange(timestamps.numel(), dtype=torch.long, device=timestamps.device)
+    order = torch.argsort(timestamps, stable=True)
+    entry = {
+        "signature": signature,
+        "sorted_timestamps": timestamps[order],
+        "sorted_edge_ids": edge_ids[order],
+        "edge_ids_are_sorted": True if order.numel() <= 1 else bool((order[1:] >= order[:-1]).all()),
+    }
+    cache[cache_key] = entry
+    if hasattr(edge_store, "query_cache"):
+        edge_store.query_cache = cache
+    return entry["sorted_timestamps"], entry["sorted_edge_ids"], entry["edge_ids_are_sorted"]
+
+
 def _resolve_temporal_edge_type(record):
     edge_type = getattr(record, "edge_type", None)
     if edge_type is None:
@@ -76,6 +302,92 @@ def _resolve_temporal_edge_type(record):
 def _temporal_endpoint_types(record):
     edge_type = _resolve_temporal_edge_type(record)
     return edge_type, edge_type[0], edge_type[2]
+
+
+def _ordered_unique_tensor(values) -> torch.Tensor:
+    values = torch.as_tensor(values, dtype=torch.long).view(-1)
+    if values.numel() == 0:
+        return values
+    order = torch.argsort(values, stable=True)
+    sorted_values = values[order]
+    keep = torch.ones(sorted_values.numel(), dtype=torch.bool, device=values.device)
+    if sorted_values.numel() > 1:
+        keep[1:] = sorted_values[1:] != sorted_values[:-1]
+    first_occurrences = torch.sort(order[keep], stable=True).values
+    return values[first_occurrences]
+
+
+def _available_destinations_from_excluded(num_nodes: int, excluded: torch.Tensor) -> torch.Tensor:
+    if excluded.numel() == 0:
+        return torch.arange(int(num_nodes), dtype=torch.long, device=excluded.device)
+
+    starts = torch.cat(
+        (
+            torch.zeros(1, dtype=torch.long, device=excluded.device),
+            excluded + 1,
+        )
+    )
+    ends = torch.cat(
+        (
+            excluded - 1,
+            torch.tensor([int(num_nodes) - 1], dtype=torch.long, device=excluded.device),
+        )
+    )
+    lengths = ends - starts + 1
+    keep = lengths > 0
+    starts = starts[keep]
+    lengths = lengths[keep]
+    return _expand_interval_values(starts, lengths, step=1)
+
+
+def _sample_non_excluded_destinations(
+    num_nodes: int,
+    excluded_destinations,
+    count: int,
+    *,
+    device: torch.device | None = None,
+) -> torch.Tensor:
+    device = torch.device(device) if device is not None else None
+    excluded = torch.as_tensor(excluded_destinations, dtype=torch.long, device=device).view(-1)
+    if excluded.numel() > 0:
+        excluded = excluded[(excluded >= 0) & (excluded < int(num_nodes))]
+        if excluded.numel() > 0:
+            excluded = torch.unique(excluded)
+
+    available_count = int(num_nodes) - int(excluded.numel())
+    if available_count <= 0:
+        raise ValueError("UniformNegativeLinkSampler could not find a valid negative destination")
+    if count <= 0:
+        return torch.empty((0,), dtype=torch.long, device=excluded.device)
+    if excluded.numel() == 0:
+        return torch.randint(int(num_nodes), (int(count),), device=excluded.device)
+
+    if available_count <= max(64, int(count) * 4):
+        available = _available_destinations_from_excluded(int(num_nodes), excluded)
+        indices = torch.randint(available.numel(), (int(count),), device=excluded.device)
+        return available[indices]
+
+    samples = torch.empty((int(count),), dtype=torch.long, device=excluded.device)
+    filled = 0
+    proposal_size = max(int(count), 32)
+    max_attempts = 8
+    attempts = 0
+    while filled < int(count):
+        attempts += 1
+        proposed = torch.randint(int(num_nodes), (proposal_size,), device=excluded.device)
+        accepted = proposed[~_membership_mask(proposed, excluded)]
+        if accepted.numel() == 0:
+            if attempts >= max_attempts:
+                available = _available_destinations_from_excluded(int(num_nodes), excluded)
+                indices = torch.randint(available.numel(), (int(count),), device=excluded.device)
+                return available[indices]
+            proposal_size = max(proposal_size * 2, int(count) - filled)
+            continue
+        take = min(int(count) - filled, int(accepted.numel()))
+        samples[filled : filled + take] = accepted[:take]
+        filled += take
+
+    return samples
 
 
 class Sampler:
@@ -116,6 +428,20 @@ class UniformNegativeLinkSampler(Sampler):
             if positive_mask.any():
                 mask[edge_index[1, positive_mask].to(dtype=torch.long)] = False
         return torch.arange(num_nodes, dtype=torch.long)[mask]
+
+    def _excluded_negative_destinations(self, item):
+        edge_type, _, dst_type = _link_endpoint_types(item)
+        graph = item.graph
+        edge_index = graph.edges[edge_type].edge_index
+        device = edge_index.device
+        excluded = torch.tensor([int(item.dst_index)], dtype=torch.long, device=device)
+        if not self.exclude_positive_edges:
+            return excluded
+        positive_mask = edge_index[0] == int(item.src_index)
+        if not bool(positive_mask.any()):
+            return excluded
+        positive_destinations = edge_index[1, positive_mask].to(dtype=torch.long)
+        return torch.unique(torch.cat((excluded, positive_destinations)))
 
     def _resolved_query_id(self, item):
         query_id = item.query_id
@@ -225,17 +551,14 @@ class UniformNegativeLinkSampler(Sampler):
         )
 
     def _uniform_destinations(self, item, count, *, excluded_destinations=()):
-        candidates = self._candidate_destinations(item)
-        if excluded_destinations:
-            excluded = torch.tensor(list(excluded_destinations), dtype=torch.long, device=candidates.device)
-            keep_mask = ~torch.isin(candidates, excluded)
-            filtered = candidates[keep_mask]
-            if filtered.numel() > 0:
-                candidates = filtered
-        if candidates.numel() == 0:
-            raise ValueError("UniformNegativeLinkSampler could not find a valid negative destination")
-        indices = torch.randint(candidates.numel(), (count,))
-        return [int(candidates[index].item()) for index in indices.tolist()]
+        edge_type, _, dst_type = _link_endpoint_types(item)
+        num_nodes = int(item.graph.nodes[dst_type].x.size(0))
+        device = item.graph.edges[edge_type].edge_index.device
+        excluded = self._excluded_negative_destinations(item)
+        additional_excluded = torch.as_tensor(excluded_destinations, dtype=torch.long, device=device).view(-1)
+        if additional_excluded.numel() > 0:
+            excluded = torch.cat((excluded, additional_excluded))
+        return _sample_non_excluded_destinations(num_nodes, excluded, int(count), device=device)
 
     def sample(self, item):
         if not isinstance(item, LinkPredictionRecord):
@@ -247,8 +570,8 @@ class UniformNegativeLinkSampler(Sampler):
         positive = self._positive_seed_record(item)
         sampled = [positive]
         destinations = self._uniform_destinations(item, self.num_negatives)
-        for offset, dst_index in enumerate(destinations):
-            sampled.append(self._negative_record(item, dst_index, offset, query_id=positive.query_id))
+        for offset, dst_index in enumerate(destinations.view(-1)):
+            sampled.append(self._negative_record(item, int(dst_index.item()), offset, query_id=positive.query_id))
         return sampled
 
 
@@ -285,19 +608,17 @@ class HardNegativeLinkSampler(UniformNegativeLinkSampler):
     def _hard_negative_candidates(self, item):
         raw_candidates = self._resolved_hard_negative_dst(item)
         if raw_candidates is None:
-            return []
+            return torch.empty((0,), dtype=torch.long)
         candidates = torch.as_tensor(raw_candidates, dtype=torch.long).view(-1)
         _, _, dst_type = _link_endpoint_types(item)
         num_nodes = int(item.graph.nodes[dst_type].x.size(0))
         if ((candidates < 0) | (candidates >= num_nodes)).any():
             raise ValueError("hard_negative_dst entries must fall within the source graph node range")
-        valid = self._candidate_destinations(item)
-        valid_set = set(valid.tolist())
-        unique_candidates = []
-        for candidate in candidates.tolist():
-            if candidate in valid_set and candidate not in unique_candidates:
-                unique_candidates.append(int(candidate))
-        return unique_candidates
+        candidates = _ordered_unique_tensor(candidates)
+        excluded = self._excluded_negative_destinations(item).to(device=candidates.device)
+        if excluded.numel() == 0:
+            return candidates
+        return candidates[~_membership_mask(candidates, excluded)]
 
     def sample(self, item):
         if not isinstance(item, LinkPredictionRecord):
@@ -310,32 +631,32 @@ class HardNegativeLinkSampler(UniformNegativeLinkSampler):
         positive = self._positive_seed_record(item)
         sampled = [positive]
         hard_candidates = self._hard_negative_candidates(item)
-        hard_count = min(self.num_negatives, self.num_hard_negatives, len(hard_candidates))
-        selected_hard = []
+        hard_count = min(self.num_negatives, self.num_hard_negatives, int(hard_candidates.numel()))
+        selected_hard = torch.empty((0,), dtype=torch.long, device=hard_candidates.device)
         if hard_count > 0:
-            permutation = torch.randperm(len(hard_candidates))[:hard_count].tolist()
-            selected_hard = [hard_candidates[index] for index in permutation]
-            for offset, dst_index in enumerate(selected_hard):
+            permutation = torch.randperm(hard_candidates.numel(), device=hard_candidates.device)[:hard_count]
+            selected_hard = hard_candidates[permutation]
+            for offset, dst_index in enumerate(selected_hard.view(-1)):
                 sampled.append(
                     self._negative_record(
                         item,
-                        dst_index,
+                        int(dst_index.item()),
                         offset,
                         hard_negative=True,
                         query_id=positive.query_id,
                     )
                 )
 
-        remaining = self.num_negatives - len(selected_hard)
+        remaining = self.num_negatives - int(selected_hard.numel())
         if remaining > 0:
             uniform_destinations = self._uniform_destinations(
                 item,
                 remaining,
                 excluded_destinations=selected_hard,
             )
-            start_offset = len(selected_hard)
-            for offset, dst_index in enumerate(uniform_destinations, start=start_offset):
-                sampled.append(self._negative_record(item, dst_index, offset, query_id=positive.query_id))
+            start_offset = int(selected_hard.numel())
+            for offset, dst_index in enumerate(uniform_destinations.view(-1), start=start_offset):
+                sampled.append(self._negative_record(item, int(dst_index.item()), offset, query_id=positive.query_id))
         return sampled
 
 
@@ -370,24 +691,19 @@ class CandidateLinkSampler(UniformNegativeLinkSampler):
         _, _, dst_type = _link_endpoint_types(item)
         num_nodes = int(item.graph.nodes[dst_type].x.size(0))
         if raw_candidates is None:
-            return list(range(num_nodes))
+            return torch.arange(num_nodes, dtype=torch.long)
         candidates = torch.as_tensor(raw_candidates, dtype=torch.long).view(-1)
         if ((candidates < 0) | (candidates >= num_nodes)).any():
             raise ValueError("candidate_dst entries must fall within the source graph node range")
-        unique_candidates = []
-        for candidate in candidates.tolist():
-            candidate = int(candidate)
-            if candidate not in unique_candidates:
-                unique_candidates.append(candidate)
-        return unique_candidates
+        return _ordered_unique_tensor(candidates)
 
     def _known_positive_destinations(self, item):
         edge_type = _resolve_link_edge_type(item)
         edge_index = item.graph.edges[edge_type].edge_index
         positive_mask = edge_index[0] == int(item.src_index)
         if not positive_mask.any():
-            return set()
-        return {int(dst_index) for dst_index in edge_index[1, positive_mask].tolist()}
+            return torch.empty((0,), dtype=torch.long, device=edge_index.device)
+        return _ordered_unique_tensor(edge_index[1, positive_mask].to(dtype=torch.long))
 
     def sample(self, item):
         if not isinstance(item, LinkPredictionRecord):
@@ -399,16 +715,21 @@ class CandidateLinkSampler(UniformNegativeLinkSampler):
 
         positive = self._positive_seed_record(item)
         candidates = self._candidate_destinations(item)
-        ordered_destinations = [int(positive.dst_index)]
-        ordered_destinations.extend(candidate for candidate in candidates if int(candidate) != int(positive.dst_index))
-        known_positive_destinations = set()
+        positive_dst = torch.tensor([int(positive.dst_index)], dtype=torch.long, device=candidates.device)
+        ordered_destinations = torch.cat((positive_dst, candidates[candidates != int(positive.dst_index)]))
+        known_positive_destinations = torch.empty((0,), dtype=torch.long, device=ordered_destinations.device)
         if self.filter_known_positive_edges:
             known_positive_destinations = self._known_positive_destinations(item)
+        filter_mask = (
+            _membership_mask(ordered_destinations[1:], known_positive_destinations)
+            if ordered_destinations.numel() > 1 and known_positive_destinations.numel() > 0
+            else torch.zeros(max(int(ordered_destinations.numel()) - 1, 0), dtype=torch.bool, device=ordered_destinations.device)
+        )
 
         sampled = [positive]
-        for offset, dst_index in enumerate(ordered_destinations[1:]):
-            negative = self._negative_record(item, dst_index, offset, query_id=positive.query_id)
-            if dst_index in known_positive_destinations:
+        for offset, dst_index in enumerate(ordered_destinations[1:].view(-1)):
+            negative = self._negative_record(item, int(dst_index.item()), offset, query_id=positive.query_id)
+            if bool(filter_mask[offset].item()):
                 negative.filter_ranking = True
                 negative.metadata["filter_ranking"] = True
             sampled.append(negative)
@@ -517,174 +838,138 @@ class LinkNeighborSampler(Sampler):
         return replace(record, candidate_dst=metadata["candidate_dst"], metadata=metadata)
 
     def _next_frontier(self, graph, frontier, visited, fanout):
-        if not frontier:
-            return set()
-        edge_index = graph.edge_index
-        frontier_tensor = torch.tensor(sorted(frontier), dtype=torch.long, device=edge_index.device)
-        incident_mask = torch.isin(edge_index[0], frontier_tensor) | torch.isin(edge_index[1], frontier_tensor)
-        if not incident_mask.any():
-            return set()
-        candidate_nodes = torch.unique(edge_index[:, incident_mask]).tolist()
-        candidate_nodes = [int(node) for node in candidate_nodes if int(node) not in visited]
-        if fanout != -1 and len(candidate_nodes) > fanout:
-            permutation = torch.randperm(len(candidate_nodes), generator=self._generator)[:fanout].tolist()
-            candidate_nodes = [candidate_nodes[index] for index in permutation]
-        return set(candidate_nodes)
+        frontier_tensor = _sample_homo_next_frontier(
+            graph.edge_index,
+            torch.tensor(sorted(frontier), dtype=torch.long, device=graph.edge_index.device),
+            torch.tensor(sorted(visited), dtype=torch.long, device=graph.edge_index.device),
+            fanout,
+            generator=self._generator,
+        )
+        return {int(node.item()) for node in frontier_tensor}
 
     def _sample_node_ids(self, graph, records, *, return_hops: bool = False):
-        visited = {
-            int(node)
-            for record in records
-            for node in (record.src_index, record.dst_index)
-        }
-        frontier = set(visited)
-        hop_nodes = None
-        if return_hops:
-            hop_nodes = [torch.tensor(sorted(visited), dtype=torch.long, device=graph.edge_index.device)]
-        for fanout in self.num_neighbors:
-            frontier = self._next_frontier(graph, frontier, visited, fanout)
-            visited.update(frontier)
-            if hop_nodes is not None:
-                hop_nodes.append(torch.tensor(sorted(visited), dtype=torch.long, device=graph.edge_index.device))
-            elif not frontier:
-                break
-        sampled = torch.tensor(sorted(visited), dtype=torch.long, device=graph.edge_index.device)
-        if hop_nodes is not None:
-            return sampled, hop_nodes
-        return sampled
+        seed_nodes = torch.tensor(
+            [
+                int(node)
+                for record in records
+                for node in (record.src_index, record.dst_index)
+            ],
+            dtype=torch.long,
+            device=graph.edge_index.device,
+        )
+        return _sample_homo_node_ids(
+            graph.edge_index,
+            seed_nodes,
+            self.num_neighbors,
+            generator=self._generator,
+            return_hops=return_hops,
+        )
 
     def _hetero_next_frontier(self, graph, frontier, visited, fanout):
-        candidates = {node_type: set() for node_type in graph.schema.node_types}
+        candidates = {node_type: [] for node_type in graph.schema.node_types}
         for edge_type, store in graph.edges.items():
             src_type, _, dst_type = edge_type
-            src_frontier = frontier.get(src_type, set())
-            dst_frontier = frontier.get(dst_type, set())
-            if not src_frontier and not dst_frontier:
+            src_frontier = frontier.get(src_type)
+            dst_frontier = frontier.get(dst_type)
+            if (src_frontier is None or src_frontier.numel() == 0) and (
+                dst_frontier is None or dst_frontier.numel() == 0
+            ):
                 continue
-            edge_index = store.edge_index
-            incident_mask = torch.zeros(edge_index.size(1), dtype=torch.bool, device=edge_index.device)
-            if src_frontier:
-                src_tensor = torch.tensor(sorted(src_frontier), dtype=torch.long, device=edge_index.device)
-                incident_mask |= torch.isin(edge_index[0], src_tensor)
-            if dst_frontier:
-                dst_tensor = torch.tensor(sorted(dst_frontier), dtype=torch.long, device=edge_index.device)
-                incident_mask |= torch.isin(edge_index[1], dst_tensor)
-            if not incident_mask.any():
-                continue
-            candidates[src_type].update(
-                int(node)
-                for node in edge_index[0, incident_mask].tolist()
-                if int(node) not in visited[src_type]
+            relation_candidates = _relation_neighbor_candidates(
+                store.edge_index,
+                frontier,
+                visited,
+                src_type=src_type,
+                dst_type=dst_type,
             )
-            candidates[dst_type].update(
-                int(node)
-                for node in edge_index[1, incident_mask].tolist()
-                if int(node) not in visited[dst_type]
-            )
+            for node_type, node_ids in relation_candidates.items():
+                if node_ids.numel() > 0:
+                    candidates[node_type].append(node_ids)
 
         next_frontier = {}
         for node_type, values in candidates.items():
-            candidate_list = sorted(values)
-            if fanout != -1 and len(candidate_list) > fanout:
-                permutation = torch.randperm(len(candidate_list), generator=self._generator)[:fanout].tolist()
-                candidate_list = [candidate_list[index] for index in permutation]
-            if candidate_list:
-                next_frontier[node_type] = set(candidate_list)
+            if not values:
+                continue
+            candidate_tensor = torch.unique(torch.cat(values))
+            candidate_tensor = _sample_fanout(candidate_tensor, fanout, generator=self._generator)
+            if candidate_tensor.numel() > 0:
+                next_frontier[node_type] = candidate_tensor
         return next_frontier
 
     def _hetero_sample_node_ids(self, graph, records, *, return_hops: bool = False):
         def _snapshot(visited_by_type):
             return {
-                node_type: torch.tensor(
-                    sorted(node_ids),
-                    dtype=torch.long,
-                    device=next(iter(graph.nodes[node_type].data.values())).device,
-                )
+                node_type: node_ids.clone()
                 for node_type, node_ids in visited_by_type.items()
             }
 
-        visited = {node_type: set() for node_type in graph.schema.node_types}
+        visited = {
+            node_type: torch.empty(
+                0,
+                dtype=torch.long,
+                device=next(iter(graph.nodes[node_type].data.values())).device,
+            )
+            for node_type in graph.schema.node_types
+        }
         for record in records:
             edge_type, src_type, dst_type = _link_endpoint_types(record)
             if edge_type not in graph.edges:
                 raise ValueError("LinkNeighborSampler record edge_type must exist in the source graph")
-            visited[src_type].add(int(record.src_index))
-            visited[dst_type].add(int(record.dst_index))
+            visited[src_type] = torch.unique(
+                torch.cat(
+                    (
+                        visited[src_type],
+                        torch.tensor([int(record.src_index)], dtype=torch.long, device=visited[src_type].device),
+                    )
+                )
+            )
+            visited[dst_type] = torch.unique(
+                torch.cat(
+                    (
+                        visited[dst_type],
+                        torch.tensor([int(record.dst_index)], dtype=torch.long, device=visited[dst_type].device),
+                    )
+                )
+            )
         frontier = {
-            node_type: set(node_ids)
+            node_type: node_ids.clone()
             for node_type, node_ids in visited.items()
+            if node_ids.numel() > 0
         }
         hop_nodes = [_snapshot(visited)] if return_hops else None
         for fanout in self.num_neighbors:
             frontier = self._hetero_next_frontier(graph, frontier, visited, fanout)
             for node_type, node_ids in frontier.items():
-                visited[node_type].update(node_ids)
+                visited[node_type] = torch.unique(torch.cat((visited[node_type], node_ids)))
             if hop_nodes is not None:
                 hop_nodes.append(_snapshot(visited))
-            elif not any(frontier.values()):
+            elif not frontier:
                 break
-        sampled = {
-            node_type: torch.tensor(
-                sorted(node_ids),
-                dtype=torch.long,
-                device=next(iter(graph.nodes[node_type].data.values())).device,
-            )
-            for node_type, node_ids in visited.items()
-        }
+        sampled = {node_type: node_ids.clone() for node_type, node_ids in visited.items()}
         if hop_nodes is not None:
             return sampled, hop_nodes
         return sampled
 
     def _subgraph(self, graph, node_ids):
         node_ids = node_ids.to(dtype=torch.long)
-        num_nodes = int(graph.x.size(0))
-        edge_index = graph.edge_index
-        node_mask = torch.zeros(num_nodes, dtype=torch.bool, device=edge_index.device)
-        node_mask[node_ids] = True
-        edge_mask = node_mask[edge_index[0]] & node_mask[edge_index[1]]
-
-        node_mapping = torch.full((num_nodes,), -1, dtype=torch.long, device=edge_index.device)
-        node_mapping[node_ids] = torch.arange(node_ids.size(0), dtype=torch.long, device=edge_index.device)
-        subgraph_edge_index = node_mapping[edge_index[:, edge_mask]]
-
-        node_data = {}
-        for key, value in graph.nodes["node"].data.items():
-            if isinstance(value, torch.Tensor) and value.ndim > 0 and value.size(0) == num_nodes:
-                node_data[key] = value[node_ids]
-            else:
-                node_data[key] = value
-        if "n_id" not in node_data:
+        subgraph = node_subgraph(graph, node_ids)
+        if "n_id" not in subgraph.nodes["node"].data:
+            node_data = dict(subgraph.nodes["node"].data)
             node_data["n_id"] = node_ids
-
-        edge_store = graph.edges[graph._default_edge_type()]
-        edge_count = int(edge_store.edge_index.size(1))
-        edge_data = {}
-        edge_ids = torch.arange(edge_count, dtype=torch.long, device=edge_index.device)[edge_mask]
-        for key, value in edge_store.data.items():
-            if key == "edge_index":
-                continue
-            if isinstance(value, torch.Tensor) and value.ndim > 0 and value.size(0) == edge_count:
-                edge_data[key] = value[edge_mask]
-            else:
-                edge_data[key] = value
-        if "e_id" not in edge_data:
-            edge_data["e_id"] = edge_ids
-        return Graph.homo(edge_index=subgraph_edge_index, edge_data=edge_data, **node_data), node_mapping
+            edge_store = subgraph.edges[subgraph._default_edge_type()]
+            edge_data = {
+                key: value
+                for key, value in edge_store.data.items()
+                if key != "edge_index"
+            }
+            subgraph = Graph.homo(edge_index=edge_store.edge_index, edge_data=edge_data, **node_data)
+        return subgraph, node_ids
 
     def _hetero_subgraph(self, graph, node_ids_by_type):
-        node_masks = {}
-        node_mappings = {}
         nodes = {}
         for node_type, store in graph.nodes.items():
-            node_ids = node_ids_by_type[node_type]
+            node_ids = node_ids_by_type[node_type].to(dtype=torch.long)
             num_nodes = store.x.size(0)
-            node_mask = torch.zeros(num_nodes, dtype=torch.bool, device=store.x.device)
-            if node_ids.numel() > 0:
-                node_mask[node_ids] = True
-            node_mapping = torch.full((num_nodes,), -1, dtype=torch.long, device=store.x.device)
-            node_mapping[node_ids] = torch.arange(node_ids.numel(), dtype=torch.long, device=store.x.device)
-            node_masks[node_type] = node_mask
-            node_mappings[node_type] = node_mapping
 
             node_data = {}
             for key, value in store.data.items():
@@ -699,29 +984,25 @@ class LinkNeighborSampler(Sampler):
         edges = {}
         for edge_type, store in graph.edges.items():
             src_type, _, dst_type = edge_type
-            edge_index = store.edge_index
-            edge_mask = node_masks[src_type][edge_index[0]] & node_masks[dst_type][edge_index[1]]
-            subgraph_edge_index = torch.stack(
-                [
-                    node_mappings[src_type][edge_index[0, edge_mask]],
-                    node_mappings[dst_type][edge_index[1, edge_mask]],
-                ],
-                dim=0,
+            src_node_ids = node_ids_by_type[src_type].to(dtype=torch.long, device=store.edge_index.device)
+            dst_node_ids = node_ids_by_type[dst_type].to(dtype=torch.long, device=store.edge_index.device)
+            candidate_edge_ids = _positions_for_endpoint_values(store, src_node_ids, endpoint=0)
+            edge_ids = candidate_edge_ids[
+                _membership_mask(store.edge_index[1, candidate_edge_ids], dst_node_ids)
+            ]
+            edge_data = _slice_edge_store(store, edge_ids)
+            edge_data["edge_index"] = _relabel_bipartite_edge_index(
+                edge_data["edge_index"],
+                node_ids_by_type[src_type],
+                node_ids_by_type[dst_type],
             )
-            edge_count = int(edge_index.size(1))
-            edge_data = {"edge_index": subgraph_edge_index}
-            edge_ids = torch.arange(edge_count, dtype=torch.long, device=edge_index.device)[edge_mask]
-            for key, value in store.data.items():
-                if key == "edge_index":
-                    continue
-                if isinstance(value, torch.Tensor) and value.ndim > 0 and value.size(0) == edge_count:
-                    edge_data[key] = value[edge_mask]
-                else:
-                    edge_data[key] = value
             if "e_id" not in edge_data:
                 edge_data["e_id"] = edge_ids
             edges[edge_type] = edge_data
-        return Graph.hetero(nodes=nodes, edges=edges, time_attr=graph.schema.time_attr), node_mappings
+        return Graph.hetero(nodes=nodes, edges=edges, time_attr=graph.schema.time_attr), {
+            node_type: node_ids_by_type[node_type].to(dtype=torch.long)
+            for node_type in graph.nodes
+        }
 
     def _local_record(self, record, graph, node_mapping):
         metadata = dict(record.metadata)
@@ -742,10 +1023,15 @@ class LinkNeighborSampler(Sampler):
             metadata["exclude_seed_edges"] = True
         if bool(record.filter_ranking):
             metadata["filter_ranking"] = True
+        local_positions = _lookup_positions(
+            node_mapping,
+            torch.tensor([int(record.src_index), int(record.dst_index)], dtype=torch.long, device=node_mapping.device),
+            entity_name="node",
+        )
         return LinkPredictionRecord(
             graph=graph,
-            src_index=int(node_mapping[int(record.src_index)].item()),
-            dst_index=int(node_mapping[int(record.dst_index)].item()),
+            src_index=int(local_positions[0].item()),
+            dst_index=int(local_positions[1].item()),
             label=int(record.label),
             metadata=metadata,
             sample_id=record.sample_id,
@@ -777,10 +1063,20 @@ class LinkNeighborSampler(Sampler):
             metadata["exclude_seed_edges"] = True
         if bool(record.filter_ranking):
             metadata["filter_ranking"] = True
+        src_position = _lookup_positions(
+            node_mapping[src_type],
+            torch.tensor([int(record.src_index)], dtype=torch.long, device=node_mapping[src_type].device),
+            entity_name="source node",
+        )
+        dst_position = _lookup_positions(
+            node_mapping[dst_type],
+            torch.tensor([int(record.dst_index)], dtype=torch.long, device=node_mapping[dst_type].device),
+            entity_name="destination node",
+        )
         return LinkPredictionRecord(
             graph=graph,
-            src_index=int(node_mapping[src_type][int(record.src_index)].item()),
-            dst_index=int(node_mapping[dst_type][int(record.dst_index)].item()),
+            src_index=int(src_position[0].item()),
+            dst_index=int(dst_position[0].item()),
             label=int(record.label),
             metadata=metadata,
             sample_id=record.sample_id,
@@ -929,86 +1225,108 @@ class TemporalNeighborSampler(LinkNeighborSampler):
             raise ValueError("TemporalNeighborSampler record edge_type must exist in the source graph")
 
         edge_store = graph.edges[edge_type]
-        edge_timestamps = edge_store.data[graph.schema.time_attr]
+        sorted_timestamps, sorted_edge_ids, edge_ids_are_sorted = _temporal_history_lookup(
+            edge_store,
+            time_attr=graph.schema.time_attr,
+        )
+        query_time = torch.as_tensor(timestamp, dtype=sorted_timestamps.dtype, device=sorted_timestamps.device).view(1)
         if self.strict_history:
-            edge_mask = edge_timestamps < timestamp
+            upper = torch.searchsorted(sorted_timestamps, query_time, right=False)
         else:
-            edge_mask = edge_timestamps <= timestamp
+            upper = torch.searchsorted(sorted_timestamps, query_time, right=True)
+        lower = torch.zeros_like(upper)
         if self.time_window is not None:
-            edge_mask &= edge_timestamps >= (timestamp - self.time_window)
+            lower_bound = query_time - self.time_window
+            lower = torch.searchsorted(sorted_timestamps, lower_bound, right=False)
 
-        edge_ids = torch.arange(edge_store.edge_index.size(1), dtype=torch.long, device=edge_store.edge_index.device)
-        edge_ids = edge_ids[edge_mask]
-        if self.max_events is not None and edge_ids.numel() > self.max_events:
-            order = torch.argsort(edge_timestamps[edge_ids], stable=True)
-            edge_ids = edge_ids[order][-self.max_events :]
-        return edge_ids
+        candidate_edge_ids = sorted_edge_ids[lower[0] : upper[0]]
+        if self.max_events is not None and candidate_edge_ids.numel() > self.max_events:
+            return candidate_edge_ids[-self.max_events :]
+        if edge_ids_are_sorted or candidate_edge_ids.numel() <= 1:
+            return candidate_edge_ids
+        return torch.sort(candidate_edge_ids, stable=True).values
 
     def _next_frontier_from_edge_index(self, edge_index, frontier, visited, fanout):
-        if not frontier or edge_index.numel() == 0:
-            return set()
-        frontier_tensor = torch.tensor(sorted(frontier), dtype=torch.long, device=edge_index.device)
-        incident_mask = torch.isin(edge_index[0], frontier_tensor) | torch.isin(edge_index[1], frontier_tensor)
-        if not incident_mask.any():
-            return set()
-        candidate_nodes = torch.unique(edge_index[:, incident_mask]).tolist()
-        candidate_nodes = [int(node) for node in candidate_nodes if int(node) not in visited]
-        if fanout != -1 and len(candidate_nodes) > fanout:
-            permutation = torch.randperm(len(candidate_nodes), generator=self._generator)[:fanout].tolist()
-            candidate_nodes = [candidate_nodes[index] for index in permutation]
-        return set(candidate_nodes)
+        frontier_tensor = _sample_homo_next_frontier(
+            edge_index,
+            torch.tensor(sorted(frontier), dtype=torch.long, device=edge_index.device),
+            torch.tensor(sorted(visited), dtype=torch.long, device=edge_index.device),
+            fanout,
+            generator=self._generator,
+        )
+        return {int(node.item()) for node in frontier_tensor}
 
     def _sample_node_ids(self, edge_index, src_index, dst_index):
-        visited = {int(src_index), int(dst_index)}
-        frontier = set(visited)
-        for fanout in self.num_neighbors:
-            frontier = self._next_frontier_from_edge_index(edge_index, frontier, visited, fanout)
-            visited.update(frontier)
-            if not frontier:
-                break
-        return torch.tensor(sorted(visited), dtype=torch.long, device=edge_index.device)
+        return _sample_homo_node_ids(
+            edge_index,
+            torch.tensor([int(src_index), int(dst_index)], dtype=torch.long, device=edge_index.device),
+            self.num_neighbors,
+            generator=self._generator,
+        )
+
+    def _sample_history_node_ids(self, edge_store, history_edge_ids, src_index, dst_index):
+        return _sample_homo_history_node_ids(
+            edge_store,
+            history_edge_ids,
+            torch.tensor([int(src_index), int(dst_index)], dtype=torch.long, device=edge_store.edge_index.device),
+            self.num_neighbors,
+            generator=self._generator,
+        )
 
     def _relation_next_frontier(self, edge_index, frontier, visited, fanout, *, src_type, dst_type):
-        if edge_index.numel() == 0:
-            return {node_type: set() for node_type in dict.fromkeys((src_type, dst_type))}
-        incident_mask = torch.zeros(edge_index.size(1), dtype=torch.bool, device=edge_index.device)
-        src_frontier = frontier.get(src_type, set())
-        dst_frontier = frontier.get(dst_type, set())
-        if src_frontier:
-            src_tensor = torch.tensor(sorted(src_frontier), dtype=torch.long, device=edge_index.device)
-            incident_mask |= torch.isin(edge_index[0], src_tensor)
-        if dst_frontier:
-            dst_tensor = torch.tensor(sorted(dst_frontier), dtype=torch.long, device=edge_index.device)
-            incident_mask |= torch.isin(edge_index[1], dst_tensor)
-        if not incident_mask.any():
-            return {node_type: set() for node_type in dict.fromkeys((src_type, dst_type))}
-
-        candidates = {node_type: set() for node_type in dict.fromkeys((src_type, dst_type))}
-        candidates[src_type].update(
-            int(node)
-            for node in edge_index[0, incident_mask].tolist()
-            if int(node) not in visited[src_type]
+        candidates = _relation_neighbor_candidates(
+            edge_index,
+            frontier,
+            visited,
+            src_type=src_type,
+            dst_type=dst_type,
         )
-        candidates[dst_type].update(
-            int(node)
-            for node in edge_index[1, incident_mask].tolist()
-            if int(node) not in visited[dst_type]
-        )
-
         next_frontier = {}
-        for node_type, values in candidates.items():
-            candidate_list = sorted(values)
-            if fanout != -1 and len(candidate_list) > fanout:
-                permutation = torch.randperm(len(candidate_list), generator=self._generator)[:fanout].tolist()
-                candidate_list = [candidate_list[index] for index in permutation]
-            next_frontier[node_type] = set(candidate_list)
+        for node_type, node_ids in candidates.items():
+            sampled = _sample_fanout(node_ids, fanout, generator=self._generator)
+            if sampled.numel() > 0:
+                next_frontier[node_type] = sampled
+        return next_frontier
+
+    def _relation_history_next_frontier(self, edge_store, history_edge_ids, frontier, visited, fanout, *, src_type, dst_type):
+        candidates = _history_relation_neighbor_candidates(
+            edge_store,
+            history_edge_ids,
+            frontier,
+            visited,
+            src_type=src_type,
+            dst_type=dst_type,
+        )
+        next_frontier = {}
+        for node_type, node_ids in candidates.items():
+            sampled = _sample_fanout(node_ids, fanout, generator=self._generator)
+            if sampled.numel() > 0:
+                next_frontier[node_type] = sampled
         return next_frontier
 
     def _relation_sample_node_ids(self, edge_index, src_index, dst_index, *, src_type, dst_type):
-        visited = {node_type: set() for node_type in dict.fromkeys((src_type, dst_type))}
-        visited[src_type].add(int(src_index))
-        visited[dst_type].add(int(dst_index))
-        frontier = {node_type: set(node_ids) for node_type, node_ids in visited.items()}
+        unique_types = tuple(dict.fromkeys((src_type, dst_type)))
+        visited = {
+            node_type: torch.empty(0, dtype=torch.long, device=edge_index.device)
+            for node_type in unique_types
+        }
+        visited[src_type] = torch.unique(
+            torch.cat(
+                (
+                    visited[src_type],
+                    torch.tensor([int(src_index)], dtype=torch.long, device=edge_index.device),
+                )
+            )
+        )
+        visited[dst_type] = torch.unique(
+            torch.cat(
+                (
+                    visited[dst_type],
+                    torch.tensor([int(dst_index)], dtype=torch.long, device=edge_index.device),
+                )
+            )
+        )
+        frontier = {node_type: node_ids.clone() for node_type, node_ids in visited.items()}
         for fanout in self.num_neighbors:
             frontier = self._relation_next_frontier(
                 edge_index,
@@ -1019,14 +1337,50 @@ class TemporalNeighborSampler(LinkNeighborSampler):
                 dst_type=dst_type,
             )
             for node_type, node_ids in frontier.items():
-                visited[node_type].update(node_ids)
-            if not any(frontier.values()):
+                visited[node_type] = torch.unique(torch.cat((visited[node_type], node_ids)))
+            if not frontier:
                 break
-        device = edge_index.device
-        return {
-            node_type: torch.tensor(sorted(node_ids), dtype=torch.long, device=device)
-            for node_type, node_ids in visited.items()
+        return {node_type: node_ids.clone() for node_type, node_ids in visited.items()}
+
+    def _relation_sample_history_node_ids(self, edge_store, history_edge_ids, src_index, dst_index, *, src_type, dst_type):
+        edge_index = edge_store.edge_index
+        unique_types = tuple(dict.fromkeys((src_type, dst_type)))
+        visited = {
+            node_type: torch.empty(0, dtype=torch.long, device=edge_index.device)
+            for node_type in unique_types
         }
+        visited[src_type] = torch.unique(
+            torch.cat(
+                (
+                    visited[src_type],
+                    torch.tensor([int(src_index)], dtype=torch.long, device=edge_index.device),
+                )
+            )
+        )
+        visited[dst_type] = torch.unique(
+            torch.cat(
+                (
+                    visited[dst_type],
+                    torch.tensor([int(dst_index)], dtype=torch.long, device=edge_index.device),
+                )
+            )
+        )
+        frontier = {node_type: node_ids.clone() for node_type, node_ids in visited.items()}
+        for fanout in self.num_neighbors:
+            frontier = self._relation_history_next_frontier(
+                edge_store,
+                history_edge_ids,
+                frontier,
+                visited,
+                fanout,
+                src_type=src_type,
+                dst_type=dst_type,
+            )
+            for node_type, node_ids in frontier.items():
+                visited[node_type] = torch.unique(torch.cat((visited[node_type], node_ids)))
+            if not frontier:
+                break
+        return {node_type: node_ids.clone() for node_type, node_ids in visited.items()}
 
     def _subgraph(self, graph, edge_type, node_ids, history_edge_ids):
         node_ids = node_ids.to(dtype=torch.long)
@@ -1034,15 +1388,17 @@ class TemporalNeighborSampler(LinkNeighborSampler):
         edge_store = graph.edges[edge_type]
         edge_index = edge_store.edge_index
 
-        node_mask = torch.zeros(num_nodes, dtype=torch.bool, device=edge_index.device)
-        node_mask[node_ids] = True
-        history_edge_index = edge_index[:, history_edge_ids]
-        edge_mask = node_mask[history_edge_index[0]] & node_mask[history_edge_index[1]]
-        kept_edge_ids = history_edge_ids[edge_mask]
+        history_edge_ids = torch.as_tensor(history_edge_ids, dtype=torch.long, device=edge_index.device)
+        kept_edge_ids = _history_edge_ids_for_nodes(edge_store, history_edge_ids, node_ids, node_ids)
 
-        node_mapping = torch.full((num_nodes,), -1, dtype=torch.long, device=edge_index.device)
-        node_mapping[node_ids] = torch.arange(node_ids.size(0), dtype=torch.long, device=edge_index.device)
-        subgraph_edge_index = node_mapping[history_edge_index[:, edge_mask]]
+        if kept_edge_ids.numel() == 0:
+            subgraph_edge_index = edge_index[:, :0]
+        else:
+            subgraph_edge_index = _relabel_bipartite_edge_index(
+                edge_index[:, kept_edge_ids],
+                node_ids,
+                node_ids,
+            )
 
         node_data = {}
         for key, value in graph.nodes["node"].data.items():
@@ -1071,26 +1427,17 @@ class TemporalNeighborSampler(LinkNeighborSampler):
                 edges={edge_type: edge_data},
                 time_attr=graph.schema.time_attr,
             ),
-            node_mapping,
+            node_ids,
         )
 
     def _relation_subgraph(self, graph, edge_type, node_ids_by_type, history_edge_ids):
         src_type, _, dst_type = edge_type
         unique_node_types = tuple(dict.fromkeys((src_type, dst_type)))
-        node_masks = {}
-        node_mappings = {}
         nodes = {}
         for node_type in unique_node_types:
             store = graph.nodes[node_type]
             node_ids = node_ids_by_type[node_type].to(dtype=torch.long)
             num_nodes = store.x.size(0)
-            node_mask = torch.zeros(num_nodes, dtype=torch.bool, device=store.x.device)
-            if node_ids.numel() > 0:
-                node_mask[node_ids] = True
-            node_mapping = torch.full((num_nodes,), -1, dtype=torch.long, device=store.x.device)
-            node_mapping[node_ids] = torch.arange(node_ids.numel(), dtype=torch.long, device=store.x.device)
-            node_masks[node_type] = node_mask
-            node_mappings[node_type] = node_mapping
 
             node_data = {}
             for key, value in store.data.items():
@@ -1103,16 +1450,21 @@ class TemporalNeighborSampler(LinkNeighborSampler):
             nodes[node_type] = node_data
 
         edge_store = graph.edges[edge_type]
-        history_edge_index = edge_store.edge_index[:, history_edge_ids]
-        edge_mask = node_masks[src_type][history_edge_index[0]] & node_masks[dst_type][history_edge_index[1]]
-        kept_edge_ids = history_edge_ids[edge_mask]
-        subgraph_edge_index = torch.stack(
-            [
-                node_mappings[src_type][history_edge_index[0, edge_mask]],
-                node_mappings[dst_type][history_edge_index[1, edge_mask]],
-            ],
-            dim=0,
+        history_edge_ids = torch.as_tensor(history_edge_ids, dtype=torch.long, device=edge_store.edge_index.device)
+        kept_edge_ids = _history_edge_ids_for_nodes(
+            edge_store,
+            history_edge_ids,
+            node_ids_by_type[src_type],
+            node_ids_by_type[dst_type],
         )
+        if kept_edge_ids.numel() == 0:
+            subgraph_edge_index = edge_store.edge_index[:, :0]
+        else:
+            subgraph_edge_index = _relabel_bipartite_edge_index(
+                edge_store.edge_index[:, kept_edge_ids],
+                node_ids_by_type[src_type],
+                node_ids_by_type[dst_type],
+            )
 
         edge_count = int(edge_store.edge_index.size(1))
         edge_data = {"edge_index": subgraph_edge_index}
@@ -1126,13 +1478,21 @@ class TemporalNeighborSampler(LinkNeighborSampler):
         if "e_id" not in edge_data:
             edge_data["e_id"] = kept_edge_ids
 
-        return Graph.temporal(nodes=nodes, edges={edge_type: edge_data}, time_attr=graph.schema.time_attr), node_mappings
+        return Graph.temporal(nodes=nodes, edges={edge_type: edge_data}, time_attr=graph.schema.time_attr), {
+            node_type: node_ids_by_type[node_type].to(dtype=torch.long)
+            for node_type in unique_node_types
+        }
 
     def _local_record(self, record, graph, node_mapping, *, edge_type):
+        local_positions = _lookup_positions(
+            node_mapping,
+            torch.tensor([int(record.src_index), int(record.dst_index)], dtype=torch.long, device=node_mapping.device),
+            entity_name="node",
+        )
         return TemporalEventRecord(
             graph=graph,
-            src_index=int(node_mapping[int(record.src_index)].item()),
-            dst_index=int(node_mapping[int(record.dst_index)].item()),
+            src_index=int(local_positions[0].item()),
+            dst_index=int(local_positions[1].item()),
             timestamp=int(record.timestamp),
             label=int(record.label),
             event_features=record.event_features,
@@ -1143,10 +1503,20 @@ class TemporalNeighborSampler(LinkNeighborSampler):
 
     def _hetero_local_record(self, record, graph, node_mapping, *, edge_type):
         _, src_type, dst_type = _temporal_endpoint_types(record)
+        src_position = _lookup_positions(
+            node_mapping[src_type],
+            torch.tensor([int(record.src_index)], dtype=torch.long, device=node_mapping[src_type].device),
+            entity_name="source node",
+        )
+        dst_position = _lookup_positions(
+            node_mapping[dst_type],
+            torch.tensor([int(record.dst_index)], dtype=torch.long, device=node_mapping[dst_type].device),
+            entity_name="destination node",
+        )
         return TemporalEventRecord(
             graph=graph,
-            src_index=int(node_mapping[src_type][int(record.src_index)].item()),
-            dst_index=int(node_mapping[dst_type][int(record.dst_index)].item()),
+            src_index=int(src_position[0].item()),
+            dst_index=int(dst_position[0].item()),
             timestamp=int(record.timestamp),
             label=int(record.label),
             event_features=record.event_features,
@@ -1177,15 +1547,19 @@ class TemporalNeighborSampler(LinkNeighborSampler):
         edge_type = _resolve_temporal_edge_type(item)
         history_edge_ids = self._history_edge_ids(item.graph, edge_type, int(item.timestamp))
         if set(item.graph.nodes) == {"node"} and len(item.graph.edges) == 1:
-            history_edge_index = item.graph.edges[edge_type].edge_index[:, history_edge_ids]
-            node_ids = self._sample_node_ids(history_edge_index, item.src_index, item.dst_index)
+            node_ids = self._sample_history_node_ids(
+                item.graph.edges[edge_type],
+                history_edge_ids,
+                item.src_index,
+                item.dst_index,
+            )
             subgraph, node_mapping = self._subgraph(item.graph, edge_type, node_ids, history_edge_ids)
             return self._local_record(item, subgraph, node_mapping, edge_type=edge_type)
 
         _, src_type, dst_type = _temporal_endpoint_types(item)
-        history_edge_index = item.graph.edges[edge_type].edge_index[:, history_edge_ids]
-        node_ids_by_type = self._relation_sample_node_ids(
-            history_edge_index,
+        node_ids_by_type = self._relation_sample_history_node_ids(
+            item.graph.edges[edge_type],
+            history_edge_ids,
             item.src_index,
             item.dst_index,
             src_type=src_type,

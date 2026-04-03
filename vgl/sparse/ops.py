@@ -38,6 +38,35 @@ def _empty_values_like(values: torch.Tensor | None) -> torch.Tensor | None:
     return values.new_empty((0,) + tuple(values.shape[1:]))
 
 
+def _optional_lookup_positions(index_ids: torch.Tensor, values: torch.Tensor) -> torch.Tensor:
+    index_ids = torch.as_tensor(index_ids, dtype=torch.long).view(-1)
+    values = torch.as_tensor(values, dtype=torch.long, device=index_ids.device).view(-1)
+    if values.numel() == 0:
+        return values
+    if index_ids.numel() == 0:
+        return torch.full_like(values, -1)
+
+    order = torch.argsort(index_ids, stable=True)
+    sorted_index_ids = index_ids[order]
+    keep_last = torch.ones(sorted_index_ids.numel(), dtype=torch.bool, device=index_ids.device)
+    if sorted_index_ids.numel() > 1:
+        keep_last[:-1] = sorted_index_ids[:-1] != sorted_index_ids[1:]
+    unique_index_ids = sorted_index_ids[keep_last]
+    source_positions = order[keep_last]
+
+    positions = torch.searchsorted(unique_index_ids, values.contiguous())
+    matched = positions < unique_index_ids.numel()
+    if bool(matched.any()):
+        matched_indices = positions[matched]
+        valid_matches = torch.zeros_like(matched)
+        valid_matches[matched] = unique_index_ids.index_select(0, matched_indices) == values[matched]
+        matched = valid_matches
+    lookup = torch.full_like(values, -1)
+    if bool(matched.any()):
+        lookup[matched] = source_positions.index_select(0, positions[matched])
+    return lookup
+
+
 def sum(sparse: SparseTensor, *, dim: int = 0) -> torch.Tensor:
     coo = to_coo(sparse)
     if dim == 0:
@@ -70,10 +99,9 @@ def degree(sparse: SparseTensor, *, dim: int = 0) -> torch.Tensor:
 def select_rows(sparse: SparseTensor, rows: torch.Tensor) -> SparseTensor:
     coo = to_coo(sparse)
     rows = rows.to(dtype=torch.long)
-    row_map = {int(row): index for index, row in enumerate(rows.tolist())}
-    selected_positions = [index for index, row in enumerate(coo.row.tolist()) if int(row) in row_map]
-    selected_index = torch.tensor(selected_positions, dtype=torch.long, device=coo.row.device)
-    if selected_index.numel() == 0:
+    selected_row = _optional_lookup_positions(rows, coo.row)
+    selected_mask = selected_row >= 0
+    if not bool(selected_mask.any()):
         empty = torch.empty(0, dtype=torch.long, device=coo.row.device)
         return SparseTensor(
             layout=SparseLayout.COO,
@@ -82,13 +110,9 @@ def select_rows(sparse: SparseTensor, rows: torch.Tensor) -> SparseTensor:
             col=empty,
             values=_empty_values_like(coo.values),
         )
-    selected_row = torch.tensor(
-        [row_map[int(row)] for row in coo.row[selected_index].tolist()],
-        dtype=torch.long,
-        device=coo.row.device,
-    )
-    selected_col = coo.col[selected_index]
-    selected_values = None if coo.values is None else coo.values[selected_index]
+    selected_row = selected_row[selected_mask]
+    selected_col = coo.col[selected_mask]
+    selected_values = None if coo.values is None else coo.values[selected_mask]
     return SparseTensor(
         layout=SparseLayout.COO,
         shape=(rows.numel(), coo.shape[1]),
@@ -101,10 +125,9 @@ def select_rows(sparse: SparseTensor, rows: torch.Tensor) -> SparseTensor:
 def select_cols(sparse: SparseTensor, cols: torch.Tensor) -> SparseTensor:
     coo = to_coo(sparse)
     cols = cols.to(dtype=torch.long)
-    col_map = {int(col): index for index, col in enumerate(cols.tolist())}
-    selected_positions = [index for index, col in enumerate(coo.col.tolist()) if int(col) in col_map]
-    selected_index = torch.tensor(selected_positions, dtype=torch.long, device=coo.col.device)
-    if selected_index.numel() == 0:
+    selected_col = _optional_lookup_positions(cols, coo.col)
+    selected_mask = selected_col >= 0
+    if not bool(selected_mask.any()):
         empty = torch.empty(0, dtype=torch.long, device=coo.col.device)
         return SparseTensor(
             layout=SparseLayout.COO,
@@ -113,13 +136,9 @@ def select_cols(sparse: SparseTensor, cols: torch.Tensor) -> SparseTensor:
             col=empty,
             values=_empty_values_like(coo.values),
         )
-    selected_row = coo.row[selected_index]
-    selected_col = torch.tensor(
-        [col_map[int(col)] for col in coo.col[selected_index].tolist()],
-        dtype=torch.long,
-        device=coo.col.device,
-    )
-    selected_values = None if coo.values is None else coo.values[selected_index]
+    selected_row = coo.row[selected_mask]
+    selected_col = selected_col[selected_mask]
+    selected_values = None if coo.values is None else coo.values[selected_mask]
     return SparseTensor(
         layout=SparseLayout.COO,
         shape=(coo.shape[0], cols.numel()),

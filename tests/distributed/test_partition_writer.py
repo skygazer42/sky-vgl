@@ -29,6 +29,22 @@ def test_partition_writer_splits_graph_into_local_files(tmp_path):
     assert torch.equal(part1_graph.edge_index, torch.tensor([[0], [1]]))
 
 
+def test_partition_writer_avoids_tensor_tolist(monkeypatch, tmp_path):
+    graph = Graph.homo(
+        edge_index=torch.tensor([[0, 1, 2, 3], [1, 2, 3, 0]]),
+        x=torch.arange(8, dtype=torch.float32).view(4, 2),
+    )
+
+    def fail_tolist(self):
+        raise AssertionError("write_partitioned_graph should stay off tensor.tolist")
+
+    monkeypatch.setattr(torch.Tensor, "tolist", fail_tolist)
+
+    manifest = write_partitioned_graph(graph, tmp_path, num_partitions=2)
+
+    assert manifest.num_partitions == 2
+
+
 def test_partition_writer_preserves_temporal_graph_payloads(tmp_path):
     graph = Graph.temporal(
         nodes={"node": {"x": torch.arange(8, dtype=torch.float32).view(4, 2)}},

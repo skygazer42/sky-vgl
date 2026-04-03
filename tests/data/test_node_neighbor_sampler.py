@@ -391,7 +391,7 @@ def test_loader_builds_hetero_node_batch_from_multi_seed_node_neighbor_context()
 
 
 
-def test_node_neighbor_sampler_prefetch_option_aligns_partition_shard_features_through_coordinator(tmp_path):
+def test_node_neighbor_sampler_prefetch_option_aligns_partition_shard_features_through_coordinator(monkeypatch, tmp_path):
     graph = Graph.homo(
         edge_index=torch.tensor([[0, 2], [1, 3]]),
         x=torch.arange(4, dtype=torch.float32).view(4, 1),
@@ -419,6 +419,11 @@ def test_node_neighbor_sampler_prefetch_option_aligns_partition_shard_features_t
         batch_size=2,
         feature_store=coordinator,
     )
+
+    def fail_tolist(self):
+        raise AssertionError("prefetch feature alignment should stay on tensors")
+
+    monkeypatch.setattr(torch.Tensor, "tolist", fail_tolist)
 
     batch = next(iter(loader))
 
@@ -466,7 +471,7 @@ def test_node_neighbor_sampler_prefetch_option_aligns_partition_shard_features_t
 
 
 
-def test_node_neighbor_sampler_stitched_hetero_sampling_crosses_partition_boundaries_through_coordinator(tmp_path):
+def test_node_neighbor_sampler_stitched_hetero_sampling_crosses_partition_boundaries_through_coordinator(monkeypatch, tmp_path):
     graph = Graph.hetero(
         nodes={
             "paper": {
@@ -506,6 +511,11 @@ def test_node_neighbor_sampler_stitched_hetero_sampling_crosses_partition_bounda
         batch_size=1,
         feature_store=coordinator,
     )
+
+    def fail_tolist(self):
+        raise AssertionError("stitched hetero node materialization should stay on tensors")
+
+    monkeypatch.setattr(torch.Tensor, "tolist", fail_tolist)
 
     batch = next(iter(loader))
 
@@ -764,7 +774,7 @@ def test_node_neighbor_sampler_stitched_hetero_output_blocks_materialize_relatio
     assert batch.metadata == [{"seed": 0, "node_type": "paper", "sample_id": "stitched_hetero_blocks_store"}]
 
 
-def test_node_neighbor_sampler_stitched_sampling_crosses_partition_boundaries_through_coordinator(tmp_path):
+def test_node_neighbor_sampler_stitched_sampling_crosses_partition_boundaries_through_coordinator(monkeypatch, tmp_path):
     graph = Graph.homo(
         edge_index=torch.tensor([[0, 1, 2, 3], [1, 2, 3, 0]]),
         x=torch.arange(4, dtype=torch.float32).view(4, 1),
@@ -783,6 +793,11 @@ def test_node_neighbor_sampler_stitched_sampling_crosses_partition_boundaries_th
         batch_size=1,
         feature_store=coordinator,
     )
+
+    def fail_tolist(self):
+        raise AssertionError("stitched homo node materialization should stay on tensors")
+
+    monkeypatch.setattr(torch.Tensor, "tolist", fail_tolist)
 
     batch = next(iter(loader))
 
@@ -828,7 +843,7 @@ def test_node_neighbor_sampler_stitched_sampling_crosses_partition_boundaries_th
     assert batch.metadata == [{"seed": 1, "sample_id": "stitched_store"}]
 
 
-def test_node_neighbor_sampler_stitched_sampling_materializes_blocks_through_coordinator(tmp_path):
+def test_node_neighbor_sampler_stitched_sampling_materializes_blocks_through_coordinator(monkeypatch, tmp_path):
     graph = Graph.homo(
         edge_index=torch.tensor([[0, 1, 2, 3], [1, 2, 3, 0]]),
         x=torch.arange(4, dtype=torch.float32).view(4, 1),
@@ -852,6 +867,11 @@ def test_node_neighbor_sampler_stitched_sampling_materializes_blocks_through_coo
         batch_size=1,
         feature_store=coordinator,
     )
+
+    def fail_tolist(self):
+        raise AssertionError("stitched homo block materialization should stay on tensors")
+
+    monkeypatch.setattr(torch.Tensor, "tolist", fail_tolist)
 
     batch = next(iter(loader))
 

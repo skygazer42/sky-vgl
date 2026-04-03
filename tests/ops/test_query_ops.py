@@ -111,6 +111,199 @@ def test_query_ops_reject_missing_pairs_and_invalid_ids():
         has_edges_between(graph, torch.tensor([0, 3]), torch.tensor([1, 1]))
 
 
+def test_query_ops_populate_and_reuse_edge_lookup_cache():
+    graph = Graph.homo(
+        edge_index=torch.tensor([[0, 0, 1, 0], [1, 1, 2, 2]]),
+        x=torch.tensor([[1.0], [2.0], [3.0]]),
+    )
+    store = graph.edges[("node", "to", "node")]
+
+    assert getattr(store, "query_cache") == {}
+
+    src, dst = find_edges(graph, torch.tensor([2, 0]))
+    assert torch.equal(src, torch.tensor([1, 0]))
+    assert torch.equal(dst, torch.tensor([2, 1]))
+    assert store.query_cache
+
+    cache_entries = dict(store.query_cache)
+
+    eids = edge_ids(graph, torch.tensor([0, 1]), torch.tensor([1, 2]))
+    assert torch.equal(eids, torch.tensor([0, 2]))
+    assert set(store.query_cache) >= set(cache_entries)
+    for key, value in cache_entries.items():
+        assert store.query_cache[key] is value
+
+    assert torch.equal(
+        has_edges_between(graph, torch.tensor([0, 1]), torch.tensor([2, 2])),
+        torch.tensor([True, True]),
+    )
+    for key, value in store.query_cache.items():
+        assert store.query_cache[key] is value
+
+
+def test_find_edges_avoids_right_boundary_searchsorted(monkeypatch):
+    graph = Graph.homo(
+        edge_index=torch.tensor([[0, 2, 1], [1, 0, 2]]),
+        x=torch.tensor([[1.0], [2.0], [3.0]]),
+    )
+    original_searchsorted = torch.searchsorted
+    right_flags = []
+
+    def record_searchsorted(sorted_sequence, input, *, out_int32=False, right=False, side=None, out=None, sorter=None):
+        right_flags.append(right if side is None else side == "right")
+        return original_searchsorted(
+            sorted_sequence,
+            input,
+            out_int32=out_int32,
+            right=right,
+            side=side,
+            out=out,
+            sorter=sorter,
+        )
+
+    monkeypatch.setattr(torch, "searchsorted", record_searchsorted)
+
+    src, dst = find_edges(graph, torch.tensor([2, 0]))
+
+    assert torch.equal(src, torch.tensor([1, 0]))
+    assert torch.equal(dst, torch.tensor([2, 1]))
+    assert right_flags
+    assert not any(right_flags)
+
+
+def test_edge_ids_without_return_uv_avoids_right_boundary_searchsorted(monkeypatch):
+    graph = Graph.homo(
+        edge_index=torch.tensor([[0, 0, 0, 1], [1, 1, 2, 2]]),
+        x=torch.tensor([[1.0], [2.0], [3.0]]),
+    )
+    original_searchsorted = torch.searchsorted
+    right_flags = []
+
+    def record_searchsorted(sorted_sequence, input, *, out_int32=False, right=False, side=None, out=None, sorter=None):
+        right_flags.append(right if side is None else side == "right")
+        return original_searchsorted(
+            sorted_sequence,
+            input,
+            out_int32=out_int32,
+            right=right,
+            side=side,
+            out=out,
+            sorter=sorter,
+        )
+
+    monkeypatch.setattr(torch, "searchsorted", record_searchsorted)
+
+    eids = edge_ids(
+        graph,
+        torch.tensor([0, 0, 1]),
+        torch.tensor([1, 2, 2]),
+    )
+
+    assert torch.equal(eids, torch.tensor([0, 2, 3]))
+    assert right_flags
+    assert not any(right_flags)
+
+
+def test_has_edges_between_avoids_right_boundary_searchsorted(monkeypatch):
+    graph = Graph.homo(
+        edge_index=torch.tensor([[0, 1, 2], [1, 2, 0]]),
+        x=torch.tensor([[1.0], [2.0], [3.0]]),
+    )
+    original_searchsorted = torch.searchsorted
+    right_flags = []
+
+    def record_searchsorted(sorted_sequence, input, *, out_int32=False, right=False, side=None, out=None, sorter=None):
+        right_flags.append(right if side is None else side == "right")
+        return original_searchsorted(
+            sorted_sequence,
+            input,
+            out_int32=out_int32,
+            right=right,
+            side=side,
+            out=out,
+            sorter=sorter,
+        )
+
+    monkeypatch.setattr(torch, "searchsorted", record_searchsorted)
+
+    exists = has_edges_between(
+        graph,
+        torch.tensor([0, 1, 2]),
+        torch.tensor([1, 0, 0]),
+    )
+
+    assert torch.equal(exists, torch.tensor([True, False, True]))
+    assert right_flags
+    assert not any(right_flags)
+
+
+def test_query_match_checks_avoid_dense_zero_buffers(monkeypatch):
+    graph = Graph.homo(
+        edge_index=torch.tensor([[0, 0, 1, 2], [1, 2, 2, 0]]),
+        x=torch.tensor([[1.0], [2.0], [3.0]]),
+    )
+    original_zeros = torch.zeros
+
+    def fail_dense_bool_zeros(*args, **kwargs):
+        dtype = kwargs.get("dtype")
+        if dtype is torch.bool:
+            raise AssertionError("query matches should avoid allocating dense bool zero buffers")
+        return original_zeros(*args, **kwargs)
+
+    monkeypatch.setattr(torch, "zeros", fail_dense_bool_zeros)
+
+    src, dst = find_edges(graph, torch.tensor([3, 0]))
+    eids = edge_ids(graph, torch.tensor([0, 1]), torch.tensor([2, 2]))
+    exists = has_edges_between(graph, torch.tensor([0, 2]), torch.tensor([1, 0]))
+
+    assert torch.equal(src, torch.tensor([2, 0]))
+    assert torch.equal(dst, torch.tensor([0, 1]))
+    assert torch.equal(eids, torch.tensor([1, 2]))
+    assert torch.equal(exists, torch.tensor([True, True]))
+
+
+def test_edge_ids_return_uv_avoids_repeat_interleave(monkeypatch):
+    graph = Graph.homo(
+        edge_index=torch.tensor([[0, 0, 1, 0], [1, 1, 2, 2]]),
+        x=torch.tensor([[1.0], [2.0], [3.0]]),
+    )
+
+    def fail_repeat_interleave(*args, **kwargs):
+        raise AssertionError("edge_ids(return_uv=True) should avoid repeat_interleave interval expansion")
+
+    monkeypatch.setattr(torch, "repeat_interleave", fail_repeat_interleave)
+
+    src, dst, eids = edge_ids(
+        graph,
+        torch.tensor([1, 0]),
+        torch.tensor([2, 1]),
+        return_uv=True,
+    )
+
+    assert torch.equal(src, torch.tensor([1, 0, 0]))
+    assert torch.equal(dst, torch.tensor([2, 1, 1]))
+    assert torch.equal(eids, torch.tensor([2, 0, 1]))
+
+
+def test_endpoint_edge_queries_avoid_repeat_interleave(monkeypatch):
+    graph = Graph.homo(
+        edge_index=torch.tensor([[0, 2, 3, 1], [2, 3, 0, 3]]),
+        x=torch.tensor([[1.0], [2.0], [3.0], [4.0]]),
+    )
+
+    def fail_repeat_interleave(*args, **kwargs):
+        raise AssertionError("endpoint edge queries should avoid repeat_interleave interval expansion")
+
+    monkeypatch.setattr(torch, "repeat_interleave", fail_repeat_interleave)
+
+    in_src, in_dst = in_edges(graph, torch.tensor([3, 0]))
+    out_eids = out_edges(graph, torch.tensor([0, 3]), form="eid")
+
+    assert torch.equal(in_src, torch.tensor([2, 3, 1]))
+    assert torch.equal(in_dst, torch.tensor([3, 0, 3]))
+    assert torch.equal(out_eids, torch.tensor([0, 2]))
+
+
 def test_reverse_swaps_homogeneous_edges_and_respects_copy_flags():
     graph = Graph.homo(
         edge_index=torch.tensor([[0, 1, 2], [1, 2, 0]]),
@@ -211,6 +404,40 @@ def test_adjacency_edge_queries_use_public_edge_ids_from_frontier_subgraph():
     assert torch.equal(dst, torch.tensor([3, 3]))
     assert torch.equal(eids, torch.tensor([1, 3]))
     assert torch.equal(outbound, torch.tensor([1, 3]))
+
+
+def test_in_edges_and_out_edges_avoid_torch_isin(monkeypatch):
+    graph = Graph.homo(
+        edge_index=torch.tensor([[0, 2, 3, 1], [2, 3, 0, 3]]),
+        x=torch.tensor([[1.0], [2.0], [3.0], [4.0]]),
+    )
+
+    def fail_isin(*args, **kwargs):
+        raise AssertionError("endpoint edge queries should avoid torch.isin scans")
+
+    monkeypatch.setattr(torch, "isin", fail_isin)
+
+    in_src, in_dst = in_edges(graph, torch.tensor([3, 0]))
+    out_eids = out_edges(graph, torch.tensor([0, 3]), form="eid")
+
+    assert torch.equal(in_src, torch.tensor([2, 3, 1]))
+    assert torch.equal(in_dst, torch.tensor([3, 0, 3]))
+    assert torch.equal(out_eids, torch.tensor([0, 2]))
+
+
+def test_predecessors_and_successors_avoid_torch_isin(monkeypatch):
+    graph = Graph.homo(
+        edge_index=torch.tensor([[0, 0, 1, 1], [1, 1, 2, 2]]),
+        x=torch.tensor([[1.0], [2.0], [3.0]]),
+    )
+
+    def fail_isin(*args, **kwargs):
+        raise AssertionError("predecessor/successor queries should avoid torch.isin scans")
+
+    monkeypatch.setattr(torch, "isin", fail_isin)
+
+    assert torch.equal(predecessors(graph, 1), torch.tensor([0, 0]))
+    assert torch.equal(successors(graph, 1), torch.tensor([2, 2]))
 
 
 def test_predecessors_and_successors_preserve_parallel_edge_duplicates():

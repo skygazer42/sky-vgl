@@ -9,12 +9,21 @@ def _ordered_unique(ids: torch.Tensor | list[int] | tuple[int, ...]) -> torch.Te
     ids = torch.as_tensor(ids, dtype=torch.long).view(-1)
     unique = []
     seen = set()
-    for value in ids.tolist():
-        value = int(value)
+    for value_tensor in ids:
+        value = int(value_tensor.item())
         if value not in seen:
             seen.add(value)
             unique.append(value)
     return torch.tensor(unique, dtype=torch.long, device=ids.device)
+
+
+def _unique_sorted_tensor(values) -> torch.Tensor:
+    values = torch.as_tensor(values, dtype=torch.long).view(-1)
+    if values.numel() <= 1:
+        return values
+    if bool((values[1:] > values[:-1]).all()):
+        return values
+    return torch.unique(values)
 
 
 def _slice_node_data(graph: Graph, node_ids: torch.Tensor, *, node_type: str) -> dict[str, torch.Tensor]:
@@ -48,14 +57,140 @@ def _slice_edge_store(store, edge_ids: torch.Tensor) -> dict[str, torch.Tensor]:
     return edge_data
 
 
-def _relabel_bipartite_edge_index(edge_index, src_mapping: dict[int, int], dst_mapping: dict[int, int]) -> torch.Tensor:
+def _tensor_signature(tensor: torch.Tensor) -> tuple[object, ...]:
+    return (
+        int(tensor.data_ptr()) if tensor.numel() > 0 else 0,
+        tuple(int(dim) for dim in tensor.shape),
+        str(tensor.dtype),
+        str(tensor.device),
+    )
+
+
+def _left_searchsorted_matches(sorted_values: torch.Tensor, requested: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
+    positions = torch.searchsorted(sorted_values, requested, right=False)
+    if sorted_values.numel() == 0:
+        return positions, torch.zeros_like(requested, dtype=torch.bool)
+    capped_positions = positions.clamp_max(sorted_values.numel() - 1)
+    in_range = positions < sorted_values.numel()
+    return positions, in_range & (sorted_values[capped_positions] == requested)
+
+
+def _expand_interval_values(values: torch.Tensor, counts: torch.Tensor, *, step: int) -> torch.Tensor:
+    if values.numel() == 0:
+        return values.new_empty(0)
+
+    positive = counts > 0
+    if not bool(positive.all()):
+        values = values[positive]
+        counts = counts[positive]
+        if values.numel() == 0:
+            return values.new_empty(0)
+
+    offsets = torch.cumsum(counts, dim=0) - counts
+    base = values - step * offsets
+    deltas = torch.empty_like(base)
+    deltas[0] = base[0]
+    if base.numel() > 1:
+        deltas[1:] = base[1:] - base[:-1]
+    markers = torch.zeros(counts.sum(), dtype=values.dtype, device=values.device)
+    markers[offsets] = deltas
+    expanded = torch.cumsum(markers, dim=0)
+    if step != 0:
+        expanded = expanded + step * torch.arange(counts.sum(), dtype=values.dtype, device=values.device)
+    return expanded
+
+
+def _endpoint_lookup(store, *, endpoint: int) -> tuple[torch.Tensor, torch.Tensor]:
+    if hasattr(store, "query_cache"):
+        cache = store.query_cache
+    else:
+        cache = {}
+
+    cache_key = ("endpoint_lookup", int(endpoint))
+    signature = (_tensor_signature(store.edge_index), int(endpoint))
+    entry = cache.get(cache_key)
+    if entry is not None and entry["signature"] == signature:
+        return entry["sorted_endpoint_ids"], entry["sorted_positions"]
+
+    endpoint_ids = store.edge_index[endpoint].to(dtype=torch.long)
+    positions = torch.arange(endpoint_ids.numel(), dtype=torch.long, device=endpoint_ids.device)
+    order = torch.argsort(endpoint_ids, stable=True)
+    entry = {
+        "signature": signature,
+        "sorted_endpoint_ids": endpoint_ids[order],
+        "sorted_positions": positions[order],
+    }
+    cache[cache_key] = entry
+    if hasattr(store, "query_cache"):
+        store.query_cache = cache
+    return entry["sorted_endpoint_ids"], entry["sorted_positions"]
+
+
+def _membership_mask(values: torch.Tensor, allowed_ids: torch.Tensor) -> torch.Tensor:
+    values = torch.as_tensor(values, dtype=torch.long).view(-1)
+    allowed_ids = _unique_sorted_tensor(
+        torch.as_tensor(allowed_ids, dtype=torch.long, device=values.device).view(-1)
+    )
+    if values.numel() == 0 or allowed_ids.numel() == 0:
+        return torch.zeros(values.numel(), dtype=torch.bool, device=values.device)
+    lower = allowed_ids[0]
+    upper = allowed_ids[-1]
+    if (upper - lower + 1) == allowed_ids.numel():
+        return (values >= lower) & (values <= upper)
+    positions = torch.searchsorted(allowed_ids, values, right=False)
+    capped_positions = positions.clamp_max(allowed_ids.numel() - 1)
+    return (positions < allowed_ids.numel()) & (allowed_ids[capped_positions] == values)
+
+
+def _positions_for_endpoint_values(store, values: torch.Tensor, *, endpoint: int) -> torch.Tensor:
+    values = _unique_sorted_tensor(
+        torch.as_tensor(values, dtype=torch.long, device=store.edge_index.device).view(-1)
+    )
+    if values.numel() == 0:
+        return torch.empty(0, dtype=torch.long, device=store.edge_index.device)
+    sorted_endpoint_ids, sorted_positions = _endpoint_lookup(store, endpoint=endpoint)
+    starts, found = _left_searchsorted_matches(sorted_endpoint_ids, values)
+    if not bool(found.any()):
+        return torch.empty(0, dtype=torch.long, device=store.edge_index.device)
+
+    starts = starts[found]
+    values = values[found]
+    ends = torch.searchsorted(sorted_endpoint_ids, values, right=True)
+    counts = ends - starts
+    positions = sorted_positions[_expand_interval_values(starts, counts, step=1)]
+    return torch.sort(positions, stable=True).values
+
+
+def _lookup_positions(index_ids: torch.Tensor, values: torch.Tensor, *, entity_name: str) -> torch.Tensor:
+    index_ids = torch.as_tensor(index_ids, dtype=torch.long).view(-1)
+    values = torch.as_tensor(values, dtype=torch.long, device=index_ids.device).view(-1)
+    if values.numel() == 0:
+        return torch.empty((0,), dtype=torch.long, device=index_ids.device)
+
+    sorted_index_ids, sort_perm = torch.sort(index_ids, stable=True)
+    positions = torch.searchsorted(sorted_index_ids, values)
+    if bool((positions >= sorted_index_ids.numel()).any()):
+        missing_value = int(values[positions >= sorted_index_ids.numel()][0].item())
+        raise KeyError(f"missing {entity_name} id {missing_value}")
+    matched_values = sorted_index_ids[positions]
+    if bool((matched_values != values).any()):
+        missing_value = int(values[matched_values != values][0].item())
+        raise KeyError(f"missing {entity_name} id {missing_value}")
+    return sort_perm[positions]
+
+
+def _relabel_bipartite_edge_index(edge_index, src_node_ids: torch.Tensor, dst_node_ids: torch.Tensor) -> torch.Tensor:
     if edge_index.numel() == 0:
         return edge_index
-    return torch.tensor(
-        [[src_mapping[int(src)], dst_mapping[int(dst)]] for src, dst in edge_index.t().tolist()],
-        dtype=edge_index.dtype,
-        device=edge_index.device,
-    ).t().contiguous()
+    src_node_ids = torch.as_tensor(src_node_ids, dtype=torch.long, device=edge_index.device).view(-1)
+    dst_node_ids = torch.as_tensor(dst_node_ids, dtype=torch.long, device=edge_index.device).view(-1)
+    return torch.stack(
+        (
+            _lookup_positions(src_node_ids, edge_index[0], entity_name="source node"),
+            _lookup_positions(dst_node_ids, edge_index[1], entity_name="destination node"),
+        ),
+        dim=0,
+    )
 
 
 def _normalize_frontier_nodes(graph: Graph, nodes) -> dict[str, torch.Tensor]:
@@ -93,8 +228,7 @@ def _frontier_edge_ids(store, frontier: torch.Tensor | None, *, endpoint: int) -
     device_frontier = None if frontier is None else frontier.to(device=store.edge_index.device)
     if device_frontier is None or int(device_frontier.numel()) == 0:
         return torch.empty(0, dtype=torch.long, device=store.edge_index.device)
-    mask = torch.isin(store.edge_index[endpoint], device_frontier)
-    return torch.nonzero(mask, as_tuple=False).view(-1)
+    return _positions_for_endpoint_values(store, device_frontier, endpoint=endpoint)
 
 
 def _frontier_subgraph(graph: Graph, nodes, *, endpoint: int) -> Graph:
@@ -134,22 +268,15 @@ def node_subgraph(graph: Graph, node_ids, *, edge_type=None) -> Graph:
     src_type, _, dst_type = edge_type
     if src_type == dst_type:
         node_ids = _ordered_unique(node_ids)
-        node_set = set(node_ids.tolist())
-        mapping = {node_id: index for index, node_id in enumerate(node_ids.tolist())}
         store = graph.edges[edge_type]
-        selected_edges = [
-            index
-            for index, (src, dst) in enumerate(store.edge_index.t().tolist())
-            if int(src) in node_set and int(dst) in node_set
+        node_ids_device = node_ids.to(device=store.edge_index.device)
+        candidate_edge_ids = _positions_for_endpoint_values(store, node_ids_device, endpoint=0)
+        edge_ids = candidate_edge_ids[
+            _membership_mask(store.edge_index[1, candidate_edge_ids], node_ids_device)
         ]
-        edge_ids = torch.tensor(selected_edges, dtype=torch.long, device=store.edge_index.device)
         edge_index = store.edge_index[:, edge_ids] if edge_ids.numel() > 0 else store.edge_index[:, :0]
         if edge_index.numel() > 0:
-            relabelled = torch.tensor(
-                [[mapping[int(src)], mapping[int(dst)]] for src, dst in edge_index.t().tolist()],
-                dtype=edge_index.dtype,
-                device=edge_index.device,
-            ).t().contiguous()
+            relabelled = _relabel_bipartite_edge_index(edge_index, node_ids, node_ids)
         else:
             relabelled = edge_index
         edge_data = {"edge_index": relabelled}
@@ -174,20 +301,16 @@ def node_subgraph(graph: Graph, node_ids, *, edge_type=None) -> Graph:
 
     src_node_ids = _ordered_unique(node_ids[src_type])
     dst_node_ids = _ordered_unique(node_ids[dst_type])
-    src_set = set(int(node_id) for node_id in src_node_ids.tolist())
-    dst_set = set(int(node_id) for node_id in dst_node_ids.tolist())
-    src_mapping = {int(node_id): index for index, node_id in enumerate(src_node_ids.tolist())}
-    dst_mapping = {int(node_id): index for index, node_id in enumerate(dst_node_ids.tolist())}
 
     store = graph.edges[edge_type]
-    selected_edges = [
-        index
-        for index, (src, dst) in enumerate(store.edge_index.t().tolist())
-        if int(src) in src_set and int(dst) in dst_set
+    src_node_ids_device = src_node_ids.to(device=store.edge_index.device)
+    dst_node_ids_device = dst_node_ids.to(device=store.edge_index.device)
+    candidate_edge_ids = _positions_for_endpoint_values(store, src_node_ids_device, endpoint=0)
+    edge_ids = candidate_edge_ids[
+        _membership_mask(store.edge_index[1, candidate_edge_ids], dst_node_ids_device)
     ]
-    edge_ids = torch.tensor(selected_edges, dtype=torch.long, device=store.edge_index.device)
     edge_data = _slice_edge_store(store, edge_ids)
-    edge_data["edge_index"] = _relabel_bipartite_edge_index(edge_data["edge_index"], src_mapping, dst_mapping)
+    edge_data["edge_index"] = _relabel_bipartite_edge_index(edge_data["edge_index"], src_node_ids, dst_node_ids)
 
     nodes = {
         src_type: _slice_node_data(graph, src_node_ids, node_type=src_type),

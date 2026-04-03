@@ -117,6 +117,7 @@ class EdgeStore:
     type_name: tuple[str, str, str]
     data: Mapping[str, object] = field(default_factory=dict)
     adjacency_cache: dict[str, object] = field(default_factory=dict)
+    query_cache: dict[object, object] = field(default_factory=dict)
 
     @classmethod
     def from_storage(cls, type_name, feature_names, feature_store, graph_store):

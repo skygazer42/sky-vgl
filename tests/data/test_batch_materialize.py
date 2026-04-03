@@ -1,10 +1,11 @@
 import torch
+import inspect
 
 from vgl import Graph
 from vgl.core.batch import GraphBatch, LinkPredictionBatch, NodeBatch, TemporalEventBatch
 from vgl.data.sample import LinkPredictionRecord, TemporalEventRecord
 from vgl.dataloading.executor import MaterializationContext
-from vgl.dataloading.materialize import materialize_batch
+from vgl.dataloading.materialize import materialize_batch, materialize_context
 from vgl.dataloading.requests import GraphSeedRequest, LinkSeedRequest, NodeSeedRequest, TemporalSeedRequest
 
 
@@ -212,3 +213,161 @@ def test_materialize_batch_builds_hetero_node_batch_from_multi_seed_node_context
         {"seed": 1, "node_type": "paper", "sample_id": "p12"},
         {"seed": 2, "node_type": "paper", "sample_id": "p12"},
     ]
+
+
+def test_materialize_node_context_homo_avoids_dense_node_masks(monkeypatch):
+    graph = Graph.homo(
+        edge_index=torch.tensor([[0, 1, 3], [1, 2, 1]]),
+        x=torch.arange(12, dtype=torch.float32).view(4, 3),
+        y=torch.tensor([0, 1, 0, 1]),
+    )
+    context = MaterializationContext(
+        request=NodeSeedRequest(
+            node_ids=torch.tensor([1]),
+            node_type="node",
+            metadata={"seed": 1, "sample_id": "n1"},
+        ),
+        state={"node_ids": torch.tensor([0, 1, 2, 3])},
+        metadata={"sample_id": "n1"},
+        graph=graph,
+    )
+    original_zeros = torch.zeros
+
+    def guarded_zeros(*args, **kwargs):
+        size = args[0] if args else kwargs.get("size")
+        caller = inspect.currentframe().f_back
+        if kwargs.get("dtype") is torch.bool and size == graph.x.size(0) and caller is not None and caller.f_code.co_name == "_subgraph":
+            raise AssertionError("homo node materialization should avoid dense bool node masks")
+        return original_zeros(*args, **kwargs)
+
+    monkeypatch.setattr(torch, "zeros", guarded_zeros)
+
+    sample = materialize_context(context)
+
+    assert torch.equal(sample.graph.n_id, torch.tensor([0, 1, 2, 3]))
+    assert sample.subgraph_seed == 1
+
+
+def test_materialize_node_context_homo_avoids_dense_node_mappings(monkeypatch):
+    graph = Graph.homo(
+        edge_index=torch.tensor([[0, 1, 3], [1, 2, 1]]),
+        x=torch.arange(12, dtype=torch.float32).view(4, 3),
+        y=torch.tensor([0, 1, 0, 1]),
+    )
+    context = MaterializationContext(
+        request=NodeSeedRequest(
+            node_ids=torch.tensor([1]),
+            node_type="node",
+            metadata={"seed": 1, "sample_id": "n1"},
+        ),
+        state={"node_ids": torch.tensor([0, 1, 2, 3])},
+        metadata={"sample_id": "n1"},
+        graph=graph,
+    )
+    original_full = torch.full
+
+    def guarded_full(*args, **kwargs):
+        size = args[0] if args else kwargs.get("size")
+        caller = inspect.currentframe().f_back
+        if size == (graph.x.size(0),) and caller is not None and caller.f_code.co_name == "_subgraph":
+            raise AssertionError("homo node materialization should avoid dense node mappings")
+        return original_full(*args, **kwargs)
+
+    monkeypatch.setattr(torch, "full", guarded_full)
+
+    sample = materialize_context(context)
+
+    assert torch.equal(sample.graph.n_id, torch.tensor([0, 1, 2, 3]))
+    assert sample.subgraph_seed == 1
+
+
+def test_materialize_node_context_hetero_avoids_dense_node_masks(monkeypatch):
+    writes = ("author", "writes", "paper")
+    written_by = ("paper", "written_by", "author")
+    graph = Graph.hetero(
+        nodes={
+            "paper": {"x": torch.randn(3, 4), "y": torch.tensor([0, 1, 0])},
+            "author": {"x": torch.randn(2, 4)},
+        },
+        edges={
+            writes: {"edge_index": torch.tensor([[0, 1], [1, 2]])},
+            written_by: {"edge_index": torch.tensor([[1, 2], [0, 1]])},
+        },
+    )
+    context = MaterializationContext(
+        request=NodeSeedRequest(
+            node_ids=torch.tensor([1]),
+            node_type="paper",
+            metadata={"seed": 1, "node_type": "paper", "sample_id": "p1"},
+        ),
+        state={
+            "node_ids_by_type": {
+                "paper": torch.tensor([1]),
+                "author": torch.tensor([0]),
+            }
+        },
+        metadata={"sample_id": "p1"},
+        graph=graph,
+    )
+    original_zeros = torch.zeros
+
+    def guarded_zeros(*args, **kwargs):
+        size = args[0] if args else kwargs.get("size")
+        caller = inspect.currentframe().f_back
+        if kwargs.get("dtype") is torch.bool and size in {2, 3} and caller is not None and caller.f_code.co_name == "_hetero_subgraph":
+            raise AssertionError("hetero node materialization should avoid dense bool node masks")
+        return original_zeros(*args, **kwargs)
+
+    monkeypatch.setattr(torch, "zeros", guarded_zeros)
+
+    sample = materialize_context(context)
+
+    assert torch.equal(sample.graph.nodes["paper"].n_id, torch.tensor([1]))
+    assert torch.equal(sample.graph.nodes["author"].n_id, torch.tensor([0]))
+    assert sample.subgraph_seed == 0
+
+
+def test_materialize_node_context_hetero_avoids_dense_node_mappings(monkeypatch):
+    writes = ("author", "writes", "paper")
+    written_by = ("paper", "written_by", "author")
+    graph = Graph.hetero(
+        nodes={
+            "paper": {"x": torch.randn(3, 4), "y": torch.tensor([0, 1, 0])},
+            "author": {"x": torch.randn(2, 4)},
+        },
+        edges={
+            writes: {"edge_index": torch.tensor([[0, 1], [1, 2]])},
+            written_by: {"edge_index": torch.tensor([[1, 2], [0, 1]])},
+        },
+    )
+    context = MaterializationContext(
+        request=NodeSeedRequest(
+            node_ids=torch.tensor([1]),
+            node_type="paper",
+            metadata={"seed": 1, "node_type": "paper", "sample_id": "p1"},
+        ),
+        state={
+            "node_ids_by_type": {
+                "paper": torch.tensor([1]),
+                "author": torch.tensor([0]),
+            }
+        },
+        metadata={"sample_id": "p1"},
+        graph=graph,
+    )
+    original_full = torch.full
+
+    def guarded_full(*args, **kwargs):
+        size = args[0] if args else kwargs.get("size")
+        caller = inspect.currentframe().f_back
+        if size in {(2,), (3,)} and caller is not None and caller.f_code.co_name == "_hetero_subgraph":
+            raise AssertionError("hetero node materialization should avoid dense node mappings")
+        return original_full(*args, **kwargs)
+
+    monkeypatch.setattr(torch, "full", guarded_full)
+
+    sample = materialize_context(context)
+
+    assert torch.equal(sample.graph.nodes["paper"].n_id, torch.tensor([1]))
+    assert torch.equal(sample.graph.nodes["author"].n_id, torch.tensor([0]))
+    assert sample.subgraph_seed == 0

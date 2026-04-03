@@ -10,6 +10,7 @@ from vgl.dataloading.records import SampleRecord
 from vgl.dataloading.sampler import FullGraphSampler, Sampler
 from vgl.graph.graph import Graph
 from vgl.ops import khop_nodes, node_subgraph, random_walk
+from vgl.ops.subgraph import _lookup_positions, _membership_mask, _positions_for_endpoint_values
 
 
 def _require_homo_graph(graph: Graph, *, context: str) -> None:
@@ -50,9 +51,34 @@ def _ordered_unique(values) -> list[int]:
     return unique
 
 
+def _ordered_unique_tensor(values) -> torch.Tensor:
+    values = torch.as_tensor(values, dtype=torch.long).view(-1)
+    if values.numel() == 0:
+        return values
+    order = torch.argsort(values, stable=True)
+    sorted_values = values[order]
+    keep = torch.ones(sorted_values.numel(), dtype=torch.bool, device=values.device)
+    if sorted_values.numel() > 1:
+        keep[1:] = sorted_values[1:] != sorted_values[:-1]
+    first_occurrences = torch.sort(order[keep], stable=True).values
+    return values[first_occurrences]
+
+
+def _tensor_to_int_list(values) -> list[int]:
+    tensor = torch.as_tensor(values, dtype=torch.long).view(-1)
+    return [int(value.item()) for value in tensor]
+
+
+def _tensor_rows_to_int_lists(values) -> list[list[int]]:
+    tensor = torch.as_tensor(values, dtype=torch.long)
+    if tensor.ndim == 1:
+        return [_tensor_to_int_list(tensor)]
+    return [_tensor_to_int_list(row) for row in tensor]
+
+
 def _normalize_seed_values(value) -> list[int]:
     if isinstance(value, torch.Tensor):
-        values = value.reshape(-1).tolist()
+        values = _tensor_to_int_list(value)
     elif isinstance(value, (list, tuple)):
         values = list(value)
     else:
@@ -71,17 +97,21 @@ def _normalize_bounded_ids(value, *, upper_bound: int, field_name: str) -> list[
 
 
 def _induced_edge_ids(graph: Graph, node_ids: list[int]) -> torch.Tensor:
-    node_set = {int(node_id) for node_id in node_ids}
-    selected = [
-        edge_id
-        for edge_id, (src_index, dst_index) in enumerate(graph.edge_index.t().tolist())
-        if int(src_index) in node_set and int(dst_index) in node_set
-    ]
-    return torch.tensor(selected, dtype=torch.long, device=graph.edge_index.device)
+    node_tensor = torch.as_tensor(node_ids, dtype=torch.long, device=graph.edge_index.device).view(-1)
+    if node_tensor.numel() == 0:
+        return torch.empty(0, dtype=torch.long, device=graph.edge_index.device)
+    node_tensor = torch.unique(node_tensor)
+    edge_type = graph._default_edge_type()
+    store = graph.edges[edge_type]
+    candidate_edge_ids = _positions_for_endpoint_values(store, node_tensor, endpoint=0)
+    if candidate_edge_ids.numel() == 0:
+        return candidate_edge_ids
+    keep = _membership_mask(graph.edge_index[1, candidate_edge_ids], node_tensor)
+    return candidate_edge_ids[keep]
 
 
 def _slice_homo_graph(graph: Graph, node_ids: list[int], edge_pairs: list[tuple[int, int]] | None = None) -> Graph:
-    node_index = torch.tensor(node_ids, dtype=torch.long, device=graph.x.device)
+    node_index = torch.as_tensor(node_ids, dtype=torch.long, device=graph.x.device).view(-1)
     node_data = {}
     num_nodes = int(graph.x.size(0))
     for key, value in graph.nodes["node"].data.items():
@@ -94,40 +124,50 @@ def _slice_homo_graph(graph: Graph, node_ids: list[int], edge_pairs: list[tuple[
     if edge_pairs is None:
         subgraph = node_subgraph(graph, node_index)
         edges = dict(subgraph.edges[subgraph._default_edge_type()].data)
-        edges.setdefault("e_id", _induced_edge_ids(graph, node_ids))
+        edges.setdefault("e_id", _induced_edge_ids(graph, node_index))
         return Graph.homo(edge_index=edges.pop("edge_index"), edge_data=edges, **node_data)
 
-    mapping = {node_id: offset for offset, node_id in enumerate(node_ids)}
-    if edge_pairs:
-        edge_index = torch.tensor(
-            [[mapping[src], mapping[dst]] for src, dst in edge_pairs],
-            dtype=torch.long,
-            device=graph.edge_index.device,
-        ).t().contiguous()
+    if edge_pairs is not None and len(edge_pairs) > 0:
+        edge_pairs_tensor = torch.as_tensor(edge_pairs, dtype=torch.long, device=graph.edge_index.device).view(-1, 2)
+        lookup_index = node_index.to(device=graph.edge_index.device)
+        src_pairs = edge_pairs_tensor[:, 0].contiguous()
+        dst_pairs = edge_pairs_tensor[:, 1].contiguous()
+        edge_index = torch.stack(
+            (
+                _lookup_positions(lookup_index, src_pairs, entity_name="source node"),
+                _lookup_positions(lookup_index, dst_pairs, entity_name="destination node"),
+            ),
+            dim=0,
+        ).to(dtype=torch.long, device=graph.edge_index.device)
     else:
         edge_index = torch.empty((2, 0), dtype=torch.long, device=graph.edge_index.device)
     return Graph.homo(edge_index=edge_index, **node_data)
 
 
 def _path_graph_from_walk(graph: Graph, walk: list[int]) -> Graph:
-    valid = [int(node_id) for node_id in walk if int(node_id) >= 0]
-    node_ids = _ordered_unique(valid)
-    edge_pairs = [(int(src), int(dst)) for src, dst in zip(valid[:-1], valid[1:]) if src >= 0 and dst >= 0]
-    return _slice_homo_graph(graph, node_ids or [0], edge_pairs=edge_pairs) if node_ids else _slice_homo_graph(graph, [0], edge_pairs=[])
+    return _path_graph_from_walks(graph, [walk])
 
 
 def _path_graph_from_walks(graph: Graph, walks: list[list[int]]) -> Graph:
-    if len(walks) == 1:
-        return _path_graph_from_walk(graph, walks[0])
-
-    valid = []
-    edge_pairs = []
-    for walk in walks:
-        current = [int(node_id) for node_id in walk if int(node_id) >= 0]
-        valid.extend(current)
-        edge_pairs.extend((int(src), int(dst)) for src, dst in zip(current[:-1], current[1:]) if src >= 0 and dst >= 0)
-    node_ids = _ordered_unique(valid)
-    return _slice_homo_graph(graph, node_ids or [0], edge_pairs=edge_pairs) if node_ids else _slice_homo_graph(graph, [0], edge_pairs=[])
+    walk_tensor = torch.as_tensor(walks, dtype=torch.long, device=graph.edge_index.device)
+    if walk_tensor.ndim == 1:
+        walk_tensor = walk_tensor.view(1, -1)
+    valid_nodes = walk_tensor.reshape(-1)
+    valid_nodes = valid_nodes[valid_nodes >= 0]
+    node_ids = _ordered_unique_tensor(valid_nodes)
+    if walk_tensor.size(1) > 1:
+        src = walk_tensor[:, :-1].reshape(-1)
+        dst = walk_tensor[:, 1:].reshape(-1)
+        edge_mask = (src >= 0) & (dst >= 0)
+        if bool(edge_mask.any()):
+            edge_pairs = torch.stack((src[edge_mask], dst[edge_mask]), dim=1)
+        else:
+            edge_pairs = torch.empty((0, 2), dtype=torch.long, device=walk_tensor.device)
+    else:
+        edge_pairs = torch.empty((0, 2), dtype=torch.long, device=walk_tensor.device)
+    if node_ids.numel() == 0:
+        node_ids = torch.tensor([0], dtype=torch.long, device=walk_tensor.device)
+    return _slice_homo_graph(graph, node_ids, edge_pairs=edge_pairs)
 
 
 def _walk_lengths(walks: list[list[int]]) -> list[int]:
@@ -166,14 +206,14 @@ def _seed_positions(sampled_node_ids: list[int], seed_ids: list[int]) -> list[in
 
 
 def _sampled_node_ids(graph: Graph) -> list[int]:
-    return [int(node_id) for node_id in torch.as_tensor(graph.nodes["node"].data["n_id"], dtype=torch.long).tolist()]
+    return _tensor_to_int_list(graph.nodes["node"].data["n_id"])
 
 
 def _sampled_edge_ids(graph: Graph) -> list[int] | None:
     edge_ids = graph.edges[graph._default_edge_type()].data.get("e_id")
     if edge_ids is None:
         return None
-    return [int(edge_id) for edge_id in torch.as_tensor(edge_ids, dtype=torch.long).tolist()]
+    return _tensor_to_int_list(edge_ids)
 
 
 def _enrich_sample_metadata(metadata: dict, sample_graph: Graph) -> dict:
@@ -271,7 +311,7 @@ class RandomWalkSampler(Sampler):
 
     def _sample_walks(self, graph: Graph, seed_ids: list[int]) -> list[list[int]]:
         traces = random_walk(graph, seed_ids, length=self.walk_length, edge_type=self.edge_type)
-        return [[int(node_id) for node_id in row.tolist()] for row in traces]
+        return _tensor_rows_to_int_lists(traces)
 
     def sample(self, item):
         graph, metadata, sample_id, source_graph_id = _parse_graph_item(item, context=self.__class__.__name__)
@@ -345,7 +385,7 @@ class Node2VecWalkSampler(RandomWalkSampler):
     def _adjacency(self, graph: Graph) -> tuple[dict[int, list[int]], dict[int, set[int]]]:
         adjacency: dict[int, list[int]] = {}
         adjacency_set: dict[int, set[int]] = {}
-        for src_index, dst_index in graph.edge_index.t().tolist():
+        for src_index, dst_index in zip(graph.edge_index[0], graph.edge_index[1]):
             adjacency.setdefault(int(src_index), []).append(int(dst_index))
             adjacency_set.setdefault(int(src_index), set()).add(int(dst_index))
         return adjacency, adjacency_set
@@ -464,7 +504,7 @@ class GraphSAINTNodeSampler(Sampler):
         _require_homo_graph(graph, context=self.__class__.__name__)
         num_nodes = int(graph.x.size(0))
         count = min(self.num_sampled_nodes, num_nodes)
-        selected = torch.randperm(num_nodes, generator=self._generator)[:count].tolist()
+        selected = _tensor_to_int_list(torch.randperm(num_nodes, generator=self._generator)[:count])
         seed_ids = None
         if "seed" in metadata:
             seed_ids = _normalize_bounded_ids(metadata["seed"], upper_bound=num_nodes, field_name="seed")
@@ -519,7 +559,7 @@ class GraphSAINTEdgeSampler(Sampler):
         target_count = max(count, len(_ordered_unique(forced_edge_ids)))
         selected_edge_ids = []
         seen = set()
-        for edge_id in forced_edge_ids + torch.randperm(edge_count, generator=self._generator).tolist():
+        for edge_id in forced_edge_ids:
             edge_id = int(edge_id)
             if edge_id in seen:
                 continue
@@ -527,8 +567,17 @@ class GraphSAINTEdgeSampler(Sampler):
             selected_edge_ids.append(edge_id)
             if len(selected_edge_ids) >= target_count:
                 break
+        if len(selected_edge_ids) < target_count:
+            for edge_id_tensor in torch.randperm(edge_count, generator=self._generator):
+                edge_id = int(edge_id_tensor.item())
+                if edge_id in seen:
+                    continue
+                seen.add(edge_id)
+                selected_edge_ids.append(edge_id)
+                if len(selected_edge_ids) >= target_count:
+                    break
         edge_ids = torch.tensor(selected_edge_ids, dtype=torch.long, device=graph.edge_index.device)
-        endpoints = _ordered_unique(graph.edge_index[:, edge_ids].reshape(-1).tolist())
+        endpoints = _tensor_to_int_list(_ordered_unique_tensor(graph.edge_index[:, edge_ids].reshape(-1)))
         sample_graph = _slice_homo_graph(graph, endpoints)
         sample_metadata = _finalize_metadata(
             metadata,
@@ -568,9 +617,9 @@ class GraphSAINTRandomWalkSampler(Sampler):
             else:
                 starts = list(explicit_seed_ids)
         else:
-            starts = torch.randint(num_nodes, (self.num_walks,), generator=self._generator).tolist()
+            starts = _tensor_to_int_list(torch.randint(num_nodes, (self.num_walks,), generator=self._generator))
         walks = random_walk(graph, starts, length=self.walk_length)
-        walk_nodes = _ordered_unique([int(node_id) for node_id in walks.reshape(-1).tolist() if int(node_id) >= 0])
+        walk_nodes = _tensor_to_int_list(_ordered_unique_tensor(walks.reshape(-1)[walks.reshape(-1) >= 0]))
         sample_graph = _slice_homo_graph(graph, walk_nodes)
         sample_metadata = _finalize_metadata(
             metadata,
@@ -585,7 +634,7 @@ class GraphSAINTRandomWalkSampler(Sampler):
         sample_metadata["walk_nodes"] = walk_nodes
         sample_metadata["sampled_node_ids"] = walk_nodes
         sample_metadata["walk_start_positions"] = _walk_start_positions(walk_nodes, sample_metadata["walk_starts"])
-        sample_metadata["walks"] = [[int(node_id) for node_id in row.tolist()] for row in walks]
+        sample_metadata["walks"] = _tensor_rows_to_int_lists(walks)
         sample_metadata["sampled_num_walks"] = len(sample_metadata["walks"])
         sample_metadata["walk_lengths"] = _walk_lengths(sample_metadata["walks"])
         sample_metadata["walk_ended_early"] = _walk_ended_early(sample_metadata["walks"], walk_length=self.walk_length)
@@ -622,7 +671,7 @@ class ClusterData(ListDataset):
         for cluster_id, part in enumerate(torch.chunk(permutation, self.num_parts)):
             if part.numel() == 0:
                 continue
-            node_ids = [int(node_id) for node_id in part.tolist()]
+            node_ids = _tensor_to_int_list(part)
             subgraph = _slice_homo_graph(self.graph, node_ids)
             metadata = _finalize_metadata(
                 {
@@ -669,7 +718,7 @@ class ShaDowKHopSampler(Sampler):
             raise ValueError("ShaDowKHopSampler requires metadata['seed']")
         seed_ids = _normalize_bounded_ids(metadata["seed"], upper_bound=int(graph.x.size(0)), field_name="seed")
         node_ids = khop_nodes(graph, seed_ids, num_hops=self.num_hops, direction=self.direction, edge_type=self.edge_type)
-        node_ids_list = [int(node_id) for node_id in torch.as_tensor(node_ids, dtype=torch.long).tolist()]
+        node_ids_list = _tensor_to_int_list(node_ids)
         subgraph = _slice_homo_graph(graph, node_ids_list)
         sample_metadata = _finalize_metadata(
             metadata,

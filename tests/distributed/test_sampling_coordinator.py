@@ -2,6 +2,7 @@ import torch
 
 from vgl import Graph
 import vgl.distributed.store as distributed_store_module
+from vgl.distributed.partition import PartitionManifest
 from vgl.distributed.coordinator import LocalSamplingCoordinator, StoreBackedSamplingCoordinator
 from vgl.distributed.shard import LocalGraphShard
 from vgl.distributed.writer import write_partitioned_graph
@@ -62,6 +63,201 @@ def test_store_backed_sampling_coordinator_routes_seeds_and_fetches_features(tmp
     assert torch.equal(routes[1].local_ids, torch.tensor([1, 0]))
     assert torch.equal(fetched.index, node_ids)
     assert torch.equal(fetched.values, torch.tensor([[6.0, 7.0], [0.0, 1.0], [4.0, 5.0]]))
+
+
+def test_local_sampling_coordinator_routes_nodes_without_per_node_owner_lookup(monkeypatch, tmp_path):
+    graph = Graph.homo(
+        edge_index=torch.tensor([[0, 1, 2, 3], [1, 2, 3, 0]]),
+        x=torch.arange(8, dtype=torch.float32).view(4, 2),
+    )
+    write_partitioned_graph(graph, tmp_path, num_partitions=2)
+    shards = {
+        0: LocalGraphShard.from_partition_dir(tmp_path, partition_id=0),
+        1: LocalGraphShard.from_partition_dir(tmp_path, partition_id=1),
+    }
+    coordinator = LocalSamplingCoordinator(shards)
+    owner_calls = 0
+    real_owner = PartitionManifest.owner
+
+    def counting_owner(self, *args, **kwargs):
+        nonlocal owner_calls
+        owner_calls += 1
+        return real_owner(self, *args, **kwargs)
+
+    monkeypatch.setattr(PartitionManifest, "owner", counting_owner)
+
+    routes = coordinator.route_node_ids(torch.tensor([3, 0, 2, 1]))
+
+    assert len(routes) == 2
+    assert owner_calls == 0
+
+
+def test_local_sampling_coordinator_init_avoids_tensor_tolist(monkeypatch, tmp_path):
+    graph = Graph.homo(
+        edge_index=torch.tensor([[0, 1, 2, 3], [1, 2, 3, 0]]),
+        x=torch.arange(8, dtype=torch.float32).view(4, 2),
+    )
+    write_partitioned_graph(graph, tmp_path, num_partitions=2)
+    shards = {
+        0: LocalGraphShard.from_partition_dir(tmp_path, partition_id=0),
+        1: LocalGraphShard.from_partition_dir(tmp_path, partition_id=1),
+    }
+
+    def fail_tolist(self):
+        raise AssertionError("LocalSamplingCoordinator init should stay off tensor.tolist")
+
+    monkeypatch.setattr(torch.Tensor, "tolist", fail_tolist)
+
+    coordinator = LocalSamplingCoordinator(shards)
+
+    assert coordinator.partition_ids() == (0, 1)
+
+
+def test_store_backed_sampling_coordinator_routes_nodes_without_per_node_owner_lookup(monkeypatch, tmp_path):
+    graph = Graph.homo(
+        edge_index=torch.tensor([[0, 1, 2, 3], [1, 2, 3, 0]]),
+        x=torch.arange(8, dtype=torch.float32).view(4, 2),
+    )
+    write_partitioned_graph(graph, tmp_path, num_partitions=2)
+    coordinator = StoreBackedSamplingCoordinator.from_partition_dir(tmp_path)
+    owner_calls = 0
+    real_owner = PartitionManifest.owner
+
+    def counting_owner(self, *args, **kwargs):
+        nonlocal owner_calls
+        owner_calls += 1
+        return real_owner(self, *args, **kwargs)
+
+    monkeypatch.setattr(PartitionManifest, "owner", counting_owner)
+
+    routes = coordinator.route_node_ids(torch.tensor([3, 0, 2, 1]))
+
+    assert len(routes) == 2
+    assert owner_calls == 0
+
+
+def test_local_sampling_coordinator_routes_edges_and_fetches_features_without_tensor_tolist(monkeypatch, tmp_path):
+    writes = ("author", "writes", "paper")
+    graph = Graph.hetero(
+        nodes={
+            "author": {"x": torch.arange(8, dtype=torch.float32).view(4, 2)},
+            "paper": {"x": torch.arange(10, 18, dtype=torch.float32).view(4, 2)},
+        },
+        edges={
+            writes: {
+                "edge_index": torch.tensor([[0, 1, 2, 3, 0], [1, 0, 3, 2, 2]]),
+                "weight": torch.tensor([1.0, 2.0, 3.0, 4.0, 9.0]),
+            },
+        },
+    )
+    write_partitioned_graph(graph, tmp_path, num_partitions=2)
+    shards = {
+        0: LocalGraphShard.from_partition_dir(tmp_path, partition_id=0),
+        1: LocalGraphShard.from_partition_dir(tmp_path, partition_id=1),
+    }
+    coordinator = LocalSamplingCoordinator(shards)
+
+    def fail_tolist(self):
+        raise AssertionError("local edge routing should stay off tensor.tolist")
+
+    monkeypatch.setattr(torch.Tensor, "tolist", fail_tolist)
+
+    routes = coordinator.route_edge_ids(torch.tensor([3, 0, 2]), edge_type=writes)
+    fetched = coordinator.fetch_edge_features(("edge", writes, "weight"), torch.tensor([4, 3, 0]))
+
+    assert len(routes) == 2
+    assert torch.equal(fetched.values, torch.tensor([9.0, 4.0, 1.0]))
+
+
+def test_local_sampling_coordinator_routes_edges_and_fetches_features_without_tensor_item(monkeypatch, tmp_path):
+    writes = ("author", "writes", "paper")
+    graph = Graph.hetero(
+        nodes={
+            "author": {"x": torch.arange(8, dtype=torch.float32).view(4, 2)},
+            "paper": {"x": torch.arange(10, 18, dtype=torch.float32).view(4, 2)},
+        },
+        edges={
+            writes: {
+                "edge_index": torch.tensor([[0, 1, 2, 3, 0], [1, 0, 3, 2, 2]]),
+                "weight": torch.tensor([1.0, 2.0, 3.0, 4.0, 9.0]),
+            },
+        },
+    )
+    write_partitioned_graph(graph, tmp_path, num_partitions=2)
+    shards = {
+        0: LocalGraphShard.from_partition_dir(tmp_path, partition_id=0),
+        1: LocalGraphShard.from_partition_dir(tmp_path, partition_id=1),
+    }
+    coordinator = LocalSamplingCoordinator(shards)
+
+    def fail_item(self):
+        raise AssertionError("local edge routing should stay off tensor.item")
+
+    monkeypatch.setattr(torch.Tensor, "item", fail_item)
+
+    routes = coordinator.route_edge_ids(torch.tensor([3, 0, 2]), edge_type=writes)
+    fetched = coordinator.fetch_edge_features(("edge", writes, "weight"), torch.tensor([4, 3, 0]))
+
+    assert len(routes) == 2
+    assert torch.equal(fetched.values, torch.tensor([9.0, 4.0, 1.0]))
+
+
+def test_store_backed_sampling_coordinator_routes_edges_and_fetches_features_without_tensor_tolist(monkeypatch, tmp_path):
+    writes = ("author", "writes", "paper")
+    graph = Graph.hetero(
+        nodes={
+            "author": {"x": torch.arange(8, dtype=torch.float32).view(4, 2)},
+            "paper": {"x": torch.arange(10, 18, dtype=torch.float32).view(4, 2)},
+        },
+        edges={
+            writes: {
+                "edge_index": torch.tensor([[0, 1, 2, 3, 0], [1, 0, 3, 2, 2]]),
+                "weight": torch.tensor([1.0, 2.0, 3.0, 4.0, 9.0]),
+            },
+        },
+    )
+    write_partitioned_graph(graph, tmp_path, num_partitions=2)
+    coordinator = StoreBackedSamplingCoordinator.from_partition_dir(tmp_path)
+
+    def fail_tolist(self):
+        raise AssertionError("store-backed edge routing should stay off tensor.tolist")
+
+    monkeypatch.setattr(torch.Tensor, "tolist", fail_tolist)
+
+    routes = coordinator.route_edge_ids(torch.tensor([3, 0, 2]), edge_type=writes)
+    fetched = coordinator.fetch_edge_features(("edge", writes, "weight"), torch.tensor([4, 3, 0]))
+
+    assert len(routes) == 2
+    assert torch.equal(fetched.values, torch.tensor([9.0, 4.0, 1.0]))
+
+
+def test_store_backed_sampling_coordinator_routes_edges_and_fetches_features_without_tensor_item(monkeypatch, tmp_path):
+    writes = ("author", "writes", "paper")
+    graph = Graph.hetero(
+        nodes={
+            "author": {"x": torch.arange(8, dtype=torch.float32).view(4, 2)},
+            "paper": {"x": torch.arange(10, 18, dtype=torch.float32).view(4, 2)},
+        },
+        edges={
+            writes: {
+                "edge_index": torch.tensor([[0, 1, 2, 3, 0], [1, 0, 3, 2, 2]]),
+                "weight": torch.tensor([1.0, 2.0, 3.0, 4.0, 9.0]),
+            },
+        },
+    )
+    write_partitioned_graph(graph, tmp_path, num_partitions=2)
+    coordinator = StoreBackedSamplingCoordinator.from_partition_dir(tmp_path)
+
+    def fail_item(self):
+        raise AssertionError("store-backed edge routing should stay off tensor.item")
+
+    monkeypatch.setattr(torch.Tensor, "item", fail_item)
+
+    routes = coordinator.route_edge_ids(torch.tensor([3, 0, 2]), edge_type=writes)
+    fetched = coordinator.fetch_edge_features(("edge", writes, "weight"), torch.tensor([4, 3, 0]))
+
+    assert len(routes) == 2
+    assert torch.equal(fetched.values, torch.tensor([9.0, 4.0, 1.0]))
 
 
 def test_store_backed_sampling_coordinator_can_load_directly_from_partition_directory(tmp_path):

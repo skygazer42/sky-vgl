@@ -26,6 +26,23 @@ def test_local_graph_shard_loads_partition_graph_and_store_view(tmp_path):
     assert torch.equal(fetched, torch.tensor([[4.0, 5.0], [6.0, 7.0]]))
 
 
+def test_local_graph_shard_global_to_local_avoids_tensor_tolist(monkeypatch, tmp_path):
+    graph = Graph.homo(
+        edge_index=torch.tensor([[0, 1, 2, 3], [1, 2, 3, 0]]),
+        x=torch.arange(8, dtype=torch.float32).view(4, 2),
+    )
+    write_partitioned_graph(graph, tmp_path, num_partitions=2)
+
+    shard = LocalGraphShard.from_partition_dir(tmp_path, partition_id=1)
+
+    def fail_tolist(self):
+        raise AssertionError("LocalGraphShard.global_to_local should stay on tensors")
+
+    monkeypatch.setattr(torch.Tensor, "tolist", fail_tolist)
+
+    assert torch.equal(shard.global_to_local(torch.tensor([2, 3])), torch.tensor([0, 1]))
+
+
 def test_local_graph_shard_store_views_reject_mismatched_partition_ids(tmp_path):
     graph = Graph.homo(
         edge_index=torch.tensor([[0, 1, 2, 3], [1, 2, 3, 0]]),
@@ -213,6 +230,34 @@ def test_local_graph_shard_reconstructs_multi_relation_partition_graph_edge_ids(
     assert torch.equal(shard.edge_ids(edge_type=follows), torch.tensor([2, 3]))
     assert torch.equal(shard.global_to_local_edge(torch.tensor([3, 2]), edge_type=follows), torch.tensor([1, 0]))
     assert torch.equal(shard.local_to_global_edge(torch.tensor([0, 1]), edge_type=follows), torch.tensor([2, 3]))
+
+
+def test_local_graph_shard_global_to_local_edge_avoids_tensor_tolist(monkeypatch, tmp_path):
+    follows = ("node", "follows", "node")
+    likes = ("node", "likes", "node")
+    graph = Graph.hetero(
+        nodes={"node": {"x": torch.arange(8, dtype=torch.float32).view(4, 2)}},
+        edges={
+            follows: {
+                "edge_index": torch.tensor([[0, 1, 2, 3], [1, 2, 3, 2]]),
+                "weight": torch.tensor([1.0, 2.0, 3.0, 4.0]),
+            },
+            likes: {
+                "edge_index": torch.tensor([[1, 0, 3], [0, 1, 2]]),
+                "score": torch.tensor([0.5, 0.6, 0.7]),
+            },
+        },
+    )
+    write_partitioned_graph(graph, tmp_path, num_partitions=2)
+
+    shard = LocalGraphShard.from_partition_dir(tmp_path, partition_id=1)
+
+    def fail_tolist(self):
+        raise AssertionError("LocalGraphShard.global_to_local_edge should stay on tensors")
+
+    monkeypatch.setattr(torch.Tensor, "tolist", fail_tolist)
+
+    assert torch.equal(shard.global_to_local_edge(torch.tensor([3, 2]), edge_type=follows), torch.tensor([1, 0]))
 
 
 def test_local_graph_shard_preserves_manifest_edge_type_order(tmp_path):
