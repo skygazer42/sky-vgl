@@ -1,0 +1,164 @@
+site_name: VGL 文档
+site_url: https://skygazer42.github.io/sky-vgl
+site_description: VGL (Versatile Graph Learning) - 基于 PyTorch 的统一图学习框架
+site_author: VGL Team
+repo_name: skygazer42/sky-vgl
+repo_url: https://github.com/skygazer42/sky-vgl
+edit_uri: edit/main/docs/
+copyright: Copyright &copy; 2024-2026 VGL Team
+
+theme:
+  name: material
+  language: zh
+  icon:
+    repo: fontawesome/brands/github
+  font:
+    text: Noto Sans SC
+    code: JetBrains Mono
+  palette:
+    - media: "(prefers-color-scheme: light)"
+      scheme: default
+      primary: deep purple
+      accent: deep purple
+      toggle:
+        icon: material/brightness-7
+        name: 切换到暗色模式
+    - media: "(prefers-color-scheme: dark)"
+      scheme: slate
+      primary: deep purple
+      accent: deep purple
+      toggle:
+        icon: material/brightness-4
+        name: 切换到亮色模式
+  features:
+    - navigation.instant
+    - navigation.instant.progress
+    - navigation.tracking
+    - navigation.tabs
+    - navigation.tabs.sticky
+    - navigation.sections
+    - navigation.expand
+    - navigation.path
+    - navigation.top
+    - navigation.indexes
+    - navigation.footer
+    - search.suggest
+    - search.highlight
+    - search.share
+    - content.code.copy
+    - content.code.annotate
+    - content.tabs.link
+    - toc.follow
+    - announce.dismiss
+
+plugins:
+  - search:
+      separator: '[\s\u200b\-]'
+      lang:
+        - zh
+        - en
+  - mkdocstrings:
+      default_handler: python
+      handlers:
+        python:
+          options:
+            show_root_heading: true
+            show_source: false
+            members_order: source
+            show_bases: true
+            show_signature_annotations: true
+            separate_signature: true
+            merge_init_into_class: true
+            docstring_style: google
+
+markdown_extensions:
+  - abbr
+  - admonition
+  - attr_list
+  - def_list
+  - footnotes
+  - md_in_html
+  - tables
+  - toc:
+      permalink: true
+      toc_depth: 3
+  - pymdownx.arithmatex:
+      generic: true
+  - pymdownx.betterem:
+      smart_enable: all
+  - pymdownx.caret
+  - pymdownx.details
+  - pymdownx.emoji:
+      emoji_index: !!python/name:material.extensions.emoji.twemoji
+      emoji_generator: !!python/name:material.extensions.emoji.to_svg
+  - pymdownx.highlight:
+      anchor_linenums: true
+      line_spans: __span
+      pygments_lang_class: true
+  - pymdownx.inlinehilite
+  - pymdownx.keys
+  - pymdownx.mark
+  - pymdownx.smartsymbols
+  - pymdownx.snippets
+  - pymdownx.superfences:
+      custom_fences:
+        - name: mermaid
+          class: mermaid
+          format: !!python/name:pymdownx.superfences.fence_code_format
+  - pymdownx.tabbed:
+      alternate_style: true
+  - pymdownx.tasklist:
+      custom_checkbox: true
+  - pymdownx.tilde
+
+extra:
+  social:
+    - icon: fontawesome/brands/github
+      link: https://github.com/skygazer42/sky-vgl
+    - icon: fontawesome/brands/python
+      link: https://pypi.org/project/sky-vgl/
+  generator: false
+
+extra_css:
+  - assets/css/custom.css
+
+nav:
+  - 首页: index.md
+  - 快速开始:
+    - getting-started/index.md
+    - 安装指南: getting-started/installation.md
+    - 5 分钟快速入门: getting-started/quickstart.md
+  - 用户指南:
+    - guide/index.md
+    - Graph 对象详解: guide/graph.md
+    - 节点分类: guide/node-classification.md
+    - 图分类: guide/graph-classification.md
+    - 链接预测: guide/link-prediction.md
+    - 时序图: guide/temporal.md
+    - 异构图: guide/hetero.md
+    - 采样策略: guide/sampling.md
+    - 训练器与回调: guide/training.md
+    - 数据变换: guide/transforms.md
+  - API 参考:
+    - api/index.md
+    - vgl.graph: api/graph.md
+    - vgl.nn: api/nn.md
+    - vgl.dataloading: api/dataloading.md
+    - vgl.engine: api/engine.md
+    - vgl.tasks: api/tasks.md
+    - vgl.metrics: api/metrics.md
+    - vgl.transforms: api/transforms.md
+    - vgl.ops: api/ops.md
+    - vgl.sparse: api/sparse.md
+    - vgl.storage: api/storage.md
+    - vgl.data: api/data.md
+    - vgl.distributed: api/distributed.md
+    - vgl.compat: api/compat.md
+  - 示例:
+    - examples/index.md
+    - 卷积层速查: examples/conv-zoo.md
+  - 架构概览: architecture.md
+  - 核心概念: core-concepts.md
+  - 迁移指南: migration-guide.md
+  - 更新日志: changelog.md
+  - FAQ: faq.md

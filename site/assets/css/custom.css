@@ -1,0 +1,67 @@
+/* VGL Documentation - Custom Styles */
+
+/* Hero section on home page */
+.md-typeset .vgl-hero {
+  text-align: center;
+  padding: 2rem 0;
+}
+
+.md-typeset .vgl-hero h1 {
+  font-weight: 700;
+  margin-bottom: 0.5rem;
+}
+
+/* Feature grid */
+.md-typeset .grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(16rem, 1fr));
+  gap: 1rem;
+  margin: 1rem 0;
+}
+
+.md-typeset .grid .card {
+  border: 1px solid var(--md-default-fg-color--lightest);
+  border-radius: 0.5rem;
+  padding: 1.2rem;
+  transition: box-shadow 0.2s, border-color 0.2s;
+}
+
+.md-typeset .grid .card:hover {
+  border-color: var(--md-primary-fg-color);
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.08);
+}
+
+.md-typeset .grid .card h3 {
+  margin-top: 0;
+}
+
+/* Version badge */
+.md-typeset .version-badge {
+  display: inline-block;
+  padding: 0.15rem 0.6rem;
+  border-radius: 1rem;
+  font-size: 0.7rem;
+  font-weight: 600;
+  background: var(--md-primary-fg-color);
+  color: white;
+  vertical-align: middle;
+}
+
+/* API module card */
+.md-typeset .module-card {
+  border: 1px solid var(--md-default-fg-color--lightest);
+  border-radius: 0.5rem;
+  padding: 1rem;
+  margin: 0.5rem 0;
+}
+
+.md-typeset .module-card code {
+  font-size: 0.9rem;
+}
+
+/* Conv zoo table improvements */
+.md-typeset .conv-table td,
+.md-typeset .conv-table th {
+  padding: 0.4rem 0.8rem;
+  font-size: 0.85rem;
+}
