@@ -4,11 +4,13 @@ from vgl._optional import import_optional
 from vgl.graph.graph import Graph
 from vgl.graph.stores import EdgeStore, NodeStore
 
+EdgeType = tuple[str, str, str]
+
 
 _GRAPH_SPARSE_FORMAT_PRIORITY = ("coo", "csr", "csc")
 
 
-def _resolve_edge_type(graph: Graph, edge_type=None) -> tuple[str, str, str]:
+def _resolve_edge_type(graph: Graph, edge_type=None) -> EdgeType:
     if edge_type is None:
         return graph._default_edge_type()
     return tuple(edge_type)
@@ -37,6 +39,7 @@ def _public_id_lookup(store) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
         cache = {}
 
     raw_public_ids = store.data.get("e_id")
+    signature: tuple[object, ...]
     if raw_public_ids is None:
         signature = ("implicit", int(store.edge_index.size(1)), str(store.edge_index.device))
     else:
@@ -193,7 +196,7 @@ def _validate_node_pairs(graph: Graph, edge_type, u_ids: torch.Tensor, v_ids: to
     _validate_node_ids(graph, dst_type, v_ids, role="destination")
 
 
-def _edge_positions_for_endpoint(graph: Graph, edge_type, nodes, *, endpoint: int) -> tuple[object, torch.Tensor]:
+def _edge_positions_for_endpoint(graph: Graph, edge_type, nodes, *, endpoint: int) -> tuple[EdgeStore, torch.Tensor]:
     store = graph.edges[edge_type]
     node_ids = _normalize_node_ids(nodes)
     node_type = edge_type[0] if endpoint == 0 else edge_type[2]
@@ -270,14 +273,21 @@ def _normalize_laplacian_normalization(normalization):
 
 
 def _normalize_graph_formats(formats) -> tuple[str, ...]:
+    requested: tuple[str, ...]
     if isinstance(formats, str):
         requested = (formats,)
     else:
         requested = tuple(formats)
     if not requested:
         raise ValueError("formats must request at least one sparse format")
-    seen = set()
-    requested = tuple(fmt for fmt in requested if not (fmt in seen or seen.add(fmt)))
+    seen: set[str] = set()
+    deduplicated: list[str] = []
+    for fmt in requested:
+        if fmt in seen:
+            continue
+        seen.add(fmt)
+        deduplicated.append(fmt)
+    requested = tuple(deduplicated)
     invalid = [fmt for fmt in requested if fmt not in _GRAPH_SPARSE_FORMAT_PRIORITY]
     if invalid:
         raise ValueError("formats must be drawn from 'coo', 'csr', and 'csc'")

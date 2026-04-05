@@ -98,7 +98,7 @@ def from_edge_list_csv(
     )
 
     edge_pairs = []
-    raw_edge_columns = {name: [] for name in resolved_edge_columns}
+    raw_edge_columns: dict[str, list[str]] = {name: [] for name in resolved_edge_columns}
     for row in rows:
         edge_pairs.append(
             (

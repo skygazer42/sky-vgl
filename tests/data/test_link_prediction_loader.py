@@ -442,6 +442,28 @@ def test_candidate_link_sampler_can_skip_negative_seed_records_in_loader():
     assert list(iter(loader)) == []
 
 
+def test_link_neighbor_sampler_with_candidate_base_can_skip_negative_seed_records_in_loader():
+    graph = Graph.homo(
+        edge_index=torch.tensor([[0], [1]]),
+        x=torch.randn(3, 4),
+    )
+    dataset = ListDataset(
+        [
+            LinkPredictionRecord(graph=graph, src_index=0, dst_index=1, label=0),
+        ]
+    )
+    loader = Loader(
+        dataset=dataset,
+        sampler=LinkNeighborSampler(
+            [1],
+            base_sampler=CandidateLinkSampler(),
+        ),
+        batch_size=1,
+    )
+
+    assert list(iter(loader)) == []
+
+
 def test_candidate_link_sampler_can_require_positive_seed_records_when_configured():
     graph = Graph.homo(
         edge_index=torch.tensor([[0], [1]]),

@@ -190,7 +190,6 @@ def test_temporal_neighbor_sampler_can_limit_history_by_max_events():
 def test_temporal_neighbor_sampler_history_lookup_avoids_tensor_lt(monkeypatch):
     graph = _graph()
     sampler = TemporalNeighborSampler(num_neighbors=[-1])
-    original_lt = torch.Tensor.__lt__
 
     def fail_lt(self, other):
         raise AssertionError("history lookup should avoid elementwise timestamp < comparisons")
@@ -205,7 +204,6 @@ def test_temporal_neighbor_sampler_history_lookup_avoids_tensor_lt(monkeypatch):
 def test_temporal_neighbor_sampler_inclusive_history_lookup_avoids_tensor_le(monkeypatch):
     graph = _graph()
     sampler = TemporalNeighborSampler(num_neighbors=[-1], strict_history=False)
-    original_le = torch.Tensor.__le__
 
     def fail_le(self, other):
         raise AssertionError("inclusive history lookup should avoid elementwise timestamp <= comparisons")

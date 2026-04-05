@@ -1,7 +1,7 @@
 from dataclasses import dataclass, field
 
 import torch
-from typing import Any, Callable
+from typing import Any, Callable, TypeAlias, cast
 
 from vgl._neighbor_sampling import (
     _relation_neighbor_candidates,
@@ -16,6 +16,8 @@ from vgl.ops.subgraph import _membership_mask, _positions_for_endpoint_values
 from vgl.storage.base import TensorSlice
 
 StageHandler = Callable[[PlanStage, "MaterializationContext"], "MaterializationContext"]
+NodeIdsByType: TypeAlias = dict[str, torch.Tensor]
+NodeHopListByType: TypeAlias = list[dict[str, torch.Tensor]]
 
 
 def _resolve_feature_store(feature_store, graph):
@@ -40,6 +42,14 @@ def _resolve_fetch_index(stage: "PlanStage", context: "MaterializationContext", 
         if global_index_key in context.state:
             return _resolve_state_index(context, global_index_key, type_name=type_name)
     return _resolve_state_index(context, stage.params["index_key"], type_name=type_name)
+
+
+def _as_node_ids_by_type(value: object) -> NodeIdsByType:
+    return cast(NodeIdsByType, value)
+
+
+def _as_node_ids_and_hops_by_type(value: object) -> tuple[NodeIdsByType, NodeHopListByType]:
+    return cast(tuple[NodeIdsByType, NodeHopListByType], value)
 
 
 def _resolve_link_record_edge_type(record) -> tuple[str, str, str]:
@@ -414,7 +424,7 @@ def _stitched_hetero_frontier_candidates(
     *,
     edge_types,
 ) -> dict[str, torch.Tensor]:
-    candidates = {node_type: [] for node_type in visited_by_type}
+    candidates: dict[str, list[torch.Tensor]] = {node_type: [] for node_type in visited_by_type}
     for edge_type in edge_types:
         src_type, _, dst_type = edge_type
         src_frontier = torch.as_tensor(
@@ -569,7 +579,7 @@ def _expand_stitched_hetero_node_ids(
             dtype=torch.long,
             device=_infer_data_device(graph.nodes[node_type].data),
         )
-    node_ids_by_type = _expand_stitched_hetero_global_node_ids(
+    expanded = _expand_stitched_hetero_global_node_ids(
         source,
         seed_global_ids_by_type,
         edge_types=tuple(graph.edges),
@@ -578,13 +588,13 @@ def _expand_stitched_hetero_node_ids(
         return_hops=return_hops,
     )
     if return_hops:
-        node_ids_by_type, node_hops_by_type = node_ids_by_type
+        node_ids_by_type, node_hops_by_type = _as_node_ids_and_hops_by_type(expanded)
         return seed_global_ids, node_ids_by_type, node_hops_by_type
-    return seed_global_ids, node_ids_by_type
+    return seed_global_ids, _as_node_ids_by_type(expanded)
 
 
 def _stitched_hetero_link_seed_global_ids(graph, records) -> dict[str, torch.Tensor]:
-    seed_local_ids_by_type = {node_type: [] for node_type in graph.schema.node_types}
+    seed_local_ids_by_type: dict[str, list[int]] = {node_type: [] for node_type in graph.schema.node_types}
     for record in records:
         src_type, _, dst_type = _resolve_link_record_edge_type(record)
         seed_local_ids_by_type[src_type].append(int(record.src_index))
@@ -1407,7 +1417,7 @@ def _build_stitched_hetero_temporal_history(
 def _stitched_hetero_temporal_seed_global_ids(graph, record, *, edge_type) -> dict[str, torch.Tensor]:
     src_type, _, dst_type = tuple(edge_type)
     unique_node_types = tuple(dict.fromkeys((src_type, dst_type)))
-    seed_local_ids_by_type = {node_type: [] for node_type in unique_node_types}
+    seed_local_ids_by_type: dict[str, list[int]] = {node_type: [] for node_type in unique_node_types}
     seed_local_ids_by_type[src_type].append(int(record.src_index))
     seed_local_ids_by_type[dst_type].append(int(record.dst_index))
 
@@ -1574,10 +1584,10 @@ def _build_stitched_homo_link_records(graph, records, stitched_graph: Graph) -> 
 
 def _build_stitched_hetero_link_records(graph, records, stitched_graph: Graph) -> list[LinkPredictionRecord]:
     edge_types = tuple(_resolve_link_record_edge_type(record) for record in records)
-    src_local_ids_by_type = {node_type: [] for node_type in stitched_graph.nodes}
-    src_record_indices_by_type = {node_type: [] for node_type in stitched_graph.nodes}
-    dst_local_ids_by_type = {node_type: [] for node_type in stitched_graph.nodes}
-    dst_record_indices_by_type = {node_type: [] for node_type in stitched_graph.nodes}
+    src_local_ids_by_type: dict[str, list[int]] = {node_type: [] for node_type in stitched_graph.nodes}
+    src_record_indices_by_type: dict[str, list[int]] = {node_type: [] for node_type in stitched_graph.nodes}
+    dst_local_ids_by_type: dict[str, list[int]] = {node_type: [] for node_type in stitched_graph.nodes}
+    dst_record_indices_by_type: dict[str, list[int]] = {node_type: [] for node_type in stitched_graph.nodes}
     for index, edge_type in enumerate(edge_types):
         src_type, _, dst_type = edge_type
         src_local_ids_by_type[src_type].append(int(records[index].src_index))
@@ -1705,20 +1715,26 @@ class PlanExecutor:
         if _match_partition_shard(context.graph, context.feature_store) is not None:
             seed_local_ids = torch.as_tensor(request.node_ids, dtype=torch.long).view(-1)
             if output_blocks:
-                seed_global_ids, node_ids_global, node_hops = _expand_stitched_homo_node_ids(
-                    context.graph,
-                    context.feature_store,
-                    seed_local_ids,
-                    fanouts=stage.params["num_neighbors"],
-                    return_hops=True,
+                seed_global_ids, node_ids_global, node_hops = cast(
+                    tuple[torch.Tensor, torch.Tensor, list[torch.Tensor]],
+                    _expand_stitched_homo_node_ids(
+                        context.graph,
+                        context.feature_store,
+                        seed_local_ids,
+                        fanouts=stage.params["num_neighbors"],
+                        return_hops=True,
+                    ),
                 )
                 context.state["node_hops"] = node_hops
             else:
-                seed_global_ids, node_ids_global = _expand_stitched_homo_node_ids(
-                    context.graph,
-                    context.feature_store,
-                    seed_local_ids,
-                    fanouts=stage.params["num_neighbors"],
+                seed_global_ids, node_ids_global = cast(
+                    tuple[torch.Tensor, torch.Tensor],
+                    _expand_stitched_homo_node_ids(
+                        context.graph,
+                        context.feature_store,
+                        seed_local_ids,
+                        fanouts=stage.params["num_neighbors"],
+                    ),
                 )
             edge_ids_global, edge_index_global = _collect_stitched_homo_edges(
                 context.feature_store,
@@ -1747,25 +1763,31 @@ class PlanExecutor:
         if _match_hetero_partition_shard(context.graph, context.feature_store) is not None:
             seed_local_ids = torch.as_tensor(request.node_ids, dtype=torch.long).view(-1)
             if output_blocks:
-                seed_global_ids, node_ids_by_type, node_hops_by_type = _expand_stitched_hetero_node_ids(
-                    context.graph,
-                    context.feature_store,
-                    seed_local_ids,
-                    seed_node_type=request.node_type,
-                    fanouts=stage.params["num_neighbors"],
-                    generator=getattr(stage.params.get("sampler", None), "_generator", None),
-                    return_hops=True,
+                seed_global_ids, node_ids_by_type, node_hops_by_type = cast(
+                    tuple[torch.Tensor, NodeIdsByType, NodeHopListByType],
+                    _expand_stitched_hetero_node_ids(
+                        context.graph,
+                        context.feature_store,
+                        seed_local_ids,
+                        seed_node_type=request.node_type,
+                        fanouts=stage.params["num_neighbors"],
+                        generator=getattr(stage.params.get("sampler", None), "_generator", None),
+                        return_hops=True,
+                    ),
                 )
                 context.state["node_hops_by_type"] = node_hops_by_type
                 context.state["node_block_edge_type"] = stage.params["node_block_edge_type"]
             else:
-                seed_global_ids, node_ids_by_type = _expand_stitched_hetero_node_ids(
-                    context.graph,
-                    context.feature_store,
-                    seed_local_ids,
-                    seed_node_type=request.node_type,
-                    fanouts=stage.params["num_neighbors"],
-                    generator=getattr(stage.params.get("sampler", None), "_generator", None),
+                seed_global_ids, node_ids_by_type = cast(
+                    tuple[torch.Tensor, NodeIdsByType],
+                    _expand_stitched_hetero_node_ids(
+                        context.graph,
+                        context.feature_store,
+                        seed_local_ids,
+                        seed_node_type=request.node_type,
+                        fanouts=stage.params["num_neighbors"],
+                        generator=getattr(stage.params.get("sampler", None), "_generator", None),
+                    ),
                 )
             edge_ids_by_type, edge_index_by_type = _collect_stitched_hetero_edges(
                 context.feature_store,
@@ -1799,9 +1821,12 @@ class PlanExecutor:
             node_type=stage.params.get("node_type", getattr(request, "node_type", None)),
             return_hops=output_blocks,
         )
-        node_hops = None
+        expanded_node_hops: list[torch.Tensor] | None = None
         if output_blocks:
-            expanded, node_hops = expanded
+            expanded, expanded_node_hops = cast(
+                tuple[torch.Tensor | NodeIdsByType, list[torch.Tensor]],
+                expanded,
+            )
         if isinstance(expanded, dict):
             edge_ids_by_type = _induced_edge_ids_by_type(context.graph, expanded)
             context.state["node_ids_by_type"] = expanded
@@ -1814,8 +1839,8 @@ class PlanExecutor:
                 edge_type: _graph_edge_global_ids(context.graph, edge_ids, edge_type=edge_type)
                 for edge_type, edge_ids in edge_ids_by_type.items()
             }
-            if node_hops is not None:
-                context.state["node_hops_by_type"] = node_hops
+            if expanded_node_hops is not None:
+                context.state["node_hops_by_type"] = expanded_node_hops
                 context.state["node_block_edge_type"] = stage.params["node_block_edge_type"]
         else:
             edge_ids = _induced_edge_ids(context.graph, expanded)
@@ -1827,8 +1852,8 @@ class PlanExecutor:
                 edge_ids,
                 edge_type=context.graph._default_edge_type(),
             )
-            if node_hops is not None:
-                context.state["node_hops"] = node_hops
+            if expanded_node_hops is not None:
+                context.state["node_hops"] = expanded_node_hops
         return context
 
     def _fetch_node_features(self, stage: PlanStage, context: MaterializationContext) -> MaterializationContext:
@@ -1891,23 +1916,27 @@ class PlanExecutor:
         elif stitched_hetero_partition is not None:
             seed_global_ids_by_type = _stitched_hetero_link_seed_global_ids(graph, records)
             if output_blocks:
-                node_ids_by_type, link_node_hops_by_type = _expand_stitched_hetero_global_node_ids(
-                    context.feature_store,
-                    seed_global_ids_by_type,
-                    edge_types=tuple(graph.edges),
-                    fanouts=sampler.num_neighbors,
-                    generator=getattr(sampler, "_generator", None),
-                    return_hops=True,
+                node_ids_by_type, link_node_hops_by_type = _as_node_ids_and_hops_by_type(
+                    _expand_stitched_hetero_global_node_ids(
+                        context.feature_store,
+                        seed_global_ids_by_type,
+                        edge_types=tuple(graph.edges),
+                        fanouts=sampler.num_neighbors,
+                        generator=getattr(sampler, "_generator", None),
+                        return_hops=True,
+                    )
                 )
                 context.state["link_node_hops_by_type"] = link_node_hops_by_type
                 context.state["link_block_edge_type"] = _single_link_record_edge_type(records)
             else:
-                node_ids_by_type = _expand_stitched_hetero_global_node_ids(
-                    context.feature_store,
-                    seed_global_ids_by_type,
-                    edge_types=tuple(graph.edges),
-                    fanouts=sampler.num_neighbors,
-                    generator=getattr(sampler, "_generator", None),
+                node_ids_by_type = _as_node_ids_by_type(
+                    _expand_stitched_hetero_global_node_ids(
+                        context.feature_store,
+                        seed_global_ids_by_type,
+                        edge_types=tuple(graph.edges),
+                        fanouts=sampler.num_neighbors,
+                        generator=getattr(sampler, "_generator", None),
+                    )
                 )
             edge_ids_by_type, edge_index_by_type = _collect_stitched_hetero_edges(
                 context.feature_store,

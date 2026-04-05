@@ -188,7 +188,7 @@ def _normalize_metapath(graph: Graph, metapath) -> tuple[tuple[str, str, str], .
 def _metapath_pairs(graph: Graph, metapath: tuple[tuple[str, str, str], ...]) -> list[tuple[int, int]]:
     current_pairs = _edge_pairs(graph.edges[metapath[0]].edge_index)
     for edge_type in metapath[1:]:
-        next_edges = {}
+        next_edges: dict[int, list[int]] = {}
         for src, dst in _edge_pairs(graph.edges[edge_type].edge_index):
             next_edges.setdefault(int(src), []).append(int(dst))
         expanded = []

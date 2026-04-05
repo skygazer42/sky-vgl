@@ -24,12 +24,13 @@ def fingerprint_manifest(manifest: DatasetManifest) -> str:
 @dataclass(slots=True)
 class DataCache:
     root: str | Path | None = None
+    cache_root: Path = Path()
 
     def __post_init__(self) -> None:
-        self.root = resolve_cache_dir(self.root)
+        self.cache_root = resolve_cache_dir(self.root)
 
     def manifest_dir(self, manifest: DatasetManifest) -> Path:
-        return Path(self.root) / manifest.name / fingerprint_manifest(manifest)
+        return self.cache_root / manifest.name / fingerprint_manifest(manifest)
 
     def path_for(self, manifest: DatasetManifest, relative_path: str | Path) -> Path:
         return self.manifest_dir(manifest) / Path(relative_path)

@@ -1120,7 +1120,7 @@ class LinkNeighborSampler(Sampler):
             return sampled
         return sampled[0]
 
-    def build_plan(self, item) -> SamplingPlan:
+    def build_plan(self, item) -> SamplingPlan | tuple[()]:
         records, is_sequence = self._seed_records(item)
         if not records:
             return ()

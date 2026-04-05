@@ -89,7 +89,7 @@ class DistributedGraphStore(Protocol):
 
 
 class LocalFeatureStoreAdapter:
-    def __init__(self, store: FeatureStore, *, boundary_edge_data_by_type=None):
+    def __init__(self, store: FeatureStore | DistributedFeatureStore, *, boundary_edge_data_by_type=None):
         self._store = store
         self._boundary_edge_data_by_type = {
             tuple(edge_type): {
@@ -182,7 +182,7 @@ class LocalGraphStoreAdapter:
 
     def _resolve_edge_type(self, edge_type: EdgeType | None) -> EdgeType:
         if edge_type is not None:
-            return tuple(edge_type)
+            return edge_type
         default_edge_type = ("node", "to", "node")
         if default_edge_type in self._store.edge_types:
             return default_edge_type
@@ -246,7 +246,6 @@ def _partition_edge_types(partition: PartitionShard) -> tuple[EdgeType, ...]:
     seen = set()
     for mapping in (partition.edge_ids_by_type, partition.boundary_edge_ids_by_type):
         for edge_type in mapping:
-            edge_type = tuple(edge_type)
             if edge_type in seen:
                 continue
             seen.add(edge_type)
@@ -374,7 +373,7 @@ class _LazyPartitionGraphStoreAdapter:
 
     def _resolve_edge_type(self, edge_type: EdgeType | None) -> EdgeType:
         if edge_type is not None:
-            return tuple(edge_type)
+            return edge_type
         default_edge_type = ("node", "to", "node")
         if default_edge_type in self._edge_types:
             return default_edge_type
@@ -523,7 +522,6 @@ class PartitionedGraphStore:
         seen = set()
         for partition_id in sorted(self._stores):
             for edge_type in self._stores[partition_id].edge_types:
-                edge_type = tuple(edge_type)
                 if edge_type in seen:
                     continue
                 seen.add(edge_type)

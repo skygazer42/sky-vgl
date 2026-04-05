@@ -286,10 +286,10 @@ class LocalSamplingCoordinator:
             for partition_id, shard in self.shards.items()
         }
         self._node_route_lookup = _build_node_route_lookup(self.manifest)
-        self._edge_partition_by_type: dict[object, dict[int, int]] = {}
-        self._boundary_partition_by_type: dict[object, dict[int, int]] = {}
-        self._edge_owner_lookup_by_type: dict[object, tuple[torch.Tensor, torch.Tensor]] = {}
-        self._boundary_owner_lookup_by_type: dict[object, tuple[torch.Tensor, torch.Tensor]] = {}
+        self._edge_partition_by_type: dict[tuple[str, str, str], dict[int, int]] = {}
+        self._boundary_partition_by_type: dict[tuple[str, str, str], dict[int, int]] = {}
+        self._edge_owner_lookup_by_type: dict[tuple[str, str, str], tuple[torch.Tensor, torch.Tensor]] = {}
+        self._boundary_owner_lookup_by_type: dict[tuple[str, str, str], tuple[torch.Tensor, torch.Tensor]] = {}
         for partition_id, shard in self.shards.items():
             for edge_type in shard.graph.edges:
                 owner = self._edge_partition_by_type.setdefault(edge_type, {})
@@ -569,7 +569,6 @@ class StoreBackedSamplingCoordinator:
         ordered = []
         seen = set()
         for edge_type in self.graph_store.edge_types:
-            edge_type = tuple(edge_type)
             if edge_type in seen:
                 continue
             seen.add(edge_type)
@@ -577,7 +576,6 @@ class StoreBackedSamplingCoordinator:
         for partition in self.manifest.partitions:
             for mapping in (partition.edge_ids_by_type, partition.boundary_edge_ids_by_type):
                 for edge_type in mapping:
-                    edge_type = tuple(edge_type)
                     if edge_type in seen:
                         continue
                     seen.add(edge_type)

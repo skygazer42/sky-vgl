@@ -1,5 +1,5 @@
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Hashable, SupportsInt
+from typing import TYPE_CHECKING, Hashable, SupportsInt, cast
 
 import torch
 
@@ -20,7 +20,7 @@ def _slice_edge_store(store: EdgeStore, mask: torch.Tensor) -> EdgeStore:
     edge_data = {}
     for key, value in store.data.items():
         if key == "edge_index":
-            edge_data[key] = value[:, mask]
+            edge_data[key] = store.edge_index[:, mask]
         elif isinstance(value, torch.Tensor) and value.ndim > 0 and value.size(0) == edge_count:
             edge_data[key] = value[mask]
         else:
@@ -147,9 +147,9 @@ def _batch_hetero_block_layer(blocks: list[HeteroBlock], *, context: str) -> Het
 
 def _batch_block_layer(blocks: list[Block | HeteroBlock], *, context: str) -> Block | HeteroBlock:
     if all(isinstance(block, Block) for block in blocks):
-        return _batch_relation_block_layer(blocks, context=context)
+        return _batch_relation_block_layer(cast(list[Block], blocks), context=context)
     if all(isinstance(block, HeteroBlock) for block in blocks):
-        return _batch_hetero_block_layer(blocks, context=context)
+        return _batch_hetero_block_layer(cast(list[HeteroBlock], blocks), context=context)
     raise ValueError(f"{context} requires matching block container types when batching block layers")
 
 
@@ -198,7 +198,7 @@ def _resolve_link_edge_type(record):
     if edge_type is None:
         edge_type = record.metadata.get("edge_type")
     if edge_type is not None:
-        return tuple(edge_type)
+        return cast(tuple[str, str, str], tuple(edge_type))
     graph = record.graph
     if len(graph.edges) == 1:
         return next(iter(graph.edges))
@@ -214,7 +214,7 @@ def _resolve_link_reverse_edge_type(record):
         reverse_edge_type = record.metadata.get("reverse_edge_type")
     if reverse_edge_type is None:
         return None
-    return tuple(reverse_edge_type)
+    return cast(tuple[str, str, str], tuple(reverse_edge_type))
 
 
 def _resolve_link_query_id(record):
@@ -233,7 +233,7 @@ def _resolve_temporal_edge_type(record):
     if edge_type is None:
         edge_type = record.metadata.get("edge_type")
     if edge_type is not None:
-        return tuple(edge_type)
+        return cast(tuple[str, str, str], tuple(edge_type))
     graph = record.graph
     if len(graph.edges) == 1:
         return next(iter(graph.edges))

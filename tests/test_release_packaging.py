@@ -96,6 +96,8 @@ def test_release_workflows_exist_for_ci_and_pypi_publish():
     publish_text = publish_path.read_text(encoding="utf-8")
 
     assert "python -m pytest -q" in ci_text
+    assert "python -m mypy vgl" in ci_text
+    assert "python -m mkdocs build --strict" in ci_text
     assert "python -m build" in ci_text
     assert "python -m twine check" in ci_text
     assert "python scripts/docs_link_scan.py" in ci_text
@@ -117,6 +119,44 @@ def test_release_workflows_exist_for_ci_and_pypi_publish():
     assert "Publish to PyPI with Trusted Publishing" in publish_text
     assert "Publish to TestPyPI with API token" in publish_text
     assert "Publish to TestPyPI with Trusted Publishing" in publish_text
+
+
+def test_docs_publish_workflow_exists_for_github_pages():
+    docs_path = REPO_ROOT / ".github" / "workflows" / "docs.yml"
+
+    assert docs_path.exists()
+
+    docs_text = docs_path.read_text(encoding="utf-8")
+
+    assert "python -m mkdocs build --strict" in docs_text
+    assert "actions/configure-pages@v5" in docs_text
+    assert "actions/upload-pages-artifact@v3" in docs_text
+    assert "actions/deploy-pages@v4" in docs_text
+    assert "pages: write" in docs_text
+    assert "id-token: write" in docs_text
+    assert "path: site" in docs_text
+
+
+def test_generated_site_directory_is_ignored_and_not_tracked():
+    gitignore = (REPO_ROOT / ".gitignore").read_text(encoding="utf-8")
+    tracked_site = subprocess.run(
+        ["git", "ls-files", "site"],
+        cwd=REPO_ROOT,
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+
+    assert "site/" in gitignore
+    assert tracked_site.stdout.strip() == ""
+
+
+def test_release_dev_dependencies_include_docs_build_stack():
+    pyproject = (REPO_ROOT / "pyproject.toml").read_text(encoding="utf-8")
+
+    assert 'mkdocs>=' in pyproject
+    assert 'mkdocs-material>=' in pyproject
+    assert 'mkdocstrings[python]>=' in pyproject
 
 
 def test_release_smoke_script_can_install_built_wheel(built_release_artifacts):

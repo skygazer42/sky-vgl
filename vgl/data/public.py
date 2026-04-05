@@ -229,7 +229,6 @@ class PlanetoidDataset(CachedGraphDataset):
 
     def build_graphs(self) -> list[Graph]:
         prefix = f"ind.{self.name}"
-        x = _dense_tensor(_read_pickle(self.raw_dir / f"{prefix}.x")).to(dtype=torch.float32)
         tx = _dense_tensor(_read_pickle(self.raw_dir / f"{prefix}.tx")).to(dtype=torch.float32)
         allx = _dense_tensor(_read_pickle(self.raw_dir / f"{prefix}.allx")).to(dtype=torch.float32)
         y = _dense_tensor(_read_pickle(self.raw_dir / f"{prefix}.y"))

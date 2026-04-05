@@ -5,7 +5,6 @@ from vgl.dataloading import (
     ClusterData,
     ClusterLoader,
     DataLoader,
-    FullGraphSampler,
     GraphSAINTEdgeSampler,
     GraphSAINTNodeSampler,
     GraphSAINTRandomWalkSampler,

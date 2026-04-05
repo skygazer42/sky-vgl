@@ -1,5 +1,3 @@
-import torch
-
 from vgl.metrics.base import Metric
 
 

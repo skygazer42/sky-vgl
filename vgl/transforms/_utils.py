@@ -6,12 +6,14 @@ import torch
 
 from vgl.graph.graph import Graph
 
+EdgeType = tuple[str, str, str]
+
 
 def is_homo_graph(graph: Graph) -> bool:
     return set(graph.nodes) == {"node"} and len(graph.edges) == 1 and graph.schema.time_attr is None
 
 
-def clone_graph(graph: Graph, *, nodes: Mapping[str, dict] | None = None, edges: Mapping[tuple[str, str, str], dict] | None = None) -> Graph:
+def clone_graph(graph: Graph, *, nodes: Mapping[str, dict] | None = None, edges: Mapping[EdgeType, dict] | None = None) -> Graph:
     nodes = {
         node_type: dict(store.data)
         for node_type, store in graph.nodes.items()
@@ -19,7 +21,7 @@ def clone_graph(graph: Graph, *, nodes: Mapping[str, dict] | None = None, edges:
     edges = {
         edge_type: dict(store.data)
         for edge_type, store in graph.edges.items()
-    } if edges is None else {tuple(edge_type): dict(data) for edge_type, data in edges.items()}
+    } if edges is None else {edge_type: dict(data) for edge_type, data in edges.items()}
 
     if is_homo_graph(graph):
         edge_type = graph._default_edge_type()

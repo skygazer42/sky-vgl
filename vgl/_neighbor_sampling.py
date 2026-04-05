@@ -1,9 +1,18 @@
 import weakref
+from typing import TypedDict
 
 import torch
 
 _LOOKUP_CACHE_MAX_ENTRIES = 64
-_endpoint_lookup_cache: dict[tuple[int, int], dict[str, object]] = {}
+
+
+class _EndpointLookupEntry(TypedDict):
+    tensor_ref: weakref.ReferenceType[torch.Tensor]
+    signature: tuple[object, ...]
+    lookup: tuple[torch.Tensor, torch.Tensor]
+
+
+_endpoint_lookup_cache: dict[tuple[int, int], _EndpointLookupEntry] = {}
 
 
 def _tensor_signature(tensor: torch.Tensor) -> tuple[object, ...]:

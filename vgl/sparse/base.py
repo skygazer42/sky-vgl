@@ -39,10 +39,19 @@ class SparseTensor:
     @property
     def nnz(self) -> int:
         if self.layout is SparseLayout.COO:
-            return int(self.row.numel())
+            row = self.row
+            if row is None:
+                raise ValueError("row is required for coo layout")
+            return int(row.numel())
         if self.layout is SparseLayout.CSR:
-            return int(self.col_indices.numel())
-        return int(self.row_indices.numel())
+            col_indices = self.col_indices
+            if col_indices is None:
+                raise ValueError("col_indices is required for csr layout")
+            return int(col_indices.numel())
+        row_indices = self.row_indices
+        if row_indices is None:
+            raise ValueError("row_indices is required for csc layout")
+        return int(row_indices.numel())
 
     def _validate_vector(self, value: torch.Tensor | None, *, name: str) -> torch.Tensor:
         if value is None:

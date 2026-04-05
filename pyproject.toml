@@ -50,6 +50,9 @@ Changelog = "https://github.com/skygazer42/sky-vgl/releases"
 [project.optional-dependencies]
 dev = [
   "build>=1.2",
+  "mkdocs>=1.6",
+  "mkdocs-material>=9.7",
+  "mkdocstrings[python]>=0.29",
   "twine>=5.1",
   "pytest>=8.3",
   "ruff>=0.6",

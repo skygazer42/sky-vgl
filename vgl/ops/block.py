@@ -217,7 +217,7 @@ def to_hetero_block(
     selected_edge_types = _resolve_hetero_block_edge_types(graph, edge_types=edge_types)
     normalized_dst_nodes = _normalize_dst_nodes_by_type(graph, dst_nodes_by_type)
 
-    src_nodes_by_type = {}
+    src_nodes_by_type: dict[str, torch.Tensor] = {}
     for edge_type in selected_edge_types:
         src_type, _, dst_type = edge_type
         dst_local_n_id = normalized_dst_nodes.get(

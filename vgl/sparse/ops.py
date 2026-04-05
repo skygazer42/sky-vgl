@@ -77,6 +77,8 @@ def sum(sparse: SparseTensor, *, dim: int = 0) -> torch.Tensor:
         size = coo.shape[1]
     else:
         raise ValueError("dim must be 0 or 1")
+    if index is None:
+        raise ValueError("coo sparse tensors require explicit row/col indices")
 
     if coo.values is None:
         weights = torch.ones(coo.nnz, dtype=torch.long, device=index.device)
@@ -98,11 +100,15 @@ def degree(sparse: SparseTensor, *, dim: int = 0) -> torch.Tensor:
 
 def select_rows(sparse: SparseTensor, rows: torch.Tensor) -> SparseTensor:
     coo = to_coo(sparse)
+    row = coo.row
+    col = coo.col
+    if row is None or col is None:
+        raise ValueError("coo sparse tensors require explicit row/col indices")
     rows = rows.to(dtype=torch.long)
-    selected_row = _optional_lookup_positions(rows, coo.row)
+    selected_row = _optional_lookup_positions(rows, row)
     selected_mask = selected_row >= 0
     if not bool(selected_mask.any()):
-        empty = torch.empty(0, dtype=torch.long, device=coo.row.device)
+        empty = torch.empty(0, dtype=torch.long, device=row.device)
         return SparseTensor(
             layout=SparseLayout.COO,
             shape=(rows.numel(), coo.shape[1]),
@@ -111,7 +117,7 @@ def select_rows(sparse: SparseTensor, rows: torch.Tensor) -> SparseTensor:
             values=_empty_values_like(coo.values),
         )
     selected_row = selected_row[selected_mask]
-    selected_col = coo.col[selected_mask]
+    selected_col = col[selected_mask]
     selected_values = None if coo.values is None else coo.values[selected_mask]
     return SparseTensor(
         layout=SparseLayout.COO,
@@ -124,11 +130,15 @@ def select_rows(sparse: SparseTensor, rows: torch.Tensor) -> SparseTensor:
 
 def select_cols(sparse: SparseTensor, cols: torch.Tensor) -> SparseTensor:
     coo = to_coo(sparse)
+    row = coo.row
+    col = coo.col
+    if row is None or col is None:
+        raise ValueError("coo sparse tensors require explicit row/col indices")
     cols = cols.to(dtype=torch.long)
-    selected_col = _optional_lookup_positions(cols, coo.col)
+    selected_col = _optional_lookup_positions(cols, col)
     selected_mask = selected_col >= 0
     if not bool(selected_mask.any()):
-        empty = torch.empty(0, dtype=torch.long, device=coo.col.device)
+        empty = torch.empty(0, dtype=torch.long, device=col.device)
         return SparseTensor(
             layout=SparseLayout.COO,
             shape=(coo.shape[0], cols.numel()),
@@ -136,7 +146,7 @@ def select_cols(sparse: SparseTensor, cols: torch.Tensor) -> SparseTensor:
             col=empty,
             values=_empty_values_like(coo.values),
         )
-    selected_row = coo.row[selected_mask]
+    selected_row = row[selected_mask]
     selected_col = selected_col[selected_mask]
     selected_values = None if coo.values is None else coo.values[selected_mask]
     return SparseTensor(
@@ -178,6 +188,10 @@ def transpose(sparse: SparseTensor) -> SparseTensor:
 
 def spmm(sparse: SparseTensor, dense: torch.Tensor) -> torch.Tensor:
     coo = to_coo(sparse)
+    row = coo.row
+    col = coo.col
+    if row is None or col is None:
+        raise ValueError("coo sparse tensors require explicit row/col indices")
     if dense.ndim != 2:
         raise ValueError("dense input must be rank-2")
     if dense.size(0) != coo.shape[1]:
@@ -191,7 +205,7 @@ def spmm(sparse: SparseTensor, dense: torch.Tensor) -> torch.Tensor:
     if coo.nnz == 0:
         return result
 
-    source = dense[coo.col]
+    source = dense[col]
     if values is not None:
         if values.ndim == 1:
             source = source * values.unsqueeze(-1).to(dtype=source.dtype)
@@ -199,12 +213,16 @@ def spmm(sparse: SparseTensor, dense: torch.Tensor) -> torch.Tensor:
             payload = values.to(dtype=source.dtype).unsqueeze(-1)
             source = source.reshape((source.size(0),) + (1,) * (values.ndim - 1) + (source.size(1),))
             source = payload * source
-    result.index_add_(0, coo.row, source)
+    result.index_add_(0, row, source)
     return result
 
 
 def sddmm(sparse: SparseTensor, lhs: torch.Tensor, rhs: torch.Tensor) -> SparseTensor:
     coo = to_coo(sparse)
+    row = coo.row
+    col = coo.col
+    if row is None or col is None:
+        raise ValueError("coo sparse tensors require explicit row/col indices")
     if lhs.ndim == 0 or rhs.ndim == 0:
         raise ValueError("lhs and rhs must have at least one dimension")
     if lhs.size(0) != coo.shape[0]:
@@ -214,7 +232,7 @@ def sddmm(sparse: SparseTensor, lhs: torch.Tensor, rhs: torch.Tensor) -> SparseT
     if lhs.ndim != rhs.ndim:
         raise ValueError("lhs and rhs must have the same rank")
     if lhs.ndim == 1:
-        values = lhs[coo.row] * rhs[coo.col]
+        values = lhs[row] * rhs[col]
         return _replace_values(sparse, values)
     if lhs.shape[1:-1] != rhs.shape[1:-1]:
         raise ValueError("lhs and rhs payload dimensions must match")

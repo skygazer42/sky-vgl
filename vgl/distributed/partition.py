@@ -21,7 +21,8 @@ def _normalize_edge_type(edge_type) -> tuple[str, str, str]:
         edge_type = json.loads(edge_type)
     if not isinstance(edge_type, (list, tuple)) or len(edge_type) != 3:
         raise ValueError("edge type metadata keys must be length-3 tuples")
-    return tuple(str(value) for value in edge_type)
+    src_type, relation_type, dst_type = edge_type
+    return str(src_type), str(relation_type), str(dst_type)
 
 
 def _normalize_edge_id_metadata(raw_value) -> dict[tuple[str, str, str], tuple[int, ...]]:
@@ -160,7 +161,7 @@ class PartitionShard:
     @property
     def edge_feature_shapes(self) -> dict[tuple[str, str, str], dict[str, tuple[int, ...]]]:
         return {
-            tuple(edge_type): dict(feature_shapes)
+            _normalize_edge_type(edge_type): dict(feature_shapes)
             for edge_type, feature_shapes in self.metadata.get("edge_feature_shapes", {}).items()
         }
 
@@ -254,7 +255,6 @@ class PartitionManifest:
         for partition in self.partitions:
             for mapping in (partition.edge_ids_by_type, partition.boundary_edge_ids_by_type):
                 for edge_type in mapping:
-                    edge_type = tuple(edge_type)
                     if edge_type in seen:
                         continue
                     seen.add(edge_type)

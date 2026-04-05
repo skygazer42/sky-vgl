@@ -60,7 +60,6 @@ def _ordered_edge_types(manifest: PartitionManifest, partition: PartitionShard) 
     seen = set()
     partition_edge_types = set(_partition_edge_types(partition))
     for edge_type in manifest.edge_types:
-        edge_type = tuple(edge_type)
         if edge_type not in partition_edge_types or edge_type in seen:
             continue
         seen.add(edge_type)
@@ -122,7 +121,7 @@ class LocalGraphShard:
 
     def _resolve_edge_type(self, edge_type: EdgeType | None) -> EdgeType:
         if edge_type is not None:
-            return tuple(edge_type)
+            return edge_type
         default_edge_type = ("node", "to", "node")
         if default_edge_type in self._edge_types:
             return default_edge_type

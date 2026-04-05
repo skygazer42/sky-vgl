@@ -141,19 +141,19 @@ def write_partitioned_graph(graph: Graph, root, *, num_partitions: int) -> Parti
             for node_type in shard_graph.nodes
         }
         edge_ids_by_type = {
-            tuple(edge_type): _tensor_int_tuple(shard_graph.edges[tuple(edge_type)].data["e_id"])
+            edge_type: _tensor_int_tuple(shard_graph.edges[edge_type].data["e_id"])
             for edge_type in shard_graph.edges
         }
         edge_feature_shapes = {
-            tuple(edge_type): {
+            edge_type: {
                 name: tuple(int(dim) for dim in value.shape)
-                for name, value in shard_graph.edges[tuple(edge_type)].data.items()
+                for name, value in shard_graph.edges[edge_type].data.items()
                 if name != "edge_index" and isinstance(value, torch.Tensor)
             }
             for edge_type in shard_graph.edges
         }
         boundary_edge_ids_by_type = {
-            tuple(edge_type): _tensor_int_tuple(boundary_edges[tuple(edge_type)]["e_id"])
+            edge_type: _tensor_int_tuple(boundary_edges[edge_type]["e_id"])
             for edge_type in shard_graph.edges
         }
         torch.save(

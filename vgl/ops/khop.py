@@ -45,6 +45,13 @@ def _normalize_hetero_khop_seeds(seeds, *, edge_type, device):
     return normalized
 
 
+def _node_store_device(graph: Graph, node_type: str) -> torch.device:
+    for value in graph.nodes[node_type].data.values():
+        if isinstance(value, torch.Tensor):
+            return value.device
+    return torch.device("cpu")
+
+
 def _hetero_directional_khop_nodes(graph: Graph, seeds, *, num_hops: int, direction: str, edge_type):
     src_type, _, dst_type = edge_type
     device = graph.edges[edge_type].edge_index.device
@@ -133,7 +140,7 @@ def expand_neighbors(
         current_type: torch.empty(
             0,
             dtype=torch.long,
-            device=next(iter(graph.nodes[current_type].data.values())).device,
+            device=_node_store_device(graph, current_type),
         )
         for current_type in graph.schema.node_types
     }
@@ -141,7 +148,9 @@ def expand_neighbors(
     frontier = {node_type: visited[node_type].clone()}
     hop_nodes = [_snapshot(visited)] if return_hops else None
     for fanout in fanouts:
-        candidates = {current_type: [] for current_type in graph.schema.node_types}
+        candidates: dict[str, list[torch.Tensor]] = {
+            current_type: [] for current_type in graph.schema.node_types
+        }
         for edge_type, store in graph.edges.items():
             src_type, _, dst_type = edge_type
             src_frontier = frontier.get(src_type)

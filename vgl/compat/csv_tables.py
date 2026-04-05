@@ -56,7 +56,7 @@ def _resolve_columns(fieldnames, *, required: tuple[str, ...], selected=None) ->
 
 
 def _collect_numeric_columns(rows, *, columns: list[str], entity_kind: str) -> dict[str, torch.Tensor]:
-    raw_columns = {name: [] for name in columns}
+    raw_columns: dict[str, list[str]] = {name: [] for name in columns}
     for row in rows:
         for name in columns:
             raw_columns[name].append(row[name])

@@ -78,9 +78,22 @@ print(trainer.test(graph))
 ```bash
 pip install sky-vgl                       # core
 pip install "sky-vgl[full]"               # all optional extras (scipy, networkx, dgl, pyg, tensorboard)
+pip install "sky-vgl[networkx]"          # NetworkX interoperability
+pip install "sky-vgl[dgl]"               # DGL interoperability
+pip install "sky-vgl[pyg]"               # PyTorch Geometric interoperability
 ```
 
 > **From source, dev deps, and extras** — see the [Installation guide](https://skygazer42.github.io/sky-vgl/getting-started/installation/).
+
+### Source Install
+
+```bash
+git clone https://github.com/skygazer42/sky-vgl.git
+cd sky-vgl
+pip install -e ".[dev]"
+```
+
+Use the editable install when developing locally or validating the latest branch state.
 
 ---
 
@@ -88,6 +101,14 @@ pip install "sky-vgl[full]"               # all optional extras (scipy, networkx
 
 <p align="center">
   <img src="https://raw.githubusercontent.com/skygazer42/sky-vgl/main/assets/architecture.svg" width="780" alt="VGL Architecture Overview"/>
+</p>
+
+<p align="center">
+  <img src="https://raw.githubusercontent.com/skygazer42/sky-vgl/main/assets/pipeline.svg" width="780" alt="VGL Training Pipeline"/>
+</p>
+
+<p align="center">
+  <img src="https://raw.githubusercontent.com/skygazer42/sky-vgl/main/assets/conv-layers.svg" width="780" alt="VGL Convolution Layer Coverage"/>
 </p>
 
 | Module | Description |

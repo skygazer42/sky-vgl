@@ -8,7 +8,7 @@ from vgl.graph.graph import Graph
 class BuiltinDataset(ListDataset):
     name = "builtin"
     version = "1.0"
-    metadata = {}
+    metadata: dict[str, object] = {}
 
     def __init__(self, split: str = "train"):
         fixtures = self._fixtures()

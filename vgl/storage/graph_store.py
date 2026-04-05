@@ -38,8 +38,10 @@ class InMemoryGraphStore:
         *,
         num_nodes: Mapping[str, int],
     ):
-        self._edges = {tuple(edge_type): edge_index for edge_type, edge_index in edges.items()}
-        self._num_nodes = dict(num_nodes)
+        self._edges: dict[EdgeType, torch.Tensor] = {
+            edge_type: edge_index for edge_type, edge_index in edges.items()
+        }
+        self._num_nodes: dict[str, int] = dict(num_nodes)
 
     @property
     def edge_types(self) -> tuple[EdgeType, ...]:
@@ -50,8 +52,8 @@ class InMemoryGraphStore:
 
     def _resolve_edge_type(self, edge_type: EdgeType | None) -> EdgeType:
         if edge_type is not None:
-            return tuple(edge_type)
-        default_edge_type = ("node", "to", "node")
+            return edge_type
+        default_edge_type: EdgeType = ("node", "to", "node")
         if default_edge_type in self._edges:
             return default_edge_type
         if len(self._edges) == 1:

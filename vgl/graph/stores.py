@@ -1,4 +1,5 @@
 from collections.abc import Mapping
+from collections.abc import Callable
 from dataclasses import dataclass, field
 
 import torch
@@ -32,7 +33,11 @@ def _pin_data(data: Mapping) -> dict:
 
 
 class LazyFeatureMap(Mapping):
-    def __init__(self, values: dict[str, object] | None = None, loaders: dict[str, object] | None = None):
+    def __init__(
+        self,
+        values: dict[str, object] | None = None,
+        loaders: dict[str, Callable[[], object]] | None = None,
+    ):
         self._values = dict(values or {})
         self._loaders = dict(loaders or {})
 

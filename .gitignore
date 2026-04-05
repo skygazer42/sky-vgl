@@ -5,6 +5,7 @@ __pycache__/
 .coverage
 build/
 dist/
+site/
 *.egg-info/
 .idea/
 .worktrees/

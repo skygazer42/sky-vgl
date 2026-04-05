@@ -19,13 +19,21 @@ def _coo_indices_and_values(tensor: torch.Tensor) -> tuple[torch.Tensor, torch.T
 def _explicit_values_for_export(sparse: SparseTensor) -> torch.Tensor:
     if sparse.values is not None:
         return sparse.values
-    device = None
     if sparse.layout is SparseLayout.COO:
-        device = sparse.row.device
+        row = sparse.row
+        if row is None:
+            raise ValueError("row is required for coo layout")
+        device = row.device
     elif sparse.layout is SparseLayout.CSR:
-        device = sparse.crow_indices.device
+        crow_indices = sparse.crow_indices
+        if crow_indices is None:
+            raise ValueError("crow_indices is required for csr layout")
+        device = crow_indices.device
     else:
-        device = sparse.ccol_indices.device
+        ccol_indices = sparse.ccol_indices
+        if ccol_indices is None:
+            raise ValueError("ccol_indices is required for csc layout")
+        device = ccol_indices.device
     return torch.ones(sparse.nnz, dtype=torch.float32, device=device)
 
 
@@ -87,27 +95,35 @@ def to_coo(sparse: SparseTensor) -> SparseTensor:
     if sparse.layout is SparseLayout.COO:
         return sparse
     if sparse.layout is SparseLayout.CSR:
-        counts = sparse.crow_indices[1:] - sparse.crow_indices[:-1]
+        crow_indices = sparse.crow_indices
+        col_indices = sparse.col_indices
+        if crow_indices is None or col_indices is None:
+            raise ValueError("crow_indices and col_indices are required for csr layout")
+        counts = crow_indices[1:] - crow_indices[:-1]
         row = torch.repeat_interleave(
-            torch.arange(sparse.shape[0], dtype=torch.long, device=sparse.crow_indices.device),
+            torch.arange(sparse.shape[0], dtype=torch.long, device=crow_indices.device),
             counts,
         )
         return SparseTensor(
             layout=SparseLayout.COO,
             shape=sparse.shape,
             row=row,
-            col=sparse.col_indices,
+            col=col_indices,
             values=sparse.values,
         )
-    counts = sparse.ccol_indices[1:] - sparse.ccol_indices[:-1]
+    ccol_indices = sparse.ccol_indices
+    row_indices = sparse.row_indices
+    if ccol_indices is None or row_indices is None:
+        raise ValueError("ccol_indices and row_indices are required for csc layout")
+    counts = ccol_indices[1:] - ccol_indices[:-1]
     col = torch.repeat_interleave(
-        torch.arange(sparse.shape[1], dtype=torch.long, device=sparse.ccol_indices.device),
+        torch.arange(sparse.shape[1], dtype=torch.long, device=ccol_indices.device),
         counts,
     )
     return SparseTensor(
         layout=SparseLayout.COO,
         shape=sparse.shape,
-        row=sparse.row_indices,
+        row=row_indices,
         col=col,
         values=sparse.values,
     )
@@ -119,6 +135,8 @@ def to_csr(sparse: SparseTensor) -> SparseTensor:
     coo = to_coo(sparse)
     row = coo.row
     col = coo.col
+    if row is None or col is None:
+        raise ValueError("row and col are required for coo layout")
     sort_key = row * max(coo.shape[1], 1) + col
     order = torch.argsort(sort_key)
     row = row[order]
@@ -142,6 +160,8 @@ def to_csc(sparse: SparseTensor) -> SparseTensor:
     coo = to_coo(sparse)
     row = coo.row
     col = coo.col
+    if row is None or col is None:
+        raise ValueError("row and col are required for coo layout")
     sort_key = col * max(coo.shape[0], 1) + row
     order = torch.argsort(sort_key)
     row = row[order]
@@ -163,19 +183,31 @@ def to_torch_sparse(sparse: SparseTensor) -> torch.Tensor:
     values = _explicit_values_for_export(sparse)
     size = tuple(sparse.shape) + tuple(values.shape[1:])
     if sparse.layout is SparseLayout.COO:
-        indices = torch.stack((sparse.row, sparse.col))
+        row = sparse.row
+        col = sparse.col
+        if row is None or col is None:
+            raise ValueError("row and col are required for coo layout")
+        indices = torch.stack((row, col))
         return torch.sparse_coo_tensor(indices, values, size=size)
     if sparse.layout is SparseLayout.CSR:
+        crow_indices = sparse.crow_indices
+        col_indices = sparse.col_indices
+        if crow_indices is None or col_indices is None:
+            raise ValueError("crow_indices and col_indices are required for csr layout")
         return torch.sparse_csr_tensor(
-            sparse.crow_indices,
-            sparse.col_indices,
+            crow_indices,
+            col_indices,
             values,
             size=size,
         )
     if sparse.layout is SparseLayout.CSC:
+        ccol_indices = sparse.ccol_indices
+        row_indices = sparse.row_indices
+        if ccol_indices is None or row_indices is None:
+            raise ValueError("ccol_indices and row_indices are required for csc layout")
         return torch.sparse_csc_tensor(
-            sparse.ccol_indices,
-            sparse.row_indices,
+            ccol_indices,
+            row_indices,
             values,
             size=size,
         )
