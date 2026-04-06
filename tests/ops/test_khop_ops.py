@@ -92,6 +92,22 @@ def test_expand_neighbors_homo_avoids_repeat_interleave(monkeypatch):
     assert torch.equal(nodes, torch.tensor([0, 1, 2, 3]))
 
 
+def test_expand_neighbors_homo_avoids_tensor_int_for_fanouts(monkeypatch):
+    graph = Graph.homo(
+        edge_index=torch.tensor([[0, 1, 3], [1, 2, 1]]),
+        x=torch.randn(4, 2),
+    )
+
+    def fail_int(self):
+        raise AssertionError("neighbor fanout normalization should stay off tensor.__int__")
+
+    monkeypatch.setattr(torch.Tensor, "__int__", fail_int)
+
+    nodes = expand_neighbors(graph, torch.tensor([1]), num_neighbors=[torch.tensor(-1)])
+
+    assert torch.equal(nodes, torch.tensor([0, 1, 2, 3]))
+
+
 def test_khop_nodes_directional_expansion_avoids_torch_isin(monkeypatch):
     graph = Graph.homo(
         edge_index=torch.tensor([[0, 1, 2, 3], [1, 2, 3, 1]]),
@@ -102,6 +118,22 @@ def test_khop_nodes_directional_expansion_avoids_torch_isin(monkeypatch):
         raise AssertionError("homogeneous khop directional expansion should avoid torch.isin scans")
 
     monkeypatch.setattr(torch, "isin", fail_isin)
+
+    nodes = khop_nodes(graph, torch.tensor([0]), num_hops=2, direction="out")
+
+    assert torch.equal(nodes, torch.tensor([0, 1, 2]))
+
+
+def test_khop_nodes_directional_expansion_avoids_torch_unique(monkeypatch):
+    graph = Graph.homo(
+        edge_index=torch.tensor([[0, 1, 2, 3], [1, 2, 3, 1]]),
+        x=torch.randn(4, 2),
+    )
+
+    def fail_unique(*args, **kwargs):
+        raise AssertionError("homogeneous khop directional expansion should avoid torch.unique")
+
+    monkeypatch.setattr(torch, "unique", fail_unique)
 
     nodes = khop_nodes(graph, torch.tensor([0]), num_hops=2, direction="out")
 
@@ -192,6 +224,25 @@ def test_expand_neighbors_hetero_avoids_torch_isin(monkeypatch):
     assert torch.equal(nodes["paper"], torch.tensor([1]))
 
 
+def test_expand_neighbors_hetero_avoids_torch_unique(monkeypatch):
+    graph = _hetero_graph()
+
+    def fail_unique(*args, **kwargs):
+        raise AssertionError("heterogeneous neighbor expansion should avoid torch.unique")
+
+    monkeypatch.setattr(torch, "unique", fail_unique)
+
+    nodes = expand_neighbors(
+        graph,
+        torch.tensor([1]),
+        num_neighbors=[-1],
+        node_type="paper",
+    )
+
+    assert torch.equal(nodes["author"], torch.tensor([0]))
+    assert torch.equal(nodes["paper"], torch.tensor([1]))
+
+
 def test_hetero_khop_nodes_directional_expansion_avoids_repeat_interleave(monkeypatch):
     graph = _hetero_graph()
 
@@ -199,6 +250,27 @@ def test_hetero_khop_nodes_directional_expansion_avoids_repeat_interleave(monkey
         raise AssertionError("heterogeneous khop directional expansion should avoid repeat_interleave interval expansion")
 
     monkeypatch.setattr(torch, "repeat_interleave", fail_repeat_interleave)
+
+    nodes = khop_nodes(
+        graph,
+        {"author": torch.tensor([1])},
+        num_hops=2,
+        direction="out",
+        edge_type=("author", "writes", "paper"),
+    )
+
+    assert set(nodes) == {"author", "paper"}
+    assert torch.equal(nodes["author"], torch.tensor([1]))
+    assert torch.equal(nodes["paper"], torch.tensor([0, 2]))
+
+
+def test_hetero_khop_nodes_directional_expansion_avoids_torch_unique(monkeypatch):
+    graph = _hetero_graph()
+
+    def fail_unique(*args, **kwargs):
+        raise AssertionError("heterogeneous khop directional expansion should avoid torch.unique")
+
+    monkeypatch.setattr(torch, "unique", fail_unique)
 
     nodes = khop_nodes(
         graph,

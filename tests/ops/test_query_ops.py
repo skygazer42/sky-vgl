@@ -237,6 +237,24 @@ def test_has_edges_between_avoids_right_boundary_searchsorted(monkeypatch):
     assert not any(right_flags)
 
 
+def test_in_out_edge_queries_avoid_torch_unique(monkeypatch):
+    graph = Graph.homo(
+        edge_index=torch.tensor([[0, 0, 1, 2], [1, 2, 2, 0]]),
+        x=torch.tensor([[1.0], [2.0], [3.0]]),
+    )
+
+    def fail_unique(*args, **kwargs):
+        raise AssertionError("endpoint edge queries should avoid torch.unique")
+
+    monkeypatch.setattr(torch, "unique", fail_unique)
+
+    out_eids = out_edges(graph, torch.tensor([0, 0, 1]), form="eid")
+    in_eids = in_edges(graph, torch.tensor([0, 2, 2]), form="eid")
+
+    assert torch.equal(out_eids, torch.tensor([0, 1, 2]))
+    assert torch.equal(in_eids, torch.tensor([1, 2, 3]))
+
+
 def test_query_match_checks_avoid_dense_zero_buffers(monkeypatch):
     graph = Graph.homo(
         edge_index=torch.tensor([[0, 0, 1, 2], [1, 2, 2, 0]]),
@@ -260,6 +278,98 @@ def test_query_match_checks_avoid_dense_zero_buffers(monkeypatch):
     assert torch.equal(dst, torch.tensor([0, 1]))
     assert torch.equal(eids, torch.tensor([1, 2]))
     assert torch.equal(exists, torch.tensor([True, True]))
+
+
+def test_query_scalar_paths_and_incidence_avoid_tensor_item(monkeypatch):
+    graph = Graph.homo(
+        edge_index=torch.tensor([[0, 0, 1, 2], [1, 2, 2, 0]]),
+        x=torch.tensor([[1.0], [2.0], [3.0], [4.0]]),
+    )
+
+    def fail_item(self):
+        raise AssertionError("query scalar helpers should stay off tensor.item")
+
+    monkeypatch.setattr(torch.Tensor, "item", fail_item)
+
+    assert has_edges_between(graph, 0, 1) is True
+    assert in_degrees(graph, 2) == 2
+    assert out_degrees(graph, 0) == 2
+    assert torch.equal(
+        _sparse_to_dense(graph.inc("both")),
+        torch.tensor(
+            [
+                [-1.0, -1.0, 0.0, 1.0],
+                [1.0, 0.0, -1.0, 0.0],
+                [0.0, 1.0, 1.0, -1.0],
+                [0.0, 0.0, 0.0, 0.0],
+            ]
+        ),
+    )
+
+
+def test_query_scalar_paths_and_incidence_avoid_tensor_int(monkeypatch):
+    graph = Graph.homo(
+        edge_index=torch.tensor([[0, 0, 1, 2], [1, 2, 2, 0]]),
+        x=torch.tensor([[1.0], [2.0], [3.0], [4.0]]),
+    )
+
+    def fail_int(self):
+        raise AssertionError("query scalar helpers should stay off tensor.__int__")
+
+    monkeypatch.setattr(torch.Tensor, "__int__", fail_int)
+
+    assert has_edges_between(graph, 0, 1) is True
+    assert in_degrees(graph, 2) == 2
+    assert out_degrees(graph, 0) == 2
+    assert torch.equal(predecessors(graph, 2), torch.tensor([0, 1]))
+    assert torch.equal(successors(graph, 0), torch.tensor([1, 2]))
+    assert torch.equal(
+        _sparse_to_dense(graph.inc("both")),
+        torch.tensor(
+            [
+                [-1.0, -1.0, 0.0, 1.0],
+                [1.0, 0.0, -1.0, 0.0],
+                [0.0, 1.0, 1.0, -1.0],
+                [0.0, 0.0, 0.0, 0.0],
+            ]
+        ),
+    )
+
+
+def test_query_missing_edge_errors_avoid_tensor_item(monkeypatch):
+    graph = Graph.homo(
+        edge_index=torch.tensor([[0, 1], [1, 2]]),
+        x=torch.tensor([[1.0], [2.0], [3.0]]),
+    )
+
+    def fail_item(self):
+        raise AssertionError("query missing-edge errors should stay off tensor.item")
+
+    monkeypatch.setattr(torch.Tensor, "item", fail_item)
+
+    with pytest.raises(ValueError, match="unknown edge id 3"):
+        find_edges(graph, torch.tensor([3]))
+
+    with pytest.raises(ValueError, match="no edge exists between 2 and 1"):
+        edge_ids(graph, torch.tensor([2]), torch.tensor([1]))
+
+
+def test_query_missing_edge_errors_avoid_tensor_int(monkeypatch):
+    graph = Graph.homo(
+        edge_index=torch.tensor([[0, 1], [1, 2]]),
+        x=torch.tensor([[1.0], [2.0], [3.0]]),
+    )
+
+    def fail_int(self):
+        raise AssertionError("query missing-edge errors should stay off tensor.__int__")
+
+    monkeypatch.setattr(torch.Tensor, "__int__", fail_int)
+
+    with pytest.raises(ValueError, match="unknown edge id 3"):
+        find_edges(graph, torch.tensor([3]))
+
+    with pytest.raises(ValueError, match="no edge exists between 2 and 1"):
+        edge_ids(graph, torch.tensor([2]), torch.tensor([1]))
 
 
 def test_edge_ids_return_uv_avoids_repeat_interleave(monkeypatch):
@@ -885,6 +995,33 @@ def test_laplacian_returns_weighted_degree_minus_adjacency_and_aggregates_duplic
 
     assert result.layout is SparseLayout.COO
     assert result.shape == (3, 3)
+    assert torch.equal(
+        _sparse_to_dense(result),
+        torch.tensor(
+            [
+                [3.0, -3.0, 0.0],
+                [0.0, 3.0, -3.0],
+                [0.0, 0.0, 0.0],
+            ]
+        ),
+    )
+
+
+def test_laplacian_avoids_torch_unique(monkeypatch):
+    graph = Graph.homo(
+        edge_index=torch.tensor([[0, 0, 0, 1, 1], [1, 1, 0, 2, 1]]),
+        x=torch.tensor([[1.0], [2.0], [3.0]]),
+        edge_data={"weight": torch.tensor([1.0, 2.0, 4.0, 3.0, 5.0])},
+    )
+
+    def fail_unique(*args, **kwargs):
+        raise AssertionError("laplacian should avoid torch.unique when coalescing edges")
+
+    monkeypatch.setattr(torch, "unique", fail_unique)
+
+    result = laplacian(graph, eweight_name="weight")
+
+    assert result.layout is SparseLayout.COO
     assert torch.equal(
         _sparse_to_dense(result),
         torch.tensor(

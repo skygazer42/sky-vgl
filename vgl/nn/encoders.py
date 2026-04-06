@@ -1,4 +1,3 @@
-from collections import deque
 import math
 
 import torch
@@ -21,27 +20,31 @@ def _feed_forward(channels, ff_multiplier, dropout):
 
 def _shortest_path_buckets(edge_index, num_nodes, max_distance, device):
     far_bucket = max_distance + 1
-    distances = torch.full((num_nodes, num_nodes), far_bucket, dtype=torch.long)
-    adjacency = [[] for _ in range(num_nodes)]
-    row, col = edge_index.detach().cpu().tolist()
-    for src, dst in zip(row, col):
-        adjacency[src].append(dst)
-        adjacency[dst].append(src)
+    distances = torch.full((num_nodes, num_nodes), far_bucket, dtype=torch.long, device=device)
+    if num_nodes == 0:
+        return distances
 
-    for source in range(num_nodes):
-        distances[source, source] = 0
-        queue = deque([source])
-        while queue:
-            current = queue.popleft()
-            current_distance = int(distances[source, current].item())
-            if current_distance >= max_distance:
-                continue
-            for neighbor in adjacency[current]:
-                if distances[source, neighbor] > current_distance + 1:
-                    distances[source, neighbor] = current_distance + 1
-                    queue.append(neighbor)
+    node_ids = torch.arange(num_nodes, dtype=torch.long, device=device)
+    distances[node_ids, node_ids] = 0
+    if edge_index.numel() == 0 or max_distance <= 0:
+        return distances
 
-    return distances.to(device)
+    adjacency = torch.zeros((num_nodes, num_nodes), dtype=torch.bool, device=device)
+    row = edge_index[0].to(dtype=torch.long, device=device)
+    col = edge_index[1].to(dtype=torch.long, device=device)
+    adjacency[row, col] = True
+    adjacency[col, row] = True
+
+    seen = torch.eye(num_nodes, dtype=torch.bool, device=device)
+    frontier = adjacency
+    adjacency_int = adjacency.to(dtype=torch.int32)
+    for distance in range(1, max_distance + 1):
+        frontier = frontier & ~seen
+        distances[frontier] = distance
+        seen |= frontier
+        frontier = (frontier.to(dtype=torch.int32) @ adjacency_int) > 0
+
+    return distances
 
 
 class GraphTransformerEncoderLayer(nn.Module):

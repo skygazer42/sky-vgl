@@ -4,10 +4,12 @@ import torch
 from typing import Any, Callable, TypeAlias, cast
 
 from vgl._neighbor_sampling import (
+    _merge_sorted_unique_tensors,
     _relation_neighbor_candidates,
     _sample_fanout,
     _sample_homo_next_frontier,
     _sample_homo_node_ids,
+    _sorted_unique_tensor,
 )
 from vgl.dataloading.plan import PlanStage, SamplingPlan
 from vgl.dataloading.records import LinkPredictionRecord, SampleRecord, TemporalEventRecord
@@ -18,6 +20,12 @@ from vgl.storage.base import TensorSlice
 StageHandler = Callable[[PlanStage, "MaterializationContext"], "MaterializationContext"]
 NodeIdsByType: TypeAlias = dict[str, torch.Tensor]
 NodeHopListByType: TypeAlias = list[dict[str, torch.Tensor]]
+
+
+def _as_python_int(value) -> int:
+    if isinstance(value, torch.Tensor):
+        return int(value.detach().cpu().numpy().reshape(()).item())
+    return int(value)
 
 
 def _resolve_feature_store(feature_store, graph):
@@ -124,7 +132,7 @@ def _incident_edge_positions(edge_index, node_ids) -> torch.Tensor:
         return dst_positions
     if dst_positions.numel() == 0:
         return src_positions
-    return torch.unique(torch.cat((src_positions, dst_positions)))
+    return _merge_sorted_unique_tensors(src_positions, dst_positions)
 
 
 def _induced_edge_positions(edge_index, src_node_ids, dst_node_ids) -> torch.Tensor:
@@ -476,7 +484,7 @@ def _stitched_hetero_frontier_candidates(
 
     return {
         node_type: (
-            torch.unique(torch.cat(node_ids_list))
+            _sorted_unique_tensor(torch.cat(node_ids_list))
             if node_ids_list
             else visited_by_type[node_type].new_empty((0,), dtype=torch.long)
         )
@@ -507,7 +515,7 @@ def _expand_stitched_hetero_global_node_ids(
         device = first_seed.device if first_seed is not None else torch.device("cpu")
 
     visited_by_type = {
-        node_type: torch.unique(seed_ids.to(device=device))
+        node_type: _sorted_unique_tensor(seed_ids.to(device=device))
         for node_type, seed_ids in normalized_seeds.items()
     }
     frontier_by_type = {
@@ -536,7 +544,7 @@ def _expand_stitched_hetero_global_node_ids(
             if sampled.numel() == 0:
                 continue
             next_frontier[node_type] = sampled
-            visited_by_type[node_type] = torch.unique(torch.cat((visited_by_type[node_type], sampled)))
+            visited_by_type[node_type] = _merge_sorted_unique_tensors(visited_by_type[node_type], sampled)
         if hop_nodes is not None:
             hop_nodes.append(
                 {
@@ -597,14 +605,14 @@ def _stitched_hetero_link_seed_global_ids(graph, records) -> dict[str, torch.Ten
     seed_local_ids_by_type: dict[str, list[int]] = {node_type: [] for node_type in graph.schema.node_types}
     for record in records:
         src_type, _, dst_type = _resolve_link_record_edge_type(record)
-        seed_local_ids_by_type[src_type].append(int(record.src_index))
-        seed_local_ids_by_type[dst_type].append(int(record.dst_index))
+        seed_local_ids_by_type[src_type].append(_as_python_int(record.src_index))
+        seed_local_ids_by_type[dst_type].append(_as_python_int(record.dst_index))
 
     seed_global_ids_by_type = {}
     for node_type in graph.schema.node_types:
         device = _infer_data_device(graph.nodes[node_type].data)
         local_tensor = torch.tensor(seed_local_ids_by_type[node_type], dtype=torch.long, device=device).view(-1)
-        local_tensor = torch.unique(local_tensor, sorted=True)
+        local_tensor = _sorted_unique_tensor(local_tensor)
         seed_global_ids_by_type[node_type] = _graph_node_global_ids(
             graph,
             local_tensor,
@@ -744,7 +752,7 @@ def _stitched_frontier_candidates(source, frontier_global_ids: torch.Tensor, vis
             candidates.append(route_candidates.to(device=frontier_global_ids.device))
     if not candidates:
         return torch.empty((0,), dtype=torch.long, device=frontier_global_ids.device)
-    return torch.unique(torch.cat(candidates))
+    return _sorted_unique_tensor(torch.cat(candidates))
 
 
 def _expand_stitched_homo_global_node_ids(
@@ -757,7 +765,7 @@ def _expand_stitched_homo_global_node_ids(
     return_hops: bool = False,
 ) -> torch.Tensor | tuple[torch.Tensor, list[torch.Tensor]]:
     seed_global_ids = torch.as_tensor(seed_global_ids, dtype=torch.long).view(-1)
-    visited = torch.unique(seed_global_ids)
+    visited = _sorted_unique_tensor(seed_global_ids)
     frontier = visited
     hop_nodes = None
     if return_hops:
@@ -766,7 +774,7 @@ def _expand_stitched_homo_global_node_ids(
         candidate_nodes = _stitched_frontier_candidates(source, frontier, visited, edge_type=edge_type)
         frontier = _sample_fanout(candidate_nodes, fanout, generator=generator)
         if frontier.numel() > 0:
-            visited = torch.unique(torch.cat((visited, frontier)))
+            visited = _merge_sorted_unique_tensors(visited, frontier)
         if hop_nodes is not None:
             hop_nodes.append(visited.clone())
         elif frontier.numel() == 0:
@@ -852,11 +860,11 @@ def _lookup_positions(index_ids: torch.Tensor, values: torch.Tensor, *, entity_n
     sorted_index_ids, sort_perm = torch.sort(index_ids, stable=True)
     positions = torch.searchsorted(sorted_index_ids, values)
     if bool((positions >= sorted_index_ids.numel()).any()):
-        missing_value = int(values[positions >= sorted_index_ids.numel()][0].item())
+        missing_value = _as_python_int(values[positions >= sorted_index_ids.numel()][0])
         raise KeyError(f"missing {entity_name} id {missing_value}")
     matched_values = sorted_index_ids[positions]
     if bool((matched_values != values).any()):
-        missing_value = int(values[matched_values != values][0].item())
+        missing_value = _as_python_int(values[matched_values != values][0])
         raise KeyError(f"missing {entity_name} id {missing_value}")
     return sort_perm[positions]
 
@@ -1001,7 +1009,7 @@ def _fallback_routed_edge_tensor_slice(source, key, edge_ids: torch.Tensor) -> T
 
     if not bool(found_mask.all()):
         missing_ids = requested_edge_ids[~found_mask]
-        missing = ", ".join(str(int(edge_id.item())) for edge_id in missing_ids)
+        missing = ", ".join(str(_as_python_int(edge_id)) for edge_id in missing_ids)
         raise KeyError(f"missing routed edge feature {feature_name!r} for edge ids: {missing}")
     return TensorSlice(index=edge_ids, values=values)
 
@@ -1068,14 +1076,14 @@ def _build_stitched_node_samples(
     samples = []
     for index in range(seed_local_ids.numel()):
         sample_metadata = dict(metadata)
-        sample_metadata["seed"] = int(seed_local_ids[index].item())
+        sample_metadata["seed"] = _as_python_int(seed_local_ids[index])
         samples.append(
             SampleRecord(
                 graph=stitched_graph,
                 metadata=sample_metadata,
                 sample_id=sample_id,
                 source_graph_id=source_graph_id,
-                subgraph_seed=int(subgraph_seeds[index].item()),
+                subgraph_seed=_as_python_int(subgraph_seeds[index]),
             )
         )
     if len(samples) == 1:
@@ -1142,7 +1150,7 @@ def _build_stitched_hetero_node_samples(
     samples = []
     for index in range(seed_local_ids.numel()):
         sample_metadata = dict(metadata)
-        sample_metadata["seed"] = int(seed_local_ids[index].item())
+        sample_metadata["seed"] = _as_python_int(seed_local_ids[index])
         sample_metadata.setdefault("node_type", str(node_type))
         samples.append(
             SampleRecord(
@@ -1150,7 +1158,7 @@ def _build_stitched_hetero_node_samples(
                 metadata=sample_metadata,
                 sample_id=sample_id,
                 source_graph_id=source_graph_id,
-                subgraph_seed=int(subgraph_seeds[index].item()),
+                subgraph_seed=_as_python_int(subgraph_seeds[index]),
             )
         )
     if len(samples) == 1:
@@ -1212,17 +1220,20 @@ def _build_stitched_hetero_temporal_graph(
 def _build_stitched_homo_temporal_record(graph, record, stitched_graph: Graph) -> TemporalEventRecord:
     seed_global_ids = _graph_node_global_ids(
         graph,
-        torch.tensor([int(record.src_index), int(record.dst_index)], dtype=torch.long),
+        torch.tensor(
+            [_as_python_int(record.src_index), _as_python_int(record.dst_index)],
+            dtype=torch.long,
+        ),
         node_type="node",
     )
     seed_positions = _lookup_positions(stitched_graph.n_id, seed_global_ids, entity_name="stitched node")
     edge_type = _resolve_temporal_record_edge_type(record)
     return TemporalEventRecord(
         graph=stitched_graph,
-        src_index=int(seed_positions[0].item()),
-        dst_index=int(seed_positions[1].item()),
-        timestamp=int(record.timestamp),
-        label=int(record.label),
+        src_index=_as_python_int(seed_positions[0]),
+        dst_index=_as_python_int(seed_positions[1]),
+        timestamp=_as_python_int(record.timestamp),
+        label=_as_python_int(record.label),
         event_features=record.event_features,
         metadata=dict(record.metadata),
         sample_id=record.sample_id,
@@ -1235,12 +1246,12 @@ def _build_stitched_hetero_temporal_record(graph, record, stitched_graph: Graph)
     src_type, _, dst_type = edge_type
     src_global = _graph_node_global_ids(
         graph,
-        torch.tensor([int(record.src_index)], dtype=torch.long),
+        torch.tensor([_as_python_int(record.src_index)], dtype=torch.long),
         node_type=src_type,
     )
     dst_global = _graph_node_global_ids(
         graph,
-        torch.tensor([int(record.dst_index)], dtype=torch.long),
+        torch.tensor([_as_python_int(record.dst_index)], dtype=torch.long),
         node_type=dst_type,
     )
     src_position = _lookup_positions(
@@ -1255,10 +1266,10 @@ def _build_stitched_hetero_temporal_record(graph, record, stitched_graph: Graph)
     )
     return TemporalEventRecord(
         graph=stitched_graph,
-        src_index=int(src_position.item()),
-        dst_index=int(dst_position.item()),
-        timestamp=int(record.timestamp),
-        label=int(record.label),
+        src_index=_as_python_int(src_position),
+        dst_index=_as_python_int(dst_position),
+        timestamp=_as_python_int(record.timestamp),
+        label=_as_python_int(record.label),
         event_features=record.event_features,
         metadata=dict(record.metadata),
         sample_id=record.sample_id,
@@ -1282,7 +1293,7 @@ def _build_stitched_homo_temporal_history(
         raise ValueError("stitched temporal sampling requires a temporal graph")
     device = graph.edges[tuple(edge_type)].edge_index.device
 
-    timestamp = int(record.timestamp)
+    timestamp = _as_python_int(record.timestamp)
     edge_id_chunks = []
     edge_index_chunks = []
     timestamp_chunks = []
@@ -1356,7 +1367,7 @@ def _build_stitched_hetero_temporal_history(
         raise ValueError("stitched temporal sampling requires a temporal graph")
     device = graph.edges[tuple(edge_type)].edge_index.device
 
-    timestamp = int(record.timestamp)
+    timestamp = _as_python_int(record.timestamp)
     edge_id_chunks = []
     edge_index_chunks = []
     timestamp_chunks = []
@@ -1418,8 +1429,8 @@ def _stitched_hetero_temporal_seed_global_ids(graph, record, *, edge_type) -> di
     src_type, _, dst_type = tuple(edge_type)
     unique_node_types = tuple(dict.fromkeys((src_type, dst_type)))
     seed_local_ids_by_type: dict[str, list[int]] = {node_type: [] for node_type in unique_node_types}
-    seed_local_ids_by_type[src_type].append(int(record.src_index))
-    seed_local_ids_by_type[dst_type].append(int(record.dst_index))
+    seed_local_ids_by_type[src_type].append(_as_python_int(record.src_index))
+    seed_local_ids_by_type[dst_type].append(_as_python_int(record.dst_index))
 
     seed_global_ids_by_type = {}
     for node_type in unique_node_types:
@@ -1428,7 +1439,7 @@ def _stitched_hetero_temporal_seed_global_ids(graph, record, *, edge_type) -> di
             dtype=torch.long,
             device=_infer_data_device(graph.nodes[node_type].data),
         ).view(-1)
-        local_tensor = torch.unique(local_tensor, sorted=True)
+        local_tensor = _sorted_unique_tensor(local_tensor)
         seed_global_ids_by_type[node_type] = _graph_node_global_ids(
             graph,
             local_tensor,
@@ -1473,7 +1484,7 @@ def _expand_stitched_hetero_temporal_node_ids(
         device = history_edge_index_global.device if history_edge_index_global.numel() > 0 else torch.device("cpu")
 
     visited = {
-        node_type: torch.unique(
+        node_type: _sorted_unique_tensor(
             torch.as_tensor(seed_global_ids_by_type[node_type], dtype=torch.long, device=device).view(-1)
         )
         for node_type in unique_node_types
@@ -1499,7 +1510,7 @@ def _expand_stitched_hetero_temporal_node_ids(
             if sampled.numel() == 0:
                 continue
             next_frontier[node_type] = sampled
-            visited[node_type] = torch.unique(torch.cat((visited[node_type], sampled)))
+            visited[node_type] = _merge_sorted_unique_tensors(visited[node_type], sampled)
         if not next_frontier:
             break
         frontier = next_frontier
@@ -1554,8 +1565,8 @@ def _induce_stitched_hetero_temporal_edges(
 
 
 def _build_stitched_homo_link_records(graph, records, stitched_graph: Graph) -> list[LinkPredictionRecord]:
-    src_local_ids = torch.tensor([int(record.src_index) for record in records], dtype=torch.long)
-    dst_local_ids = torch.tensor([int(record.dst_index) for record in records], dtype=torch.long)
+    src_local_ids = torch.tensor([_as_python_int(record.src_index) for record in records], dtype=torch.long)
+    dst_local_ids = torch.tensor([_as_python_int(record.dst_index) for record in records], dtype=torch.long)
     src_global_ids = _graph_node_global_ids(graph, src_local_ids, node_type="node")
     dst_global_ids = _graph_node_global_ids(graph, dst_local_ids, node_type="node")
     src_positions = _lookup_positions(stitched_graph.n_id, src_global_ids, entity_name="stitched node")
@@ -1565,9 +1576,9 @@ def _build_stitched_homo_link_records(graph, records, stitched_graph: Graph) -> 
         sampled_records.append(
             LinkPredictionRecord(
                 graph=stitched_graph,
-                src_index=int(src_positions[index].item()),
-                dst_index=int(dst_positions[index].item()),
-                label=int(record.label),
+                src_index=_as_python_int(src_positions[index]),
+                dst_index=_as_python_int(dst_positions[index]),
+                label=_as_python_int(record.label),
                 metadata=dict(record.metadata),
                 sample_id=record.sample_id,
                 exclude_seed_edge=bool(record.exclude_seed_edge),
@@ -1590,9 +1601,9 @@ def _build_stitched_hetero_link_records(graph, records, stitched_graph: Graph) -
     dst_record_indices_by_type: dict[str, list[int]] = {node_type: [] for node_type in stitched_graph.nodes}
     for index, edge_type in enumerate(edge_types):
         src_type, _, dst_type = edge_type
-        src_local_ids_by_type[src_type].append(int(records[index].src_index))
+        src_local_ids_by_type[src_type].append(_as_python_int(records[index].src_index))
         src_record_indices_by_type[src_type].append(index)
-        dst_local_ids_by_type[dst_type].append(int(records[index].dst_index))
+        dst_local_ids_by_type[dst_type].append(_as_python_int(records[index].dst_index))
         dst_record_indices_by_type[dst_type].append(index)
 
     src_positions = [0] * len(records)
@@ -1614,7 +1625,7 @@ def _build_stitched_hetero_link_records(graph, records, stitched_graph: Graph) -
                 entity_name=f"stitched {node_type}",
             )
             for offset, record_index in enumerate(src_record_indices_by_type[node_type]):
-                src_positions[record_index] = int(current_positions[offset].item())
+                src_positions[record_index] = _as_python_int(current_positions[offset])
 
         if dst_local_ids_by_type[node_type]:
             dst_global_ids = _graph_node_global_ids(
@@ -1632,7 +1643,7 @@ def _build_stitched_hetero_link_records(graph, records, stitched_graph: Graph) -
                 entity_name=f"stitched {node_type}",
             )
             for offset, record_index in enumerate(dst_record_indices_by_type[node_type]):
-                dst_positions[record_index] = int(current_positions[offset].item())
+                dst_positions[record_index] = _as_python_int(current_positions[offset])
 
     sampled_records = []
     for index, record in enumerate(records):
@@ -1643,7 +1654,7 @@ def _build_stitched_hetero_link_records(graph, records, stitched_graph: Graph) -
                 graph=stitched_graph,
                 src_index=src_positions[index],
                 dst_index=dst_positions[index],
-                label=int(record.label),
+                label=_as_python_int(record.label),
                 metadata=dict(record.metadata),
                 sample_id=record.sample_id,
                 exclude_seed_edge=bool(record.exclude_seed_edge),
@@ -1874,7 +1885,7 @@ class PlanExecutor:
             stitched_hetero_partition = _match_hetero_partition_shard(graph, context.feature_store)
         if stitched_homo_partition is not None:
             seed_local_ids = torch.tensor(
-                [int(node) for record in records for node in (record.src_index, record.dst_index)],
+                [_as_python_int(node) for record in records for node in (record.src_index, record.dst_index)],
                 dtype=torch.long,
             )
             seed_global_ids = _graph_node_global_ids(graph, seed_local_ids, node_type="node")
@@ -1989,7 +2000,10 @@ class PlanExecutor:
             stitched_hetero_temporal_partition = _match_hetero_temporal_partition_shard(graph, context.feature_store)
         if stitched_homo_partition is not None:
             edge_type = _resolve_temporal_record_edge_type(seed_record)
-            seed_local_ids = torch.tensor([int(seed_record.src_index), int(seed_record.dst_index)], dtype=torch.long)
+            seed_local_ids = torch.tensor(
+                [_as_python_int(seed_record.src_index), _as_python_int(seed_record.dst_index)],
+                dtype=torch.long,
+            )
             seed_global_ids = _graph_node_global_ids(graph, seed_local_ids, node_type="node")
             history_edge_ids_global, history_edge_index_global = _build_stitched_homo_temporal_history(
                 graph,

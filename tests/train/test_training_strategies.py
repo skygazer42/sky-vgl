@@ -378,6 +378,23 @@ def test_trainer_runs_gsam_gradient_decomposition_step():
     )
 
 
+def test_gsam_zero_norm_short_circuit_avoids_tensor_item(monkeypatch):
+    model = ToyModel()
+    optimizer = GSAM(model.parameters(), torch.optim.SGD, lr=0.1, rho=0.5, alpha=0.2)
+    parameter = next(iter(model.parameters()))
+    parameter.grad = torch.zeros_like(parameter)
+    optimizer.state[parameter]["reference_grad"] = torch.zeros_like(parameter)
+
+    def fail_item(self):
+        raise AssertionError("GSAM zero-norm short circuit should stay off tensor.item")
+
+    monkeypatch.setattr(torch.Tensor, "item", fail_item)
+
+    optimizer.on_after_second_backward()
+
+    assert torch.equal(parameter.grad, torch.zeros_like(parameter))
+
+
 def test_trainer_rejects_sharpness_aware_optimizer_with_grad_scaler():
     with pytest.raises(ValueError, match="grad_scaler"):
         Trainer(
@@ -711,6 +728,26 @@ def test_warmup_cosine_scheduler_rejects_invalid_configuration():
 
     with pytest.raises(ValueError, match="min_lr_ratio"):
         WarmupCosineScheduler(optimizer, warmup_epochs=2, max_epochs=5, min_lr_ratio=1.1)
+
+
+def test_warmup_cosine_scheduler_accepts_tensor_epoch_counts_without_tensor_int(monkeypatch):
+    optimizer = torch.optim.SGD(ToyModel().parameters(), lr=1.0)
+
+    def fail_int(self):
+        raise AssertionError("WarmupCosineScheduler epoch counts should stay off tensor.__int__")
+
+    monkeypatch.setattr(torch.Tensor, "__int__", fail_int)
+
+    scheduler = WarmupCosineScheduler(
+        optimizer,
+        warmup_epochs=torch.tensor(2),
+        max_epochs=torch.tensor(5),
+        min_lr_ratio=0.1,
+    )
+
+    assert scheduler.warmup_epochs == 2
+    assert scheduler.max_epochs == 5
+    assert scheduler.get_last_lr() == pytest.approx([0.5])
 
 
 def test_warmup_cosine_scheduler_applies_warmup_then_cosine_decay():

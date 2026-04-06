@@ -84,11 +84,11 @@ class SparseTensor:
         col_indices = self._validate_vector(self.col_indices, name="col_indices")
         if crow_indices.numel() != self.shape[0] + 1:
             raise ValueError("crow_indices must have length rows + 1")
-        if crow_indices[0].item() != 0:
+        if int(crow_indices[0]) != 0:
             raise ValueError("crow_indices must start at 0")
         if not bool((crow_indices[1:] >= crow_indices[:-1]).all()):
             raise ValueError("crow_indices must be non-decreasing")
-        if crow_indices[-1].item() != col_indices.numel():
+        if int(crow_indices[-1]) != col_indices.numel():
             raise ValueError("crow_indices must terminate at nnz")
         if col_indices.numel() > 0 and ((col_indices < 0).any() or (col_indices >= self.shape[1]).any()):
             raise ValueError("col_indices must fall within shape bounds")
@@ -99,11 +99,11 @@ class SparseTensor:
         row_indices = self._validate_vector(self.row_indices, name="row_indices")
         if ccol_indices.numel() != self.shape[1] + 1:
             raise ValueError("ccol_indices must have length cols + 1")
-        if ccol_indices[0].item() != 0:
+        if int(ccol_indices[0]) != 0:
             raise ValueError("ccol_indices must start at 0")
         if not bool((ccol_indices[1:] >= ccol_indices[:-1]).all()):
             raise ValueError("ccol_indices must be non-decreasing")
-        if ccol_indices[-1].item() != row_indices.numel():
+        if int(ccol_indices[-1]) != row_indices.numel():
             raise ValueError("ccol_indices must terminate at nnz")
         if row_indices.numel() > 0 and ((row_indices < 0).any() or (row_indices >= self.shape[0]).any()):
             raise ValueError("row_indices must fall within shape bounds")

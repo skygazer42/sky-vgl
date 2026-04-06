@@ -3,6 +3,12 @@ import torch
 from vgl.graph import Graph
 
 
+def _as_python_int(value) -> int:
+    if isinstance(value, torch.Tensor):
+        return int(value.detach().cpu().numpy().reshape(()).item())
+    return int(value)
+
+
 def _ensure_homo_graph(graph: Graph) -> None:
     if set(graph.nodes) != {"node"} or set(graph.edges) != {("node", "to", "node")}:
         raise ValueError("to_edge_list currently supports homogeneous graphs only")
@@ -69,12 +75,12 @@ def from_edge_list(edge_list, *, num_nodes=None, node_data=None, edge_data=None)
     if feature_edge_count is not None and feature_edge_count != edge_count:
         raise ValueError("edge features must align with the number of edges")
 
-    inferred_num_nodes = int(edge_index.max().item()) + 1 if edge_count > 0 else 0
+    inferred_num_nodes = int(edge_index.max().detach().cpu().numpy().reshape(()).item()) + 1 if edge_count > 0 else 0
     feature_node_count = _feature_count(normalized_node_data)
     if num_nodes is None:
         resolved_num_nodes = feature_node_count if feature_node_count is not None else inferred_num_nodes
     else:
-        resolved_num_nodes = int(num_nodes)
+        resolved_num_nodes = _as_python_int(num_nodes)
     if resolved_num_nodes < inferred_num_nodes:
         raise ValueError("num_nodes must cover all edge endpoints")
     if feature_node_count is not None and feature_node_count != resolved_num_nodes:

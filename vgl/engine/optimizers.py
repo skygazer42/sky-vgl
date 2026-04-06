@@ -135,7 +135,7 @@ class GSAM(SAM):
     def on_after_second_backward(self):
         grad_norm = self._grad_norm()
         reference_norm = self._reference_grad_norm()
-        if grad_norm.item() == 0.0 or reference_norm.item() == 0.0:
+        if float(grad_norm) == 0.0 or float(reference_norm) == 0.0:
             return
         inner_product = self._gradient_inner_product()
         cosine = inner_product / (grad_norm * reference_norm).clamp(min=self.eps)

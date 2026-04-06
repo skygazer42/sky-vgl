@@ -1,12 +1,32 @@
 from __future__ import annotations
 
-from collections import defaultdict
-
 import torch
 
 from vgl.dataloading.dataset import ListDataset
 from vgl.transforms.base import BaseTransform
 from vgl.transforms._utils import clone_graph
+
+
+def _as_python_int(value) -> int:
+    if isinstance(value, torch.Tensor):
+        return int(value.detach().cpu().numpy().reshape(()).item())
+    return int(value)
+
+
+def _sorted_unique_with_inverse(values) -> tuple[torch.Tensor, torch.Tensor]:
+    values = torch.as_tensor(values).view(-1)
+    if values.numel() == 0:
+        return values, values.to(dtype=torch.long)
+    order = torch.argsort(values, stable=True)
+    sorted_values = values.index_select(0, order)
+    keep = torch.ones(sorted_values.numel(), dtype=torch.bool, device=sorted_values.device)
+    if sorted_values.numel() > 1:
+        keep[1:] = sorted_values[1:] != sorted_values[:-1]
+    unique_values = sorted_values[keep]
+    group_ids = torch.cumsum(keep.to(dtype=torch.long), dim=0) - 1
+    inverse = torch.empty_like(group_ids)
+    inverse[order] = group_ids
+    return unique_values, inverse
 
 
 class RandomNodeSplit(BaseTransform):
@@ -24,7 +44,9 @@ class RandomNodeSplit(BaseTransform):
         self.num_train = num_train
         self.num_val = num_val
         self.num_test = num_test
-        self.num_train_per_class = None if num_train_per_class is None else int(num_train_per_class)
+        self.num_train_per_class = (
+            None if num_train_per_class is None else _as_python_int(num_train_per_class)
+        )
         self.target = str(target)
         self.node_type = node_type
         self.seed = seed
@@ -37,7 +59,7 @@ class RandomNodeSplit(BaseTransform):
             if not 0.0 <= value < 1.0:
                 raise ValueError(f"{name} must be in [0.0, 1.0)")
             return int(total * value)
-        count = int(value)
+        count = _as_python_int(value)
         if count < 0:
             raise ValueError(f"{name} must be >= 0")
         return count
@@ -45,7 +67,7 @@ class RandomNodeSplit(BaseTransform):
     def _generator(self):
         generator = torch.Generator()
         if self.seed is not None:
-            generator.manual_seed(int(self.seed))
+            generator.manual_seed(_as_python_int(self.seed))
         return generator
 
     def __call__(self, graph):
@@ -74,13 +96,14 @@ class RandomNodeSplit(BaseTransform):
         if self.num_train_per_class is not None:
             if self.num_train_per_class < 0:
                 raise ValueError("num_train_per_class must be >= 0")
-            per_class = defaultdict(list)
-            for index, label in enumerate(labels.tolist()):
-                per_class[int(label)].append(index)
-            for indices in per_class.values():
-                order = torch.randperm(len(indices), generator=generator).tolist()
-                for position in order[: self.num_train_per_class]:
-                    train_mask[int(indices[position])] = True
+            _, inverse = _sorted_unique_with_inverse(labels)
+            for class_id in range(torch.bincount(inverse).size(0)):
+                class_nodes = torch.nonzero(inverse == class_id, as_tuple=False).view(-1)
+                if class_nodes.numel() == 0:
+                    continue
+                order = torch.randperm(class_nodes.numel(), generator=generator)
+                selected = class_nodes.index_select(0, order[: self.num_train_per_class].to(device=class_nodes.device))
+                train_mask[selected] = True
             remaining &= ~train_mask
 
         num_val = self._resolve_count(self.num_val, num_nodes, name="num_val")
@@ -133,7 +156,7 @@ class RandomGraphSplit(BaseTransform):
             if not 0.0 <= value < 1.0:
                 raise ValueError(f"{name} must be in [0.0, 1.0)")
             return int(total * value)
-        count = int(value)
+        count = _as_python_int(value)
         if count < 0:
             raise ValueError(f"{name} must be >= 0")
         return count
@@ -149,9 +172,9 @@ class RandomGraphSplit(BaseTransform):
             raise ValueError("RandomGraphSplit requires at least one training graph")
         generator = torch.Generator()
         if self.seed is not None:
-            generator.manual_seed(int(self.seed))
-        permutation = torch.randperm(total, generator=generator).tolist()
-        ordered = [items[index] for index in permutation]
+            generator.manual_seed(_as_python_int(self.seed))
+        permutation = torch.randperm(total, generator=generator)
+        ordered = [items[index] for index in permutation.detach().cpu().numpy().reshape(-1)]
         train_count = total - num_val - num_test
         return (
             ListDataset(ordered[:train_count]),

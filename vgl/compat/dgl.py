@@ -52,6 +52,12 @@ def _data_device(data) -> torch.device | None:
     return None
 
 
+def _as_python_int(value) -> int:
+    if isinstance(value, torch.Tensor):
+        return int(value.detach().cpu().numpy().reshape(()).item())
+    return int(value)
+
+
 def _has_count_tensor(data, *, count: int) -> bool:
     for value in data.values():
         if isinstance(value, torch.Tensor) and value.ndim > 0 and int(value.size(0)) == count:
@@ -70,10 +76,10 @@ def _graph_num_nodes(dgl_graph, node_type=None) -> int:
     num_nodes = getattr(dgl_graph, "num_nodes")
     try:
         if node_type is None:
-            return int(num_nodes())
-        return int(num_nodes(node_type))
+            return _as_python_int(num_nodes())
+        return _as_python_int(num_nodes(node_type))
     except TypeError:
-        return int(num_nodes())
+        return _as_python_int(num_nodes())
 
 
 def _edge_pairs_from_dgl(dgl_graph, edge_type=None):
@@ -107,6 +113,9 @@ def _node_count(graph, node_type):
     try:
         return graph._node_count(node_type)
     except ValueError:
+        def _tensor_max_plus_one(tensor: torch.Tensor) -> int:
+            return int(tensor.max().detach().cpu().numpy().reshape(()).item()) + 1
+
         count = 0
         for edge_type, store in graph.edges.items():
             src_type, _, dst_type = edge_type
@@ -114,9 +123,9 @@ def _node_count(graph, node_type):
             if edge_index.numel() == 0:
                 continue
             if src_type == node_type:
-                count = max(count, int(edge_index[0].max().item()) + 1)
+                count = max(count, _tensor_max_plus_one(edge_index[0]))
             if dst_type == node_type:
-                count = max(count, int(edge_index[1].max().item()) + 1)
+                count = max(count, _tensor_max_plus_one(edge_index[1]))
         return count
 
 
@@ -176,9 +185,9 @@ def _block_node_data_from_dgl(dgl_block, node_type, *, side: str):
 def _block_num_nodes(dgl_block, *, node_type, side: str) -> int:
     num_nodes = getattr(dgl_block, f"num_{side}_nodes")
     try:
-        return int(num_nodes(node_type))
+        return _as_python_int(num_nodes(node_type))
     except TypeError:
-        return int(num_nodes())
+        return _as_python_int(num_nodes())
 
 
 def _as_long_tensor(value, *, device=None) -> torch.Tensor:

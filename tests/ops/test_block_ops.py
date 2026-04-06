@@ -5,6 +5,7 @@ from tests.pinning import assert_tensor_pin_state
 from vgl import Graph
 from vgl.graph import Block, GraphSchema, HeteroBlock
 from vgl.ops import to_block, to_hetero_block
+from vgl.ops.block import _lookup_positions as _block_lookup_positions
 from vgl.storage import FeatureStore, InMemoryGraphStore
 
 
@@ -115,6 +116,32 @@ def test_to_block_avoids_torch_isin_scans(monkeypatch):
 
     assert torch.equal(block.edata["e_id"], torch.tensor([0, 1, 2]))
     assert torch.equal(block.edge_index, torch.tensor([[2, 0, 1], [0, 1, 0]]))
+
+
+def test_block_lookup_positions_avoids_tensor_item_in_missing_id_errors(monkeypatch):
+    def fail_item(self):
+        raise AssertionError("block lookup should stay off tensor.item")
+
+    monkeypatch.setattr(torch.Tensor, "item", fail_item)
+
+    with pytest.raises(KeyError, match="missing block node id 7"):
+        _block_lookup_positions(torch.tensor([0, 2, 6]), torch.tensor([7]), entity_name="block node")
+
+    with pytest.raises(KeyError, match="missing block node id 4"):
+        _block_lookup_positions(torch.tensor([0, 2, 6]), torch.tensor([2, 4]), entity_name="block node")
+
+
+def test_block_lookup_positions_avoids_tensor_int_in_missing_id_errors(monkeypatch):
+    def fail_int(self):
+        raise AssertionError("block lookup should stay off tensor.__int__")
+
+    monkeypatch.setattr(torch.Tensor, "__int__", fail_int)
+
+    with pytest.raises(KeyError, match="missing block node id 7"):
+        _block_lookup_positions(torch.tensor([0, 2, 6]), torch.tensor([7]), entity_name="block node")
+
+    with pytest.raises(KeyError, match="missing block node id 4"):
+        _block_lookup_positions(torch.tensor([0, 2, 6]), torch.tensor([2, 4]), entity_name="block node")
 
 
 def test_to_block_uses_graph_store_counts_for_featureless_storage_backed_graph():

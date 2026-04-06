@@ -189,6 +189,25 @@ def test_evaluate_and_test_do_not_step_optimizer():
     assert torch.equal(before, after)
 
 
+def test_trainer_evaluate_avoids_tensor_item_for_loss_aggregation(monkeypatch):
+    trainer = Trainer(
+        model=ToyModel(),
+        task=ToyTask(),
+        optimizer=torch.optim.SGD,
+        lr=1.0,
+        max_epochs=1,
+    )
+
+    def fail_item(self):
+        raise AssertionError("trainer loss aggregation should stay off tensor.item")
+
+    monkeypatch.setattr(torch.Tensor, "item", fail_item)
+
+    summary = trainer.evaluate([ToyBatch(2.0)], stage="val")
+
+    assert summary["loss"] == pytest.approx(4.0)
+
+
 def test_trainer_restores_best_state_and_saves_checkpoint(tmp_path):
     checkpoint = tmp_path / "best.pt"
     trainer = Trainer(

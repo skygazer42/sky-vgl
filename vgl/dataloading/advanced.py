@@ -13,6 +13,12 @@ from vgl.ops import khop_nodes, node_subgraph, random_walk
 from vgl.ops.subgraph import _lookup_positions, _membership_mask, _positions_for_endpoint_values
 
 
+def _as_python_int(value) -> int:
+    if isinstance(value, torch.Tensor):
+        return int(value.detach().cpu().numpy().reshape(()).item())
+    return int(value)
+
+
 def _require_homo_graph(graph: Graph, *, context: str) -> None:
     if set(graph.nodes) != {"node"} or len(graph.edges) != 1:
         raise ValueError(f"{context} currently supports homogeneous graphs only")
@@ -66,7 +72,7 @@ def _ordered_unique_tensor(values) -> torch.Tensor:
 
 def _tensor_to_int_list(values) -> list[int]:
     tensor = torch.as_tensor(values, dtype=torch.long).view(-1)
-    return [int(value.item()) for value in tensor]
+    return [_as_python_int(value) for value in tensor]
 
 
 def _tensor_rows_to_int_lists(values) -> list[list[int]]:
@@ -85,7 +91,7 @@ def _normalize_seed_values(value) -> list[int]:
         values = [value]
     if not values:
         raise ValueError("seed collections must contain at least one node id")
-    return [int(seed) for seed in values]
+    return [_as_python_int(seed) for seed in values]
 
 
 def _normalize_bounded_ids(value, *, upper_bound: int, field_name: str) -> list[int]:
@@ -100,7 +106,7 @@ def _induced_edge_ids(graph: Graph, node_ids: list[int]) -> torch.Tensor:
     node_tensor = torch.as_tensor(node_ids, dtype=torch.long, device=graph.edge_index.device).view(-1)
     if node_tensor.numel() == 0:
         return torch.empty(0, dtype=torch.long, device=graph.edge_index.device)
-    node_tensor = torch.unique(node_tensor)
+    node_tensor = _ordered_unique_tensor(node_tensor)
     edge_type = graph._default_edge_type()
     store = graph.edges[edge_type]
     candidate_edge_ids = _positions_for_endpoint_values(store, node_tensor, endpoint=0)
@@ -275,25 +281,27 @@ def _finalize_metadata(
 
 class RandomWalkSampler(Sampler):
     def __init__(self, *, walk_length: int, num_walks: int = 1, seed: int | None = None, edge_type=None, expand_seeds: bool = False):
-        if int(walk_length) < 0:
+        resolved_walk_length = _as_python_int(walk_length)
+        resolved_num_walks = _as_python_int(num_walks)
+        if resolved_walk_length < 0:
             raise ValueError("walk_length must be >= 0")
-        if int(num_walks) < 1:
+        if resolved_num_walks < 1:
             raise ValueError("num_walks must be >= 1")
-        self.walk_length = int(walk_length)
-        self.num_walks = int(num_walks)
+        self.walk_length = resolved_walk_length
+        self.num_walks = resolved_num_walks
         self.seed = seed
         self.edge_type = None if edge_type is None else tuple(edge_type)
         self.expand_seeds = bool(expand_seeds)
         self._generator = None
         if seed is not None:
             self._generator = torch.Generator()
-            self._generator.manual_seed(int(seed))
+            self._generator.manual_seed(_as_python_int(seed))
 
     def _sample_start(self, graph: Graph) -> int:
         num_nodes = int(graph.x.size(0))
         if self._generator is None:
-            return int(torch.randint(num_nodes, (1,)).item())
-        return int(torch.randint(num_nodes, (1,), generator=self._generator).item())
+            return _as_python_int(torch.randint(num_nodes, (1,)))
+        return _as_python_int(torch.randint(num_nodes, (1,), generator=self._generator))
 
     def _seed_ids_from_metadata(self, graph: Graph, metadata: dict) -> list[int]:
         seed = metadata.get("seed")
@@ -386,17 +394,19 @@ class Node2VecWalkSampler(RandomWalkSampler):
         adjacency: dict[int, list[int]] = {}
         adjacency_set: dict[int, set[int]] = {}
         for src_index, dst_index in zip(graph.edge_index[0], graph.edge_index[1]):
-            adjacency.setdefault(int(src_index), []).append(int(dst_index))
-            adjacency_set.setdefault(int(src_index), set()).add(int(dst_index))
+            src_value = _as_python_int(src_index)
+            dst_value = _as_python_int(dst_index)
+            adjacency.setdefault(src_value, []).append(dst_value)
+            adjacency_set.setdefault(src_value, set()).add(dst_value)
         return adjacency, adjacency_set
 
     def _weighted_choice(self, neighbors: list[int], weights: list[float]) -> int:
         weight_tensor = torch.tensor(weights, dtype=torch.float32)
         probs = weight_tensor / weight_tensor.sum()
         if self._generator is None:
-            index = int(torch.multinomial(probs, 1).item())
+            index = _as_python_int(torch.multinomial(probs, 1))
         else:
-            index = int(torch.multinomial(probs, 1, generator=self._generator).item())
+            index = _as_python_int(torch.multinomial(probs, 1, generator=self._generator))
         return int(neighbors[index])
 
     def sample(self, item):
@@ -421,9 +431,11 @@ class Node2VecWalkSampler(RandomWalkSampler):
                     continue
                 if previous is None or previous < 0:
                     if self._generator is None:
-                        choice = int(neighbors[int(torch.randint(len(neighbors), (1,)).item())])
+                        choice = int(neighbors[_as_python_int(torch.randint(len(neighbors), (1,)))])
                     else:
-                        choice = int(neighbors[int(torch.randint(len(neighbors), (1,), generator=self._generator).item())])
+                        choice = int(
+                            neighbors[_as_python_int(torch.randint(len(neighbors), (1,), generator=self._generator))]
+                        )
                 else:
                     weights = []
                     previous_neighbors = adjacency_set.get(previous, set())
@@ -492,12 +504,13 @@ class Node2VecWalkSampler(RandomWalkSampler):
 
 class GraphSAINTNodeSampler(Sampler):
     def __init__(self, *, num_sampled_nodes: int, seed: int | None = None):
-        if int(num_sampled_nodes) < 1:
+        resolved_num_sampled_nodes = _as_python_int(num_sampled_nodes)
+        if resolved_num_sampled_nodes < 1:
             raise ValueError("num_sampled_nodes must be >= 1")
-        self.num_sampled_nodes = int(num_sampled_nodes)
+        self.num_sampled_nodes = resolved_num_sampled_nodes
         self._generator = torch.Generator()
         if seed is not None:
-            self._generator.manual_seed(int(seed))
+            self._generator.manual_seed(_as_python_int(seed))
 
     def sample(self, item):
         graph, metadata, sample_id, source_graph_id = _parse_graph_item(item, context=self.__class__.__name__)
@@ -537,12 +550,13 @@ class GraphSAINTNodeSampler(Sampler):
 
 class GraphSAINTEdgeSampler(Sampler):
     def __init__(self, *, num_sampled_edges: int, seed: int | None = None):
-        if int(num_sampled_edges) < 1:
+        resolved_num_sampled_edges = _as_python_int(num_sampled_edges)
+        if resolved_num_sampled_edges < 1:
             raise ValueError("num_sampled_edges must be >= 1")
-        self.num_sampled_edges = int(num_sampled_edges)
+        self.num_sampled_edges = resolved_num_sampled_edges
         self._generator = torch.Generator()
         if seed is not None:
-            self._generator.manual_seed(int(seed))
+            self._generator.manual_seed(_as_python_int(seed))
 
     def sample(self, item):
         graph, metadata, sample_id, source_graph_id = _parse_graph_item(item, context=self.__class__.__name__)
@@ -569,7 +583,7 @@ class GraphSAINTEdgeSampler(Sampler):
                 break
         if len(selected_edge_ids) < target_count:
             for edge_id_tensor in torch.randperm(edge_count, generator=self._generator):
-                edge_id = int(edge_id_tensor.item())
+                edge_id = _as_python_int(edge_id_tensor)
                 if edge_id in seen:
                     continue
                 seen.add(edge_id)
@@ -595,15 +609,17 @@ class GraphSAINTEdgeSampler(Sampler):
 
 class GraphSAINTRandomWalkSampler(Sampler):
     def __init__(self, *, num_walks: int, walk_length: int, seed: int | None = None):
-        if int(num_walks) < 1:
+        resolved_num_walks = _as_python_int(num_walks)
+        resolved_walk_length = _as_python_int(walk_length)
+        if resolved_num_walks < 1:
             raise ValueError("num_walks must be >= 1")
-        if int(walk_length) < 0:
+        if resolved_walk_length < 0:
             raise ValueError("walk_length must be >= 0")
-        self.num_walks = int(num_walks)
-        self.walk_length = int(walk_length)
+        self.num_walks = resolved_num_walks
+        self.walk_length = resolved_walk_length
         self._generator = torch.Generator()
         if seed is not None:
-            self._generator.manual_seed(int(seed))
+            self._generator.manual_seed(_as_python_int(seed))
 
     def sample(self, item):
         graph, metadata, sample_id, source_graph_id = _parse_graph_item(item, context=self.__class__.__name__)
@@ -661,11 +677,13 @@ class ClusterData(ListDataset):
 
     def __post_init__(self):
         _require_homo_graph(self.graph, context=self.__class__.__name__)
-        if int(self.num_parts) < 1:
+        resolved_num_parts = _as_python_int(self.num_parts)
+        if resolved_num_parts < 1:
             raise ValueError("num_parts must be >= 1")
+        self.num_parts = resolved_num_parts
         generator = torch.Generator()
         if self.seed is not None:
-            generator.manual_seed(int(self.seed))
+            generator.manual_seed(_as_python_int(self.seed))
         permutation = torch.randperm(int(self.graph.x.size(0)), generator=generator)
         samples = []
         for cluster_id, part in enumerate(torch.chunk(permutation, self.num_parts)):
@@ -705,9 +723,10 @@ class ClusterLoader(Loader):
 
 class ShaDowKHopSampler(Sampler):
     def __init__(self, *, num_hops: int, direction: str = "out", edge_type=None):
-        if int(num_hops) < 0:
+        resolved_num_hops = _as_python_int(num_hops)
+        if resolved_num_hops < 0:
             raise ValueError("num_hops must be >= 0")
-        self.num_hops = int(num_hops)
+        self.num_hops = resolved_num_hops
         self.direction = direction
         self.edge_type = edge_type
 

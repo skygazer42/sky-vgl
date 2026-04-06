@@ -31,6 +31,50 @@ def test_graph_round_trips_to_edge_list_csv(tmp_path):
     assert torch.equal(restored.edata["e_id"], graph.edata["e_id"])
 
 
+def test_to_edge_list_csv_avoids_tensor_item(monkeypatch, tmp_path):
+    path = tmp_path / "graph.csv"
+    graph = Graph.homo(
+        edge_index=torch.tensor([[0, 0, 2], [1, 2, 2]]),
+        edge_data={
+            "edge_weight": torch.tensor([0.5, 1.5, 2.5]),
+            "e_id": torch.tensor([10, 11, 12]),
+        },
+    )
+
+    def fail_item(self):
+        raise AssertionError("edge list CSV export should stay off tensor.item")
+
+    monkeypatch.setattr(torch.Tensor, "item", fail_item)
+
+    graph.to_edge_list_csv(path)
+
+    rows = list(csv.DictReader(path.read_text().splitlines()))
+
+    assert rows[0] == {"src": "0", "dst": "1", "edge_weight": "0.5", "e_id": "10"}
+
+
+def test_to_edge_list_csv_avoids_tensor_int(monkeypatch, tmp_path):
+    path = tmp_path / "graph.csv"
+    graph = Graph.homo(
+        edge_index=torch.tensor([[0, 0, 2], [1, 2, 2]]),
+        edge_data={
+            "edge_weight": torch.tensor([0.5, 1.5, 2.5]),
+            "e_id": torch.tensor([10, 11, 12]),
+        },
+    )
+
+    def fail_int(self):
+        raise AssertionError("edge list CSV export should stay off tensor.__int__")
+
+    monkeypatch.setattr(torch.Tensor, "__int__", fail_int)
+
+    graph.to_edge_list_csv(path)
+
+    rows = list(csv.DictReader(path.read_text().splitlines()))
+
+    assert rows[0] == {"src": "0", "dst": "1", "edge_weight": "0.5", "e_id": "10"}
+
+
 def test_edge_list_csv_supports_custom_columns_and_delimiter(tmp_path):
     path = tmp_path / "graph.tsv"
     path.write_text("source|target|weight\n0|1|0.5\n1|2|1.5\n")

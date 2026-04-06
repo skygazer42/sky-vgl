@@ -45,6 +45,38 @@ def test_partition_writer_avoids_tensor_tolist(monkeypatch, tmp_path):
     assert manifest.num_partitions == 2
 
 
+def test_partition_writer_avoids_tensor_item(monkeypatch, tmp_path):
+    graph = Graph.homo(
+        edge_index=torch.tensor([[0, 1, 2, 3], [1, 2, 3, 0]]),
+        x=torch.arange(8, dtype=torch.float32).view(4, 2),
+    )
+
+    def fail_item(self):
+        raise AssertionError("write_partitioned_graph should stay off tensor.item")
+
+    monkeypatch.setattr(torch.Tensor, "item", fail_item)
+
+    manifest = write_partitioned_graph(graph, tmp_path, num_partitions=2)
+
+    assert manifest.num_partitions == 2
+
+
+def test_partition_writer_avoids_tensor_int(monkeypatch, tmp_path):
+    graph = Graph.homo(
+        edge_index=torch.tensor([[0, 1, 2, 3], [1, 2, 3, 0]]),
+        x=torch.arange(8, dtype=torch.float32).view(4, 2),
+    )
+
+    def fail_int(self):
+        raise AssertionError("write_partitioned_graph should stay off tensor.__int__")
+
+    monkeypatch.setattr(torch.Tensor, "__int__", fail_int)
+
+    manifest = write_partitioned_graph(graph, tmp_path, num_partitions=2)
+
+    assert manifest.num_partitions == 2
+
+
 def test_partition_writer_preserves_temporal_graph_payloads(tmp_path):
     graph = Graph.temporal(
         nodes={"node": {"x": torch.arange(8, dtype=torch.float32).view(4, 2)}},

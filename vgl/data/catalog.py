@@ -3,6 +3,14 @@ import hashlib
 import json
 from typing import Any
 
+import torch
+
+
+def _as_python_int(value) -> int:
+    if isinstance(value, torch.Tensor):
+        return int(value.detach().cpu().numpy().reshape(()).item())
+    return int(value)
+
 
 @dataclass(frozen=True, slots=True)
 class DatasetSplit:
@@ -13,9 +21,10 @@ class DatasetSplit:
     def __post_init__(self) -> None:
         if not self.name:
             raise ValueError("split name must be non-empty")
-        if int(self.size) < 0:
+        size = _as_python_int(self.size)
+        if size < 0:
             raise ValueError("split size must be >= 0")
-        object.__setattr__(self, "size", int(self.size))
+        object.__setattr__(self, "size", size)
         object.__setattr__(self, "metadata", dict(self.metadata))
 
     def to_dict(self) -> dict[str, Any]:

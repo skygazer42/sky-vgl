@@ -74,6 +74,86 @@ def test_mean_message_aggregator_averages_messages_per_node():
     assert torch.equal(timestamps, torch.tensor([4, 3]))
 
 
+def test_last_message_aggregator_avoids_tensor_tolist(monkeypatch):
+    aggregator = LastMessageAggregator()
+
+    def fail_tolist(self):
+        raise AssertionError("LastMessageAggregator should stay off tensor.tolist")
+
+    monkeypatch.setattr(torch.Tensor, "tolist", fail_tolist)
+
+    node_ids, messages, timestamps = aggregator(
+        messages=torch.tensor([[1.0, 0.0], [2.0, 0.0], [5.0, 1.0]]),
+        node_index=torch.tensor([0, 0, 1]),
+        timestamp=torch.tensor([1, 3, 2]),
+        num_nodes=3,
+    )
+
+    assert torch.equal(node_ids, torch.tensor([0, 1]))
+    assert torch.equal(messages, torch.tensor([[2.0, 0.0], [5.0, 1.0]]))
+    assert torch.equal(timestamps, torch.tensor([3, 2]))
+
+
+def test_mean_message_aggregator_avoids_tensor_tolist(monkeypatch):
+    aggregator = MeanMessageAggregator()
+
+    def fail_tolist(self):
+        raise AssertionError("MeanMessageAggregator should stay off tensor.tolist")
+
+    monkeypatch.setattr(torch.Tensor, "tolist", fail_tolist)
+
+    node_ids, messages, timestamps = aggregator(
+        messages=torch.tensor([[1.0, 1.0], [3.0, 5.0], [4.0, 2.0]]),
+        node_index=torch.tensor([0, 0, 2]),
+        timestamp=torch.tensor([1, 4, 3]),
+        num_nodes=4,
+    )
+
+    assert torch.equal(node_ids, torch.tensor([0, 2]))
+    assert torch.allclose(messages, torch.tensor([[2.0, 3.0], [4.0, 2.0]]))
+    assert torch.equal(timestamps, torch.tensor([4, 3]))
+
+
+def test_last_message_aggregator_avoids_torch_unique(monkeypatch):
+    aggregator = LastMessageAggregator()
+
+    def fail_unique(*args, **kwargs):
+        raise AssertionError("LastMessageAggregator should avoid torch.unique")
+
+    monkeypatch.setattr(torch, "unique", fail_unique)
+
+    node_ids, messages, timestamps = aggregator(
+        messages=torch.tensor([[1.0, 0.0], [2.0, 0.0], [5.0, 1.0]]),
+        node_index=torch.tensor([0, 0, 1]),
+        timestamp=torch.tensor([1, 3, 2]),
+        num_nodes=3,
+    )
+
+    assert torch.equal(node_ids, torch.tensor([0, 1]))
+    assert torch.equal(messages, torch.tensor([[2.0, 0.0], [5.0, 1.0]]))
+    assert torch.equal(timestamps, torch.tensor([3, 2]))
+
+
+def test_mean_message_aggregator_avoids_torch_unique(monkeypatch):
+    aggregator = MeanMessageAggregator()
+
+    def fail_unique(*args, **kwargs):
+        raise AssertionError("MeanMessageAggregator should avoid torch.unique")
+
+    monkeypatch.setattr(torch, "unique", fail_unique)
+
+    node_ids, messages, timestamps = aggregator(
+        messages=torch.tensor([[1.0, 1.0], [3.0, 5.0], [4.0, 2.0]]),
+        node_index=torch.tensor([0, 0, 2]),
+        timestamp=torch.tensor([1, 4, 3]),
+        num_nodes=4,
+    )
+
+    assert torch.equal(node_ids, torch.tensor([0, 2]))
+    assert torch.allclose(messages, torch.tensor([[2.0, 3.0], [4.0, 2.0]]))
+    assert torch.equal(timestamps, torch.tensor([4, 3]))
+
+
 def test_tgat_layer_accepts_graph_input():
     encoder = TGATLayer(in_channels=4, out_channels=4, time_channels=4, heads=2, dropout=0.0)
 

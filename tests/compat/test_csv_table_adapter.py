@@ -44,6 +44,62 @@ def test_graph_round_trips_to_csv_tables(tmp_path):
     assert torch.equal(restored.edata["e_id"], graph.edata["e_id"])
 
 
+def test_to_csv_tables_avoids_tensor_item(monkeypatch, tmp_path):
+    nodes_path = tmp_path / "nodes.csv"
+    edges_path = tmp_path / "edges.csv"
+    graph = Graph.homo(
+        edge_index=torch.tensor([[0, 0, 2], [1, 2, 1]]),
+        n_id=torch.tensor([10, 20, 30]),
+        x=torch.tensor([1.0, 2.0, 3.0]),
+        y=torch.tensor([0, 1, 0]),
+        edge_data={
+            "edge_weight": torch.tensor([0.5, 1.5, 2.5]),
+            "e_id": torch.tensor([11, 12, 13]),
+        },
+    )
+
+    def fail_item(self):
+        raise AssertionError("CSV table export should stay off tensor.item")
+
+    monkeypatch.setattr(torch.Tensor, "item", fail_item)
+
+    graph.to_csv_tables(nodes_path, edges_path)
+
+    node_rows = list(csv.DictReader(nodes_path.read_text().splitlines()))
+    edge_rows = list(csv.DictReader(edges_path.read_text().splitlines()))
+
+    assert node_rows[0] == {"node_id": "10", "x": "1.0", "y": "0"}
+    assert edge_rows[0] == {"src": "10", "dst": "20", "edge_weight": "0.5", "e_id": "11"}
+
+
+def test_to_csv_tables_avoids_tensor_int(monkeypatch, tmp_path):
+    nodes_path = tmp_path / "nodes.csv"
+    edges_path = tmp_path / "edges.csv"
+    graph = Graph.homo(
+        edge_index=torch.tensor([[0, 0, 2], [1, 2, 1]]),
+        n_id=torch.tensor([10, 20, 30]),
+        x=torch.tensor([1.0, 2.0, 3.0]),
+        y=torch.tensor([0, 1, 0]),
+        edge_data={
+            "edge_weight": torch.tensor([0.5, 1.5, 2.5]),
+            "e_id": torch.tensor([11, 12, 13]),
+        },
+    )
+
+    def fail_int(self):
+        raise AssertionError("CSV table export should stay off tensor.__int__")
+
+    monkeypatch.setattr(torch.Tensor, "__int__", fail_int)
+
+    graph.to_csv_tables(nodes_path, edges_path)
+
+    node_rows = list(csv.DictReader(nodes_path.read_text().splitlines()))
+    edge_rows = list(csv.DictReader(edges_path.read_text().splitlines()))
+
+    assert node_rows[0] == {"node_id": "10", "x": "1.0", "y": "0"}
+    assert edge_rows[0] == {"src": "10", "dst": "20", "edge_weight": "0.5", "e_id": "11"}
+
+
 def test_csv_tables_support_custom_columns_and_delimiter(tmp_path):
     nodes_path = tmp_path / "nodes.tsv"
     edges_path = tmp_path / "edges.tsv"

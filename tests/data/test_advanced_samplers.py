@@ -63,6 +63,51 @@ def test_random_walk_sampler_avoids_tensor_tolist(monkeypatch):
     assert sample.metadata["walk"][0] == 0
 
 
+def test_random_walk_sampler_avoids_tensor_item(monkeypatch):
+    sampler = RandomWalkSampler(walk_length=3, seed=0)
+
+    def fail_item(self):
+        raise AssertionError("RandomWalkSampler should stay off tensor.item")
+
+    monkeypatch.setattr(torch.Tensor, "item", fail_item)
+
+    sample = sampler.sample(_graph())
+
+    assert sample.metadata["walk"][0] == sample.metadata["walk_starts"][0]
+    assert len(sample.metadata["walk"]) == 4
+
+
+def test_random_walk_sampler_avoids_tensor_int(monkeypatch):
+    sampler = RandomWalkSampler(walk_length=3, seed=0)
+
+    def fail_int(self):
+        raise AssertionError("RandomWalkSampler should stay off tensor.__int__")
+
+    monkeypatch.setattr(torch.Tensor, "__int__", fail_int)
+
+    sample = sampler.sample(_graph())
+
+    assert sample.metadata["walk"][0] == sample.metadata["walk_starts"][0]
+    assert len(sample.metadata["walk"]) == 4
+
+
+def test_random_walk_sampler_accepts_tensor_ctor_scalars_without_tensor_int(monkeypatch):
+    def fail_int(self):
+        raise AssertionError("RandomWalkSampler constructor scalars should stay off tensor.__int__")
+
+    monkeypatch.setattr(torch.Tensor, "__int__", fail_int)
+
+    sample = RandomWalkSampler(
+        walk_length=torch.tensor(2),
+        num_walks=torch.tensor(2),
+        seed=torch.tensor(0),
+    ).sample((_graph(), {"seed": 1}))
+
+    assert sample.metadata["sampling_config"]["walk_length"] == 2
+    assert sample.metadata["sampling_config"]["num_walks"] == 2
+    assert sample.metadata["walk_starts"] == [1, 1]
+
+
 def test_random_walk_sampler_supports_multiple_walks_from_one_seed():
     sampler = RandomWalkSampler(walk_length=3, num_walks=2, seed=0)
 
@@ -91,6 +136,22 @@ def test_random_walk_sampler_accepts_explicit_seed_collections():
     assert "walk" not in sample.metadata
     assert len(sample.metadata["walks"]) == 2
     assert [walk[0] for walk in sample.metadata["walks"]] == [0, 3]
+
+
+def test_random_walk_sampler_accepts_tensor_seed_collections_without_tensor_int(monkeypatch):
+    sampler = RandomWalkSampler(walk_length=2, seed=0)
+
+    def fail_int(self):
+        raise AssertionError("RandomWalkSampler tensor seed collections should stay off tensor.__int__")
+
+    monkeypatch.setattr(torch.Tensor, "__int__", fail_int)
+
+    sample = sampler.sample((_graph(), {"seed": torch.tensor([0, 3])}))
+
+    assert torch.equal(sample.metadata["seed"], torch.tensor([0, 3]))
+    assert sample.metadata["seed_ids"] == [0, 3]
+    assert sample.metadata["walk_starts"] == [0, 3]
+    assert len(sample.metadata["walks"]) == 2
 
 
 def test_random_walk_sampler_can_expand_explicit_seed_collections_into_node_samples():
@@ -141,6 +202,34 @@ def test_node2vec_walk_sampler_avoids_tensor_tolist(monkeypatch):
         raise AssertionError("Node2VecWalkSampler should stay on tensors")
 
     monkeypatch.setattr(torch.Tensor, "tolist", fail_tolist)
+
+    sample = sampler.sample((_graph(), {"seed": 2}))
+
+    assert sample.metadata["walk"][0] == 2
+    assert len(sample.metadata["walk"]) == 5
+
+
+def test_node2vec_walk_sampler_avoids_tensor_item(monkeypatch):
+    sampler = Node2VecWalkSampler(walk_length=4, p=0.5, q=2.0, seed=1)
+
+    def fail_item(self):
+        raise AssertionError("Node2VecWalkSampler should stay off tensor.item")
+
+    monkeypatch.setattr(torch.Tensor, "item", fail_item)
+
+    sample = sampler.sample((_graph(), {"seed": 2}))
+
+    assert sample.metadata["walk"][0] == 2
+    assert len(sample.metadata["walk"]) == 5
+
+
+def test_node2vec_walk_sampler_avoids_tensor_int(monkeypatch):
+    sampler = Node2VecWalkSampler(walk_length=4, p=0.5, q=2.0, seed=1)
+
+    def fail_int(self):
+        raise AssertionError("Node2VecWalkSampler should stay off tensor.__int__")
+
+    monkeypatch.setattr(torch.Tensor, "__int__", fail_int)
 
     sample = sampler.sample((_graph(), {"seed": 2}))
 
@@ -253,6 +342,35 @@ def test_graph_saint_node_sampler_avoids_tensor_tolist(monkeypatch):
     assert "sampled_node_ids" in sample.metadata
 
 
+def test_graph_saint_node_sampler_avoids_torch_unique(monkeypatch):
+    sampler = GraphSAINTNodeSampler(num_sampled_nodes=3, seed=3)
+
+    def fail_unique(*args, **kwargs):
+        raise AssertionError("GraphSAINTNodeSampler should avoid torch.unique")
+
+    monkeypatch.setattr(torch, "unique", fail_unique)
+
+    sample = sampler.sample(_graph())
+
+    assert sample.graph.x.size(0) <= 3
+    assert "sampled_node_ids" in sample.metadata
+
+
+def test_graph_saint_node_sampler_accepts_tensor_ctor_scalars_without_tensor_int(monkeypatch):
+    def fail_int(self):
+        raise AssertionError("GraphSAINTNodeSampler constructor scalars should stay off tensor.__int__")
+
+    monkeypatch.setattr(torch.Tensor, "__int__", fail_int)
+
+    sample = GraphSAINTNodeSampler(
+        num_sampled_nodes=torch.tensor(3),
+        seed=torch.tensor(3),
+    ).sample(_graph())
+
+    assert sample.graph.x.size(0) <= 3
+    assert sample.metadata["sampling_config"]["num_sampled_nodes"] == 3
+
+
 def test_graph_saint_node_sampler_expands_explicit_seed_collections():
     sampler = GraphSAINTNodeSampler(num_sampled_nodes=2, seed=3)
 
@@ -297,6 +415,49 @@ def test_graph_saint_edge_sampler_avoids_tensor_tolist(monkeypatch):
     assert "sampled_edge_ids" in sample.metadata
 
 
+def test_graph_saint_edge_sampler_avoids_tensor_int(monkeypatch):
+    sampler = GraphSAINTEdgeSampler(num_sampled_edges=2, seed=4)
+
+    def fail_int(self):
+        raise AssertionError("GraphSAINTEdgeSampler should stay off tensor.__int__")
+
+    monkeypatch.setattr(torch.Tensor, "__int__", fail_int)
+
+    sample = sampler.sample(_graph())
+
+    assert sample.graph.edge_index.size(1) >= 1
+    assert "sampled_edge_ids" in sample.metadata
+
+
+def test_graph_saint_edge_sampler_avoids_tensor_item(monkeypatch):
+    sampler = GraphSAINTEdgeSampler(num_sampled_edges=2, seed=4)
+
+    def fail_item(self):
+        raise AssertionError("GraphSAINTEdgeSampler should stay off tensor.item")
+
+    monkeypatch.setattr(torch.Tensor, "item", fail_item)
+
+    sample = sampler.sample(_graph())
+
+    assert sample.graph.edge_index.size(1) >= 1
+    assert "sampled_edge_ids" in sample.metadata
+
+
+def test_graph_saint_edge_sampler_accepts_tensor_ctor_scalars_without_tensor_int(monkeypatch):
+    def fail_int(self):
+        raise AssertionError("GraphSAINTEdgeSampler constructor scalars should stay off tensor.__int__")
+
+    monkeypatch.setattr(torch.Tensor, "__int__", fail_int)
+
+    sample = GraphSAINTEdgeSampler(
+        num_sampled_edges=torch.tensor(2),
+        seed=torch.tensor(4),
+    ).sample(_graph())
+
+    assert sample.graph.edge_index.size(1) >= 1
+    assert sample.metadata["sampling_config"]["num_sampled_edges"] == 2
+
+
 def test_graph_saint_edge_sampler_can_force_include_explicit_edge_ids():
     sampler = GraphSAINTEdgeSampler(num_sampled_edges=1, seed=4)
 
@@ -336,6 +497,24 @@ def test_graph_saint_random_walk_sampler_avoids_tensor_tolist(monkeypatch):
     assert "walks" in sample.metadata
 
 
+def test_graph_saint_random_walk_sampler_accepts_tensor_ctor_scalars_without_tensor_int(monkeypatch):
+    def fail_int(self):
+        raise AssertionError("GraphSAINTRandomWalkSampler constructor scalars should stay off tensor.__int__")
+
+    monkeypatch.setattr(torch.Tensor, "__int__", fail_int)
+
+    sample = GraphSAINTRandomWalkSampler(
+        num_walks=torch.tensor(2),
+        walk_length=torch.tensor(2),
+        seed=torch.tensor(5),
+    ).sample((_graph(), {"seed": 1}))
+
+    assert sample.graph.x.size(0) >= 1
+    assert sample.metadata["sampling_config"]["num_walks"] == 2
+    assert sample.metadata["sampling_config"]["walk_length"] == 2
+    assert sample.metadata["walk_starts"] == [1, 1]
+
+
 def test_graph_saint_random_walk_sampler_accepts_explicit_start_nodes():
     sampler = GraphSAINTRandomWalkSampler(num_walks=3, walk_length=2, seed=5)
 
@@ -356,6 +535,22 @@ def test_graph_saint_random_walk_sampler_accepts_explicit_start_nodes():
     assert all(len(sample.metadata["walks"]) == 2 for sample in samples)
     assert [walk[0] for walk in samples[0].metadata["walks"]] == [1, 3]
     assert all(sample.subgraph_seed is not None for sample in samples)
+
+
+def test_graph_saint_random_walk_sampler_accepts_tensor_scalar_seed_lists_without_tensor_int(monkeypatch):
+    sampler = GraphSAINTRandomWalkSampler(num_walks=3, walk_length=2, seed=5)
+
+    def fail_int(self):
+        raise AssertionError("GraphSAINTRandomWalkSampler seed normalization should stay off tensor.__int__")
+
+    monkeypatch.setattr(torch.Tensor, "__int__", fail_int)
+
+    samples = sampler.sample((_graph(), {"seed": [torch.tensor(1), torch.tensor(3)], "sample_id": "saint-walk-many"}))
+
+    assert isinstance(samples, list)
+    assert len(samples) == 2
+    assert all(sample.metadata["seed_ids"] == [1, 3] for sample in samples)
+    assert all(sample.metadata["walk_starts"] == [1, 3] for sample in samples)
 
 
 def test_graph_saint_random_walk_sampler_records_effective_walk_lengths():
@@ -426,6 +621,30 @@ def test_cluster_data_avoids_torch_isin(monkeypatch):
     assert all("sampled_edge_ids" in sample.metadata for sample in cluster_data.samples)
 
 
+def test_cluster_data_accepts_tensor_seed_without_tensor_int(monkeypatch):
+    def fail_int(self):
+        raise AssertionError("ClusterData should stay off tensor.__int__ for tensor seed values")
+
+    monkeypatch.setattr(torch.Tensor, "__int__", fail_int)
+
+    cluster_data = ClusterData(_graph(), num_parts=2, seed=torch.tensor(6))
+
+    assert len(cluster_data) == 2
+    assert all("sampled_node_ids" in sample.metadata for sample in cluster_data.samples)
+
+
+def test_cluster_data_accepts_tensor_num_parts_without_tensor_int(monkeypatch):
+    def fail_int(self):
+        raise AssertionError("ClusterData num_parts should stay off tensor.__int__")
+
+    monkeypatch.setattr(torch.Tensor, "__int__", fail_int)
+
+    cluster_data = ClusterData(_graph(), num_parts=torch.tensor(2), seed=6)
+
+    assert len(cluster_data) == 2
+    assert all(sample.metadata["sampling_config"]["num_parts"] == 2 for sample in cluster_data.samples)
+
+
 def test_shadow_khop_sampler_materializes_node_batch():
     dataset = ListDataset([(_graph(), {"seed": 2, "sample_id": "shadow-0"})])
     loader = DataLoader(dataset=dataset, sampler=ShaDowKHopSampler(num_hops=2), batch_size=1)
@@ -456,6 +675,19 @@ def test_shadow_khop_sampler_avoids_tensor_tolist(monkeypatch):
     sample = sampler.sample((_graph(), {"seed": 2, "sample_id": "shadow-0"}))
 
     assert sample.sample_id == "shadow-0"
+    assert 2 in sample.metadata["sampled_node_ids"]
+
+
+def test_shadow_khop_sampler_accepts_tensor_num_hops_without_tensor_int(monkeypatch):
+    def fail_int(self):
+        raise AssertionError("ShaDowKHopSampler num_hops should stay off tensor.__int__")
+
+    monkeypatch.setattr(torch.Tensor, "__int__", fail_int)
+
+    sample = ShaDowKHopSampler(num_hops=torch.tensor(1)).sample((_graph(), {"seed": 2, "sample_id": "shadow-0"}))
+
+    assert sample.sample_id == "shadow-0"
+    assert sample.metadata["sampling_config"]["num_hops"] == 1
     assert 2 in sample.metadata["sampled_node_ids"]
 
 

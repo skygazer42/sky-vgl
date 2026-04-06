@@ -15,6 +15,32 @@ if TYPE_CHECKING:
     from vgl.dataloading.records import TemporalEventRecord
 
 
+def _expand_interval_values(values: torch.Tensor, counts: torch.Tensor, *, step: int) -> torch.Tensor:
+    values = torch.as_tensor(values, dtype=torch.long).view(-1)
+    counts = torch.as_tensor(counts, dtype=torch.long, device=values.device).view(-1)
+    if values.numel() == 0 or counts.numel() == 0:
+        return values.new_empty(0)
+
+    positive = counts > 0
+    values = values[positive]
+    counts = counts[positive]
+    if values.numel() == 0:
+        return values.new_empty(0)
+
+    offsets = torch.cumsum(counts, dim=0) - counts
+    base = values - step * offsets
+    deltas = torch.empty_like(base)
+    deltas[0] = base[0]
+    if base.numel() > 1:
+        deltas[1:] = base[1:] - base[:-1]
+    markers = torch.zeros(counts.sum(), dtype=values.dtype, device=values.device)
+    markers[offsets] = deltas
+    expanded = torch.cumsum(markers, dim=0)
+    if step != 0:
+        expanded = expanded + step * torch.arange(counts.sum(), dtype=values.dtype, device=values.device)
+    return expanded
+
+
 def _slice_edge_store(store: EdgeStore, mask: torch.Tensor) -> EdgeStore:
     edge_count = int(store.edge_index.size(1))
     edge_data = {}
@@ -178,6 +204,12 @@ def _node_count(store):
         if isinstance(value, torch.Tensor) and value.ndim > 0:
             return int(value.size(0))
     return 0
+
+
+def _as_python_int(value) -> int:
+    if isinstance(value, torch.Tensor):
+        return int(value.detach().cpu().numpy().reshape(()).item())
+    return int(value)
 
 
 def _transfer_tensor(tensor: torch.Tensor, *, device=None, dtype=None, non_blocking: bool = False) -> torch.Tensor:
@@ -408,18 +440,22 @@ def _batch_hetero_graphs(graphs, *, context):
 
 def _graph_membership_from_counts(counts: list[int]) -> tuple[torch.Tensor, torch.Tensor]:
     count_tensor = torch.tensor(counts, dtype=torch.long)
-    graph_index = torch.repeat_interleave(
+    graph_index = _expand_interval_values(
         torch.arange(len(counts), dtype=torch.long),
         count_tensor,
+        step=0,
     )
-    graph_ptr = torch.tensor([0, *torch.cumsum(count_tensor, dim=0).tolist()], dtype=torch.long)
+    graph_ptr = torch.empty(len(counts) + 1, dtype=torch.long)
+    graph_ptr[0] = 0
+    if count_tensor.numel() > 0:
+        graph_ptr[1:] = torch.cumsum(count_tensor, dim=0)
     return graph_index, graph_ptr
 
 
 def _graph_label_from_graph(graph: Graph, label_key: str) -> int:
     if set(graph.nodes) == {"node"} and label_key in graph.nodes["node"].data:
         value = graph.nodes["node"].data[label_key]
-        return int(torch.as_tensor(value).reshape(-1)[0].item())
+        return _as_python_int(torch.as_tensor(value).reshape(-1)[0])
 
     candidates = []
     for node_type, store in graph.nodes.items():
@@ -428,7 +464,7 @@ def _graph_label_from_graph(graph: Graph, label_key: str) -> int:
             continue
         value = torch.as_tensor(value)
         if value.numel() == 1:
-            candidates.append((node_type, int(value.reshape(-1)[0].item())))
+            candidates.append((node_type, _as_python_int(value.reshape(-1)[0])))
     if len(candidates) == 1:
         return candidates[0][1]
     if not candidates:
@@ -719,8 +755,8 @@ class LinkPredictionBatch:
         dst_values = []
         for record, current_edge_type in zip(records, record_edge_types):
             record_graph = record.graph
-            src_index = int(record.src_index)
-            dst_index = int(record.dst_index)
+            src_index = _as_python_int(record.src_index)
+            dst_index = _as_python_int(record.dst_index)
             if current_edge_type not in record_graph.edges:
                 raise ValueError("LinkPredictionBatch record edge_type must exist in the source graph")
             current_src_type, _, current_dst_type = current_edge_type
@@ -752,7 +788,7 @@ class LinkPredictionBatch:
         supervision_edges_by_type: dict[tuple[str, str, str], set[tuple[int, int]]] = {}
         reverse_supervision_edges: dict[tuple[str, str, str], set[tuple[int, int]]] = {}
         for record, current_edge_type in zip(records, record_edge_types):
-            if int(record.label) != 1:
+            if _as_python_int(record.label) != 1:
                 continue
             if not (getattr(record, "exclude_seed_edge", False) or bool(record.metadata.get("exclude_seed_edges", False))):
                 continue
@@ -760,11 +796,11 @@ class LinkPredictionBatch:
             current_src_type, _, current_dst_type = current_edge_type
             if is_homo:
                 offset = graph_offsets[id(record_graph)]
-                src_value = int(record.src_index) + offset
-                dst_value = int(record.dst_index) + offset
+                src_value = _as_python_int(record.src_index) + offset
+                dst_value = _as_python_int(record.dst_index) + offset
             else:
-                src_value = int(record.src_index) + graph_offsets[id(record_graph)][current_src_type]
-                dst_value = int(record.dst_index) + graph_offsets[id(record_graph)][current_dst_type]
+                src_value = _as_python_int(record.src_index) + graph_offsets[id(record_graph)][current_src_type]
+                dst_value = _as_python_int(record.dst_index) + graph_offsets[id(record_graph)][current_dst_type]
             supervision_edges_by_type.setdefault(current_edge_type, set()).add((src_value, dst_value))
             reverse_edge_type = _resolve_link_reverse_edge_type(record)
             if reverse_edge_type is not None:
@@ -773,8 +809,8 @@ class LinkPredictionBatch:
                     reverse_dst = src_value
                 else:
                     reverse_src_type, _, reverse_dst_type = reverse_edge_type
-                    reverse_src = int(record.dst_index) + graph_offsets[id(record_graph)][reverse_src_type]
-                    reverse_dst = int(record.src_index) + graph_offsets[id(record_graph)][reverse_dst_type]
+                    reverse_src = _as_python_int(record.dst_index) + graph_offsets[id(record_graph)][reverse_src_type]
+                    reverse_dst = _as_python_int(record.src_index) + graph_offsets[id(record_graph)][reverse_dst_type]
                 reverse_supervision_edges.setdefault(reverse_edge_type, set()).add((reverse_src, reverse_dst))
 
         batch_graph = graph
@@ -935,8 +971,8 @@ class TemporalEventBatch:
         dst_values = []
         for record, current_edge_type in zip(records, record_edge_types):
             record_graph = record.graph
-            src_index = int(record.src_index)
-            dst_index = int(record.dst_index)
+            src_index = _as_python_int(record.src_index)
+            dst_index = _as_python_int(record.dst_index)
             if current_edge_type not in record_graph.edges:
                 raise ValueError("TemporalEventBatch record edge_type must exist in the source graph")
             current_src_type, _, current_dst_type = current_edge_type
@@ -978,7 +1014,7 @@ class TemporalEventBatch:
         )
 
     def history_graph(self, index: int):
-        return self.graph.snapshot(self.timestamp[index].item())
+        return self.graph.snapshot(_as_python_int(self.timestamp[index]))
 
     def to(self, device=None, dtype=None, non_blocking: bool = False):
         return TemporalEventBatch(

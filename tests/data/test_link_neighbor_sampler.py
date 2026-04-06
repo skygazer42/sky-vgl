@@ -5,7 +5,7 @@ from vgl import Graph, HeteroBlock
 from vgl.data.dataset import ListDataset
 from vgl.data.loader import Loader
 from vgl.data.sample import LinkPredictionRecord
-from vgl.data.sampler import LinkNeighborSampler, UniformNegativeLinkSampler
+from vgl.data.sampler import CandidateLinkSampler, HardNegativeLinkSampler, LinkNeighborSampler, UniformNegativeLinkSampler
 from vgl.distributed import LocalGraphShard, LocalSamplingCoordinator, write_partitioned_graph
 from vgl.distributed.coordinator import StoreBackedSamplingCoordinator
 from vgl.storage import FeatureStore, InMemoryTensorStore
@@ -54,6 +54,40 @@ def test_link_neighbor_sampler_homo_frontier_expansion_avoids_tensor_tolist(monk
     assert torch.equal(sampled, torch.tensor([0, 1, 2, 3]))
 
 
+def test_link_neighbor_sampler_homo_next_frontier_avoids_tensor_item(monkeypatch):
+    graph = Graph.homo(
+        edge_index=torch.tensor([[0, 1, 3], [1, 2, 1]]),
+        x=torch.arange(12, dtype=torch.float32).view(4, 3),
+    )
+    sampler = LinkNeighborSampler(num_neighbors=[-1])
+
+    def fail_item(self):
+        raise AssertionError("homo next frontier should stay off tensor.item")
+
+    monkeypatch.setattr(torch.Tensor, "item", fail_item)
+
+    sampled = sampler._next_frontier(graph, frontier={0, 1}, visited={0, 1}, fanout=-1)
+
+    assert sampled == {2, 3}
+
+
+def test_link_neighbor_sampler_homo_next_frontier_avoids_tensor_int(monkeypatch):
+    graph = Graph.homo(
+        edge_index=torch.tensor([[0, 1, 3], [1, 2, 1]]),
+        x=torch.arange(12, dtype=torch.float32).view(4, 3),
+    )
+    sampler = LinkNeighborSampler(num_neighbors=[-1])
+
+    def fail_int(self):
+        raise AssertionError("homo next frontier should stay off tensor.__int__")
+
+    monkeypatch.setattr(torch.Tensor, "__int__", fail_int)
+
+    sampled = sampler._next_frontier(graph, frontier={0, 1}, visited={0, 1}, fanout=-1)
+
+    assert sampled == {2, 3}
+
+
 def test_link_neighbor_sampler_homo_local_subgraph_avoids_dense_bool_masks(monkeypatch):
     graph = Graph.homo(
         edge_index=torch.tensor([[0, 1, 3], [1, 2, 1]]),
@@ -100,6 +134,51 @@ def test_link_neighbor_sampler_homo_local_subgraph_avoids_dense_node_mappings(mo
     assert torch.equal(node_mapping, torch.tensor([0, 1, 2, 3]))
 
 
+def test_link_neighbor_sampler_homo_local_record_avoids_tensor_item(monkeypatch):
+    graph = Graph.homo(
+        edge_index=torch.tensor([[0, 1, 3], [1, 2, 1]]),
+        x=torch.arange(12, dtype=torch.float32).view(4, 3),
+    )
+    sampler = LinkNeighborSampler(num_neighbors=[-1])
+
+    def fail_item(self):
+        raise AssertionError("homo local record mapping should stay off tensor.item")
+
+    monkeypatch.setattr(torch.Tensor, "item", fail_item)
+
+    record = sampler.sample(LinkPredictionRecord(graph=graph, src_index=0, dst_index=1, label=1))
+
+    assert torch.equal(record.graph.n_id, torch.tensor([0, 1, 2, 3]))
+    assert record.src_index == 0
+    assert record.dst_index == 1
+
+
+def test_link_neighbor_sampler_homo_local_record_avoids_tensor_int(monkeypatch):
+    graph = Graph.homo(
+        edge_index=torch.tensor([[0, 1, 3], [1, 2, 1]]),
+        x=torch.arange(12, dtype=torch.float32).view(4, 3),
+    )
+    sampler = LinkNeighborSampler(num_neighbors=[-1])
+
+    def fail_int(self):
+        raise AssertionError("homo local record mapping should stay off tensor.__int__")
+
+    monkeypatch.setattr(torch.Tensor, "__int__", fail_int)
+
+    record = sampler.sample(
+        LinkPredictionRecord(
+            graph=graph,
+            src_index=torch.tensor(0),
+            dst_index=torch.tensor(1),
+            label=torch.tensor(1),
+        )
+    )
+
+    assert torch.equal(record.graph.n_id, torch.tensor([0, 1, 2, 3]))
+    assert record.src_index == 0
+    assert record.dst_index == 1
+
+
 def test_link_neighbor_sampler_can_wrap_uniform_negative_sampling():
     graph = Graph.homo(
         edge_index=torch.tensor([[0, 1, 2], [1, 2, 3]]),
@@ -119,6 +198,188 @@ def test_link_neighbor_sampler_can_wrap_uniform_negative_sampling():
     assert [int(record.label) for record in records] == [1, 0, 0]
     assert all(0 <= int(record.src_index) < records[0].graph.x.size(0) for record in records)
     assert all(0 <= int(record.dst_index) < records[0].graph.x.size(0) for record in records)
+
+
+def test_uniform_negative_link_sampler_avoids_tensor_int(monkeypatch):
+    with torch.random.fork_rng(devices=[]):
+        torch.manual_seed(0)
+        graph = Graph.homo(
+            edge_index=torch.tensor([[0, 1, 2], [1, 2, 3]]),
+            x=torch.randn(5, 4),
+        )
+        sampler = UniformNegativeLinkSampler(num_negatives=2)
+
+        def fail_int(self):
+            raise AssertionError("UniformNegativeLinkSampler should stay off tensor.__int__")
+
+        monkeypatch.setattr(torch.Tensor, "__int__", fail_int)
+
+        records = sampler.sample(
+            LinkPredictionRecord(
+                graph=graph,
+                src_index=torch.tensor(0),
+                dst_index=torch.tensor(1),
+                label=torch.tensor(1),
+            )
+        )
+
+        assert len(records) == 3
+        assert all(record.graph is graph for record in records)
+        assert records[0].label == 1
+        assert all(record.src_index == 0 for record in records)
+
+
+def test_uniform_negative_link_sampler_accepts_tensor_num_negatives_without_tensor_int(monkeypatch):
+    with torch.random.fork_rng(devices=[]):
+        torch.manual_seed(0)
+        graph = Graph.homo(
+            edge_index=torch.tensor([[0, 1, 2], [1, 2, 3]]),
+            x=torch.randn(5, 4),
+        )
+
+        def fail_int(self):
+            raise AssertionError("UniformNegativeLinkSampler num_negatives should stay off tensor.__int__")
+
+        monkeypatch.setattr(torch.Tensor, "__int__", fail_int)
+
+        records = UniformNegativeLinkSampler(num_negatives=torch.tensor(2)).sample(
+            LinkPredictionRecord(graph=graph, src_index=0, dst_index=1, label=1)
+        )
+
+        assert len(records) == 3
+        assert all(record.src_index == 0 for record in records)
+
+
+def test_uniform_negative_link_sampler_candidate_destinations_avoids_tensor_int(monkeypatch):
+    graph = Graph.homo(
+        edge_index=torch.tensor([[0, 0, 1], [1, 2, 2]]),
+        x=torch.randn(4, 4),
+    )
+    sampler = UniformNegativeLinkSampler()
+
+    def fail_int(self):
+        raise AssertionError("UniformNegativeLinkSampler candidate destinations should stay off tensor.__int__")
+
+    monkeypatch.setattr(torch.Tensor, "__int__", fail_int)
+
+    candidates = sampler._candidate_destinations(
+        LinkPredictionRecord(
+            graph=graph,
+            src_index=torch.tensor(0),
+            dst_index=torch.tensor(1),
+            label=torch.tensor(1),
+        )
+    )
+
+    assert torch.equal(candidates, torch.tensor([0, 3]))
+
+
+def test_candidate_link_sampler_avoids_tensor_int(monkeypatch):
+    with torch.random.fork_rng(devices=[]):
+        torch.manual_seed(0)
+        graph = Graph.homo(
+            edge_index=torch.tensor([[0, 0, 1], [1, 2, 2]]),
+            x=torch.randn(4, 4),
+        )
+        sampler = CandidateLinkSampler()
+
+        def fail_int(self):
+            raise AssertionError("CandidateLinkSampler should stay off tensor.__int__")
+
+        monkeypatch.setattr(torch.Tensor, "__int__", fail_int)
+
+        records = sampler.sample(
+            LinkPredictionRecord(
+                graph=graph,
+                src_index=torch.tensor(0),
+                dst_index=torch.tensor(1),
+                label=torch.tensor(1),
+            )
+        )
+
+        assert len(records) == 4
+        assert records[0].label == 1
+        assert all(record.src_index == 0 for record in records)
+
+
+def test_hard_negative_link_sampler_avoids_tensor_int(monkeypatch):
+    with torch.random.fork_rng(devices=[]):
+        torch.manual_seed(0)
+        graph = Graph.homo(
+            edge_index=torch.tensor([[0, 1, 2], [1, 2, 3]]),
+            x=torch.randn(5, 4),
+        )
+        sampler = HardNegativeLinkSampler(num_negatives=2, num_hard_negatives=2)
+
+        def fail_int(self):
+            raise AssertionError("HardNegativeLinkSampler should stay off tensor.__int__")
+
+        monkeypatch.setattr(torch.Tensor, "__int__", fail_int)
+
+        records = sampler.sample(
+            LinkPredictionRecord(
+                graph=graph,
+                src_index=torch.tensor(0),
+                dst_index=torch.tensor(1),
+                label=torch.tensor(1),
+                hard_negative_dst=torch.tensor([3, 4]),
+            )
+        )
+
+        assert len(records) == 3
+        assert records[0].label == 1
+        assert records[0].dst_index == 1
+        assert sorted(record.dst_index for record in records[1:]) == [3, 4]
+
+
+def test_hard_negative_link_sampler_accepts_tensor_num_hard_negatives_without_tensor_int(monkeypatch):
+    with torch.random.fork_rng(devices=[]):
+        torch.manual_seed(0)
+        graph = Graph.homo(
+            edge_index=torch.tensor([[0, 1, 2], [1, 2, 3]]),
+            x=torch.randn(5, 4),
+        )
+
+        def fail_int(self):
+            raise AssertionError("HardNegativeLinkSampler num_hard_negatives should stay off tensor.__int__")
+
+        monkeypatch.setattr(torch.Tensor, "__int__", fail_int)
+
+        records = HardNegativeLinkSampler(num_negatives=2, num_hard_negatives=torch.tensor(2)).sample(
+            LinkPredictionRecord(
+                graph=graph,
+                src_index=0,
+                dst_index=1,
+                label=1,
+                hard_negative_dst=torch.tensor([3, 4]),
+            )
+        )
+
+        assert len(records) == 3
+        assert sorted(record.dst_index for record in records[1:]) == [3, 4]
+
+
+def test_link_neighbor_sampler_accepts_tensor_ctor_scalars_without_tensor_int(monkeypatch):
+    with torch.random.fork_rng(devices=[]):
+        torch.manual_seed(0)
+        graph = Graph.homo(
+            edge_index=torch.tensor([[0, 1, 3], [1, 2, 1]]),
+            x=torch.arange(12, dtype=torch.float32).view(4, 3),
+        )
+
+        def fail_int(self):
+            raise AssertionError("LinkNeighborSampler constructor scalars should stay off tensor.__int__")
+
+        monkeypatch.setattr(torch.Tensor, "__int__", fail_int)
+
+        record = LinkNeighborSampler(
+            num_neighbors=[torch.tensor(-1)],
+            seed=torch.tensor(0),
+        ).sample(LinkPredictionRecord(graph=graph, src_index=0, dst_index=1, label=1))
+
+        assert torch.equal(record.graph.n_id, torch.tensor([0, 1, 2, 3]))
+        assert record.src_index == 0
+        assert record.dst_index == 1
 
 
 def test_link_neighbor_sampler_extracts_hetero_local_subgraph_for_single_edge_type():
@@ -196,6 +457,119 @@ def test_link_neighbor_sampler_hetero_frontier_expansion_avoids_tensor_tolist(mo
 
     assert torch.equal(sampled["author"], torch.tensor([0, 2]))
     assert torch.equal(sampled["paper"], torch.tensor([1]))
+
+
+def test_link_neighbor_sampler_hetero_frontier_expansion_avoids_torch_unique(monkeypatch):
+    graph = Graph.hetero(
+        nodes={
+            "author": {"x": torch.randn(3, 4)},
+            "paper": {"x": torch.randn(3, 4)},
+        },
+        edges={
+            ("author", "writes", "paper"): {
+                "edge_index": torch.tensor([[0, 2], [1, 1]])
+            },
+            ("paper", "written_by", "author"): {
+                "edge_index": torch.tensor([[1, 1], [0, 2]])
+            },
+        },
+    )
+    sampler = LinkNeighborSampler(num_neighbors=[-1])
+    record = LinkPredictionRecord(
+        graph=graph,
+        src_index=0,
+        dst_index=1,
+        label=1,
+        edge_type=("author", "writes", "paper"),
+    )
+
+    def fail_unique(*args, **kwargs):
+        raise AssertionError("hetero frontier expansion should avoid torch.unique")
+
+    monkeypatch.setattr(torch, "unique", fail_unique)
+
+    sampled = sampler._hetero_sample_node_ids(graph, [record])
+
+    assert torch.equal(sampled["author"], torch.tensor([0, 2]))
+    assert torch.equal(sampled["paper"], torch.tensor([1]))
+
+
+def test_link_neighbor_sampler_hetero_local_record_avoids_tensor_item(monkeypatch):
+    graph = Graph.hetero(
+        nodes={
+            "author": {"x": torch.randn(2, 4)},
+            "paper": {"x": torch.randn(3, 4)},
+        },
+        edges={
+            ("author", "writes", "paper"): {
+                "edge_index": torch.tensor([[0, 1], [1, 2]])
+            },
+            ("paper", "written_by", "author"): {
+                "edge_index": torch.tensor([[1, 2], [0, 1]])
+            },
+        },
+    )
+    sampler = LinkNeighborSampler(num_neighbors=[-1])
+
+    def fail_item(self):
+        raise AssertionError("hetero local record mapping should stay off tensor.item")
+
+    monkeypatch.setattr(torch.Tensor, "item", fail_item)
+
+    record = sampler.sample(
+        LinkPredictionRecord(
+            graph=graph,
+            src_index=0,
+            dst_index=1,
+            label=1,
+            edge_type=("author", "writes", "paper"),
+        )
+    )
+
+    assert record.edge_type == ("author", "writes", "paper")
+    assert torch.equal(record.graph.nodes["author"].n_id, torch.tensor([0]))
+    assert torch.equal(record.graph.nodes["paper"].n_id, torch.tensor([1]))
+    assert record.src_index == 0
+    assert record.dst_index == 0
+
+
+def test_link_neighbor_sampler_hetero_local_record_avoids_tensor_int(monkeypatch):
+    graph = Graph.hetero(
+        nodes={
+            "author": {"x": torch.tensor([[0.0], [1.0]])},
+            "paper": {"x": torch.tensor([[2.0], [3.0], [4.0]])},
+        },
+        edges={
+            ("author", "writes", "paper"): {
+                "edge_index": torch.tensor([[0, 1], [1, 2]])
+            },
+            ("paper", "written_by", "author"): {
+                "edge_index": torch.tensor([[1, 2], [0, 1]])
+            },
+        },
+    )
+    sampler = LinkNeighborSampler(num_neighbors=[-1])
+
+    def fail_int(self):
+        raise AssertionError("hetero local record mapping should stay off tensor.__int__")
+
+    monkeypatch.setattr(torch.Tensor, "__int__", fail_int)
+
+    record = sampler.sample(
+        LinkPredictionRecord(
+            graph=graph,
+            src_index=torch.tensor(0),
+            dst_index=torch.tensor(1),
+            label=torch.tensor(1),
+            edge_type=("author", "writes", "paper"),
+        )
+    )
+
+    assert record.edge_type == ("author", "writes", "paper")
+    assert torch.equal(record.graph.nodes["author"].n_id, torch.tensor([0]))
+    assert torch.equal(record.graph.nodes["paper"].n_id, torch.tensor([1]))
+    assert record.src_index == 0
+    assert record.dst_index == 0
 
 
 def test_link_neighbor_sampler_hetero_local_subgraph_avoids_dense_bool_masks(monkeypatch):
@@ -667,6 +1041,92 @@ def test_link_neighbor_sampler_stitched_link_sampling_crosses_partition_boundari
     assert torch.equal(batch.labels, torch.tensor([1.0]))
 
 
+def test_link_neighbor_sampler_stitched_link_materialization_avoids_tensor_item(monkeypatch, tmp_path):
+    graph = Graph.homo(
+        edge_index=torch.tensor([[0, 1, 2], [1, 2, 3]]),
+        x=torch.arange(4, dtype=torch.float32).view(4, 1),
+        edge_data={"edge_weight": torch.tensor([10.0, 20.0, 30.0])},
+    )
+    write_partitioned_graph(graph, tmp_path, num_partitions=2)
+    shards = {
+        0: LocalGraphShard.from_partition_dir(tmp_path, partition_id=0),
+        1: LocalGraphShard.from_partition_dir(tmp_path, partition_id=1),
+    }
+    coordinator = LocalSamplingCoordinator(shards)
+    loader = Loader(
+        dataset=ListDataset(
+            [
+                LinkPredictionRecord(
+                    graph=shards[0].graph,
+                    src_index=0,
+                    dst_index=1,
+                    label=1,
+                )
+            ]
+        ),
+        sampler=LinkNeighborSampler(
+            num_neighbors=[-1],
+            node_feature_names=("x",),
+            edge_feature_names=("edge_weight",),
+        ),
+        batch_size=1,
+        feature_store=coordinator,
+    )
+
+    def fail_item(self):
+        raise AssertionError("stitched homo link materialization should stay off tensor.item")
+
+    monkeypatch.setattr(torch.Tensor, "item", fail_item)
+
+    batch = next(iter(loader))
+
+    assert torch.equal(batch.src_index, torch.tensor([0]))
+    assert torch.equal(batch.dst_index, torch.tensor([1]))
+
+
+def test_link_neighbor_sampler_stitched_link_materialization_avoids_tensor_int(monkeypatch, tmp_path):
+    graph = Graph.homo(
+        edge_index=torch.tensor([[0, 1, 2], [1, 2, 3]]),
+        x=torch.arange(4, dtype=torch.float32).view(4, 1),
+        edge_data={"edge_weight": torch.tensor([10.0, 20.0, 30.0])},
+    )
+    write_partitioned_graph(graph, tmp_path, num_partitions=2)
+    shards = {
+        0: LocalGraphShard.from_partition_dir(tmp_path, partition_id=0),
+        1: LocalGraphShard.from_partition_dir(tmp_path, partition_id=1),
+    }
+    coordinator = LocalSamplingCoordinator(shards)
+    loader = Loader(
+        dataset=ListDataset(
+            [
+                LinkPredictionRecord(
+                    graph=shards[0].graph,
+                    src_index=torch.tensor(0),
+                    dst_index=torch.tensor(1),
+                    label=torch.tensor(1),
+                )
+            ]
+        ),
+        sampler=LinkNeighborSampler(
+            num_neighbors=[-1],
+            node_feature_names=("x",),
+            edge_feature_names=("edge_weight",),
+        ),
+        batch_size=1,
+        feature_store=coordinator,
+    )
+
+    def fail_int(self):
+        raise AssertionError("stitched homo link materialization should stay off tensor.__int__")
+
+    monkeypatch.setattr(torch.Tensor, "__int__", fail_int)
+
+    batch = next(iter(loader))
+
+    assert torch.equal(batch.src_index, torch.tensor([0]))
+    assert torch.equal(batch.dst_index, torch.tensor([1]))
+
+
 def test_link_neighbor_sampler_stitched_link_sampling_crosses_partition_boundaries_through_store_backed_coordinator(
     tmp_path,
 ):
@@ -975,6 +1435,116 @@ def test_link_neighbor_sampler_stitched_hetero_link_sampling_crosses_partition_b
     assert torch.equal(batch.src_index, torch.tensor([0]))
     assert torch.equal(batch.dst_index, torch.tensor([0]))
     assert torch.equal(batch.labels, torch.tensor([1.0]))
+
+
+def test_link_neighbor_sampler_stitched_hetero_link_materialization_avoids_tensor_item(monkeypatch, tmp_path):
+    graph = Graph.hetero(
+        nodes={
+            "author": {"x": torch.tensor([[10.0], [20.0], [30.0]])},
+            "paper": {"x": torch.tensor([[1.0], [2.0]])},
+        },
+        edges={
+            WRITES: {
+                "edge_index": torch.tensor([[0, 2], [0, 0]]),
+                "edge_weight": torch.tensor([10.0, 20.0]),
+            },
+            WRITTEN_BY: {
+                "edge_index": torch.tensor([[0, 0], [0, 2]]),
+                "edge_weight": torch.tensor([100.0, 200.0]),
+            },
+        },
+    )
+    write_partitioned_graph(graph, tmp_path, num_partitions=2)
+    shards = {
+        0: LocalGraphShard.from_partition_dir(tmp_path, partition_id=0),
+        1: LocalGraphShard.from_partition_dir(tmp_path, partition_id=1),
+    }
+    coordinator = LocalSamplingCoordinator(shards)
+    loader = Loader(
+        dataset=ListDataset(
+            [
+                LinkPredictionRecord(
+                    graph=shards[0].graph,
+                    src_index=0,
+                    dst_index=0,
+                    label=1,
+                    edge_type=WRITES,
+                )
+            ]
+        ),
+        sampler=LinkNeighborSampler(
+            num_neighbors=[-1],
+            node_feature_names={"author": ("x",), "paper": ("x",)},
+            edge_feature_names={WRITES: ("edge_weight",), WRITTEN_BY: ("edge_weight",)},
+        ),
+        batch_size=1,
+        feature_store=coordinator,
+    )
+
+    def fail_item(self):
+        raise AssertionError("stitched hetero link materialization should stay off tensor.item")
+
+    monkeypatch.setattr(torch.Tensor, "item", fail_item)
+
+    batch = next(iter(loader))
+
+    assert torch.equal(batch.src_index, torch.tensor([0]))
+    assert torch.equal(batch.dst_index, torch.tensor([0]))
+
+
+def test_link_neighbor_sampler_stitched_hetero_link_materialization_avoids_torch_unique(monkeypatch, tmp_path):
+    graph = Graph.hetero(
+        nodes={
+            "author": {"x": torch.tensor([[10.0], [20.0], [30.0]])},
+            "paper": {"x": torch.tensor([[1.0], [2.0]])},
+        },
+        edges={
+            WRITES: {
+                "edge_index": torch.tensor([[0, 2], [0, 0]]),
+                "edge_weight": torch.tensor([10.0, 20.0]),
+            },
+            WRITTEN_BY: {
+                "edge_index": torch.tensor([[0, 0], [0, 2]]),
+                "edge_weight": torch.tensor([100.0, 200.0]),
+            },
+        },
+    )
+    write_partitioned_graph(graph, tmp_path, num_partitions=2)
+    shards = {
+        0: LocalGraphShard.from_partition_dir(tmp_path, partition_id=0),
+        1: LocalGraphShard.from_partition_dir(tmp_path, partition_id=1),
+    }
+    coordinator = LocalSamplingCoordinator(shards)
+    loader = Loader(
+        dataset=ListDataset(
+            [
+                LinkPredictionRecord(
+                    graph=shards[0].graph,
+                    src_index=0,
+                    dst_index=0,
+                    label=1,
+                    edge_type=WRITES,
+                )
+            ]
+        ),
+        sampler=LinkNeighborSampler(
+            num_neighbors=[-1],
+            node_feature_names={"author": ("x",), "paper": ("x",)},
+            edge_feature_names={WRITES: ("edge_weight",), WRITTEN_BY: ("edge_weight",)},
+        ),
+        batch_size=1,
+        feature_store=coordinator,
+    )
+
+    def fail_unique(*args, **kwargs):
+        raise AssertionError("stitched hetero link materialization should avoid torch.unique")
+
+    monkeypatch.setattr(torch, "unique", fail_unique)
+
+    batch = next(iter(loader))
+
+    assert torch.equal(batch.src_index, torch.tensor([0]))
+    assert torch.equal(batch.dst_index, torch.tensor([0]))
 
 
 def test_link_neighbor_sampler_stitched_hetero_link_sampling_crosses_partition_boundaries_through_store_backed_coordinator(

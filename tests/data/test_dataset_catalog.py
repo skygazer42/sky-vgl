@@ -1,3 +1,5 @@
+import torch
+
 from vgl.data.catalog import DatasetCatalog, DatasetManifest, DatasetSplit
 
 
@@ -27,6 +29,18 @@ def test_dataset_manifest_exposes_declared_splits_and_stable_fingerprint():
     )
 
     assert changed.fingerprint() != manifest.fingerprint()
+
+
+def test_dataset_split_accepts_tensor_size_without_tensor_int(monkeypatch):
+    def fail_int(self):
+        raise AssertionError("DatasetSplit size should stay off tensor.__int__")
+
+    monkeypatch.setattr(torch.Tensor, "__int__", fail_int)
+
+    split = DatasetSplit("train", size=torch.tensor(2), metadata={"shuffle": False})
+
+    assert split.size == 2
+    assert split.metadata["shuffle"] is False
 
 
 def test_dataset_catalog_registers_and_returns_manifests():

@@ -654,6 +654,22 @@ def test_gradient_accumulation_scheduler_rejects_invalid_configuration():
         GradientAccumulationScheduler({1: 0})
 
 
+def test_gradient_accumulation_scheduler_accepts_tensor_schedule_without_tensor_int(monkeypatch):
+    def fail_int(self):
+        raise AssertionError("GradientAccumulationScheduler scheduling should stay off tensor.__int__")
+
+    monkeypatch.setattr(torch.Tensor, "__int__", fail_int)
+
+    callback = GradientAccumulationScheduler(
+        [
+            (torch.tensor(1), torch.tensor(1)),
+            (torch.tensor(2), torch.tensor(2)),
+        ]
+    )
+
+    assert callback.scheduling == ((1, 1), (2, 2))
+
+
 def test_gradient_accumulation_scheduler_updates_epoch_accumulation_and_restores_original_value():
     callback = GradientAccumulationScheduler({1: 1, 2: 2})
     trainer = Trainer(
@@ -673,6 +689,46 @@ def test_gradient_accumulation_scheduler_updates_epoch_accumulation_and_restores
     assert trainer.global_step == 6
     assert callback.current_accumulate_grad_batches == 2
     assert trainer.accumulate_grad_batches == 3
+
+
+def test_gradient_accumulation_scheduler_on_fit_start_accepts_tensor_state_without_tensor_int(monkeypatch):
+    def fail_int(self):
+        raise AssertionError("GradientAccumulationScheduler fit state should stay off tensor.__int__")
+
+    monkeypatch.setattr(torch.Tensor, "__int__", fail_int)
+
+    callback = GradientAccumulationScheduler({1: 1, 2: 2})
+    trainer = DummyTrainer(ToyModel())
+    trainer.accumulate_grad_batches = torch.tensor(3)
+
+    callback.on_fit_start(trainer, history={"completed_epochs": torch.tensor(1)})
+
+    assert callback.original_accumulate_grad_batches == 3
+    assert callback.current_accumulate_grad_batches == 2
+    assert trainer.accumulate_grad_batches == 2
+
+
+def test_gradient_accumulation_scheduler_load_state_dict_accepts_tensor_state_without_tensor_int(monkeypatch):
+    def fail_int(self):
+        raise AssertionError("GradientAccumulationScheduler state loading should stay off tensor.__int__")
+
+    monkeypatch.setattr(torch.Tensor, "__int__", fail_int)
+
+    callback = GradientAccumulationScheduler({1: 1, 2: 2})
+    trainer = DummyTrainer(ToyModel())
+    trainer.accumulate_grad_batches = 1
+    callback._trainer = trainer
+
+    callback.load_state_dict(
+        {
+            "original_accumulate_grad_batches": torch.tensor(3),
+            "current_accumulate_grad_batches": torch.tensor(2),
+        }
+    )
+
+    assert callback.original_accumulate_grad_batches == 3
+    assert callback.current_accumulate_grad_batches == 2
+    assert trainer.accumulate_grad_batches == 2
 
 
 def test_model_checkpoint_rejects_invalid_configuration(tmp_path):
@@ -699,6 +755,22 @@ def test_model_checkpoint_rejects_invalid_configuration(tmp_path):
 
     with pytest.raises(ValueError, match="every_n_epochs"):
         ModelCheckpoint(tmp_path, every_n_epochs=0)
+
+
+def test_model_checkpoint_accepts_tensor_scalar_counts_without_tensor_int(tmp_path, monkeypatch):
+    def fail_int(self):
+        raise AssertionError("ModelCheckpoint count parameters should stay off tensor.__int__")
+
+    monkeypatch.setattr(torch.Tensor, "__int__", fail_int)
+
+    callback = ModelCheckpoint(
+        tmp_path,
+        save_top_k=torch.tensor(1),
+        every_n_epochs=torch.tensor(2),
+    )
+
+    assert callback.save_top_k == 1
+    assert callback.every_n_epochs == 2
 
 
 def test_model_checkpoint_saves_top_k_and_last(tmp_path):
@@ -855,6 +927,22 @@ def test_gradual_unfreezing_rejects_invalid_configuration():
         GradualUnfreezing(["encoder"], frequency=0)
 
 
+def test_gradual_unfreezing_accepts_tensor_configuration_without_tensor_int(monkeypatch):
+    def fail_int(self):
+        raise AssertionError("GradualUnfreezing config should stay off tensor.__int__")
+
+    monkeypatch.setattr(torch.Tensor, "__int__", fail_int)
+
+    callback = GradualUnfreezing(
+        ["encoder"],
+        start_epoch=torch.tensor(2),
+        frequency=torch.tensor(3),
+    )
+
+    assert callback.start_epoch == 2
+    assert callback.frequency == 3
+
+
 def test_gradual_unfreezing_freezes_modules_then_unfreezes_on_schedule():
     callback = GradualUnfreezing(["encoder_top", "encoder_bottom"], start_epoch=2, frequency=1)
     recorder = FreezeStateRecorder()
@@ -939,6 +1027,26 @@ def test_gradual_unfreezing_state_dict_round_trip_preserves_progress():
     assert restored_trainer.model.encoder_bottom.weight.requires_grad is False
 
 
+def test_gradual_unfreezing_load_state_dict_accepts_tensor_state_without_tensor_int(monkeypatch):
+    def fail_int(self):
+        raise AssertionError("GradualUnfreezing state should stay off tensor.__int__")
+
+    monkeypatch.setattr(torch.Tensor, "__int__", fail_int)
+
+    callback = GradualUnfreezing(["encoder"])
+    callback.group_param_names = (("encoder.weight",), ("head.weight",))
+
+    callback.load_state_dict(
+        {
+            "original_requires_grad": {"encoder.weight": True},
+            "unfrozen_group_count": torch.tensor(1),
+        }
+    )
+
+    assert callback.unfrozen_group_count == 1
+    assert callback.original_requires_grad == {"encoder.weight": True}
+
+
 def test_lookahead_rejects_invalid_configuration():
     with pytest.raises(ValueError, match="sync_period"):
         Lookahead(sync_period=0)
@@ -948,6 +1056,18 @@ def test_lookahead_rejects_invalid_configuration():
 
     with pytest.raises(ValueError, match="slow_step_size"):
         Lookahead(slow_step_size=1.5)
+
+
+def test_lookahead_accepts_tensor_sync_period_without_tensor_int(monkeypatch):
+    def fail_int(self):
+        raise AssertionError("Lookahead sync_period should stay off tensor.__int__")
+
+    monkeypatch.setattr(torch.Tensor, "__int__", fail_int)
+
+    callback = Lookahead(sync_period=torch.tensor(2), slow_step_size=0.5)
+
+    assert callback.sync_period == 2
+    assert callback.slow_step_size == pytest.approx(0.5)
 
 
 def test_lookahead_periodically_syncs_slow_weights_back_into_model():
@@ -988,12 +1108,82 @@ def test_lookahead_state_dict_round_trip_preserves_slow_state():
     assert torch.allclose(restored.slow_state["weight"], callback.slow_state["weight"])
 
 
+def test_lookahead_load_state_dict_accepts_tensor_step_count_without_tensor_int(monkeypatch):
+    def fail_int(self):
+        raise AssertionError("Lookahead state loading should stay off tensor.__int__")
+
+    monkeypatch.setattr(torch.Tensor, "__int__", fail_int)
+
+    callback = Lookahead(sync_period=2, slow_step_size=0.5)
+    callback.load_state_dict(
+        {
+            "slow_state": {"weight": torch.tensor([1.0])},
+            "step_count": torch.tensor(3),
+        }
+    )
+
+    assert callback.step_count == 3
+    assert torch.allclose(callback.slow_state["weight"], torch.tensor([1.0]))
+
+
+def test_lookahead_on_after_optimizer_step_accepts_tensor_step_without_tensor_int(monkeypatch):
+    def fail_int(self):
+        raise AssertionError("Lookahead step handling should stay off tensor.__int__")
+
+    monkeypatch.setattr(torch.Tensor, "__int__", fail_int)
+
+    callback = Lookahead(sync_period=2, slow_step_size=0.5)
+    callback.slow_state = {"weight": torch.tensor([0.0])}
+    trainer = DummyTrainer(ToyModel())
+
+    callback.on_after_optimizer_step(trainer, step=torch.tensor(1))
+
+    assert callback.step_count == 1
+    assert torch.allclose(callback.slow_state["weight"], torch.tensor([0.0]))
+
+
 def test_stochastic_weight_averaging_rejects_invalid_configuration():
     with pytest.raises(ValueError, match="start_epoch"):
         StochasticWeightAveraging(start_epoch=0)
 
     with pytest.raises(ValueError, match="frequency"):
         StochasticWeightAveraging(frequency=0)
+
+
+def test_stochastic_weight_averaging_accepts_tensor_configuration_without_tensor_int(monkeypatch):
+    def fail_int(self):
+        raise AssertionError("StochasticWeightAveraging config should stay off tensor.__int__")
+
+    monkeypatch.setattr(torch.Tensor, "__int__", fail_int)
+
+    callback = StochasticWeightAveraging(
+        start_epoch=torch.tensor(2),
+        frequency=torch.tensor(3),
+    )
+
+    assert callback.start_epoch == 2
+    assert callback.frequency == 3
+
+
+def test_stochastic_weight_averaging_load_state_dict_accepts_tensor_state_without_tensor_int(
+    monkeypatch,
+):
+    def fail_int(self):
+        raise AssertionError("StochasticWeightAveraging state should stay off tensor.__int__")
+
+    monkeypatch.setattr(torch.Tensor, "__int__", fail_int)
+
+    callback = StochasticWeightAveraging()
+
+    callback.load_state_dict(
+        {
+            "avg_state": {"weight": torch.tensor([2.0])},
+            "num_averaged": torch.tensor(3),
+        }
+    )
+
+    assert callback.num_averaged == 3
+    assert torch.allclose(callback.avg_state["weight"], torch.tensor([2.0]))
 
 
 def test_stochastic_weight_averaging_can_apply_averaged_weights_at_fit_end():
@@ -1027,6 +1217,57 @@ def test_label_smoothing_scheduler_rejects_invalid_configuration():
 
     with pytest.raises(ValueError, match="end_epoch"):
         LabelSmoothingScheduler(start_value=0.0, end_value=0.2, start_epoch=3, end_epoch=2)
+
+
+def test_label_smoothing_scheduler_accepts_tensor_epoch_configuration_without_tensor_int(monkeypatch):
+    def fail_int(self):
+        raise AssertionError("LabelSmoothingScheduler config should stay off tensor.__int__")
+
+    monkeypatch.setattr(torch.Tensor, "__int__", fail_int)
+
+    callback = LabelSmoothingScheduler(
+        start_value=0.0,
+        end_value=0.2,
+        start_epoch=torch.tensor(2),
+        end_epoch=torch.tensor(4),
+    )
+
+    assert callback.start_epoch == 2
+    assert callback.end_epoch == 4
+
+
+def test_label_smoothing_scheduler_value_for_epoch_accepts_tensor_epoch_without_tensor_int(monkeypatch):
+    def fail_int(self):
+        raise AssertionError("LabelSmoothingScheduler epoch math should stay off tensor.__int__")
+
+    monkeypatch.setattr(torch.Tensor, "__int__", fail_int)
+
+    callback = LabelSmoothingScheduler(start_value=0.0, end_value=0.2, start_epoch=2, end_epoch=4)
+
+    assert callback._value_for_epoch(torch.tensor(3)) == pytest.approx(0.1)
+
+
+def test_label_smoothing_scheduler_on_fit_start_accepts_tensor_history_without_tensor_int(monkeypatch):
+    def fail_int(self):
+        raise AssertionError("LabelSmoothingScheduler history should stay off tensor.__int__")
+
+    monkeypatch.setattr(torch.Tensor, "__int__", fail_int)
+
+    callback = LabelSmoothingScheduler(start_value=0.0, end_value=0.2, start_epoch=2, end_epoch=4)
+    task = GraphClassificationTask(target="label", label_source="graph", label_smoothing=0.05)
+    trainer = Trainer(
+        model=MulticlassToyModel(),
+        task=task,
+        optimizer=torch.optim.SGD,
+        lr=0.0,
+        max_epochs=3,
+        callbacks=[callback],
+    )
+
+    callback.on_fit_start(trainer, history={"completed_epochs": torch.tensor(2)})
+
+    assert callback.current_value == pytest.approx(0.1)
+    assert task.label_smoothing == pytest.approx(0.1)
 
 
 def test_label_smoothing_scheduler_updates_task_on_linear_schedule_and_restores_original_value():
@@ -1107,6 +1348,62 @@ def test_focal_gamma_scheduler_rejects_invalid_configuration():
 
     with pytest.raises(ValueError, match="end_epoch"):
         FocalGammaScheduler(start_value=0.0, end_value=3.0, start_epoch=3, end_epoch=2)
+
+
+def test_focal_gamma_scheduler_accepts_tensor_epoch_configuration_without_tensor_int(monkeypatch):
+    def fail_int(self):
+        raise AssertionError("FocalGammaScheduler config should stay off tensor.__int__")
+
+    monkeypatch.setattr(torch.Tensor, "__int__", fail_int)
+
+    callback = FocalGammaScheduler(
+        start_value=0.5,
+        end_value=3.0,
+        start_epoch=torch.tensor(2),
+        end_epoch=torch.tensor(4),
+    )
+
+    assert callback.start_epoch == 2
+    assert callback.end_epoch == 4
+
+
+def test_focal_gamma_scheduler_value_for_epoch_accepts_tensor_epoch_without_tensor_int(monkeypatch):
+    def fail_int(self):
+        raise AssertionError("FocalGammaScheduler epoch math should stay off tensor.__int__")
+
+    monkeypatch.setattr(torch.Tensor, "__int__", fail_int)
+
+    callback = FocalGammaScheduler(start_value=0.5, end_value=3.0, start_epoch=2, end_epoch=4)
+
+    assert callback._value_for_epoch(torch.tensor(3)) == pytest.approx(1.75)
+
+
+def test_focal_gamma_scheduler_on_fit_start_accepts_tensor_history_without_tensor_int(monkeypatch):
+    def fail_int(self):
+        raise AssertionError("FocalGammaScheduler history should stay off tensor.__int__")
+
+    monkeypatch.setattr(torch.Tensor, "__int__", fail_int)
+
+    callback = FocalGammaScheduler(start_value=0.5, end_value=3.0, start_epoch=2, end_epoch=4)
+    task = GraphClassificationTask(
+        target="label",
+        label_source="graph",
+        loss="focal",
+        focal_gamma=1.5,
+    )
+    trainer = Trainer(
+        model=MulticlassToyModel(),
+        task=task,
+        optimizer=torch.optim.SGD,
+        lr=0.0,
+        max_epochs=3,
+        callbacks=[callback],
+    )
+
+    callback.on_fit_start(trainer, history={"completed_epochs": torch.tensor(2)})
+
+    assert callback.current_value == pytest.approx(1.75)
+    assert task.focal_gamma == pytest.approx(1.75)
 
 
 def test_focal_gamma_scheduler_updates_task_on_linear_schedule_and_restores_original_value():
@@ -1202,6 +1499,63 @@ def test_logit_adjust_tau_scheduler_rejects_invalid_configuration():
 
     with pytest.raises(ValueError, match="end_epoch"):
         LogitAdjustTauScheduler(start_value=0.0, end_value=1.5, start_epoch=3, end_epoch=2)
+
+
+def test_logit_adjust_tau_scheduler_accepts_tensor_epoch_configuration_without_tensor_int(monkeypatch):
+    def fail_int(self):
+        raise AssertionError("LogitAdjustTauScheduler config should stay off tensor.__int__")
+
+    monkeypatch.setattr(torch.Tensor, "__int__", fail_int)
+
+    callback = LogitAdjustTauScheduler(
+        start_value=0.0,
+        end_value=1.5,
+        start_epoch=torch.tensor(2),
+        end_epoch=torch.tensor(4),
+    )
+
+    assert callback.start_epoch == 2
+    assert callback.end_epoch == 4
+
+
+def test_logit_adjust_tau_scheduler_value_for_epoch_accepts_tensor_epoch_without_tensor_int(monkeypatch):
+    def fail_int(self):
+        raise AssertionError("LogitAdjustTauScheduler epoch math should stay off tensor.__int__")
+
+    monkeypatch.setattr(torch.Tensor, "__int__", fail_int)
+
+    callback = LogitAdjustTauScheduler(start_value=0.0, end_value=1.5, start_epoch=2, end_epoch=4)
+
+    assert callback._value_for_epoch(torch.tensor(3)) == pytest.approx(0.75)
+
+
+def test_logit_adjust_tau_scheduler_on_fit_start_accepts_tensor_history_without_tensor_int(monkeypatch):
+    def fail_int(self):
+        raise AssertionError("LogitAdjustTauScheduler history should stay off tensor.__int__")
+
+    monkeypatch.setattr(torch.Tensor, "__int__", fail_int)
+
+    callback = LogitAdjustTauScheduler(start_value=0.0, end_value=1.5, start_epoch=2, end_epoch=4)
+    task = GraphClassificationTask(
+        target="label",
+        label_source="graph",
+        loss="logit_adjustment",
+        class_count=[3.0, 1.0],
+        logit_adjust_tau=0.2,
+    )
+    trainer = Trainer(
+        model=MulticlassToyModel(),
+        task=task,
+        optimizer=torch.optim.SGD,
+        lr=0.0,
+        max_epochs=3,
+        callbacks=[callback],
+    )
+
+    callback.on_fit_start(trainer, history={"completed_epochs": torch.tensor(2)})
+
+    assert callback.current_value == pytest.approx(0.75)
+    assert task.logit_adjust_tau == pytest.approx(0.75)
 
 
 def test_logit_adjust_tau_scheduler_updates_task_on_linear_schedule_and_restores_original_value():
@@ -1302,6 +1656,63 @@ def test_ldam_margin_scheduler_rejects_invalid_configuration():
         LdamMarginScheduler(start_value=0.2, end_value=0.4, start_epoch=3, end_epoch=2)
 
 
+def test_ldam_margin_scheduler_accepts_tensor_epoch_configuration_without_tensor_int(monkeypatch):
+    def fail_int(self):
+        raise AssertionError("LdamMarginScheduler config should stay off tensor.__int__")
+
+    monkeypatch.setattr(torch.Tensor, "__int__", fail_int)
+
+    callback = LdamMarginScheduler(
+        start_value=0.2,
+        end_value=0.5,
+        start_epoch=torch.tensor(2),
+        end_epoch=torch.tensor(4),
+    )
+
+    assert callback.start_epoch == 2
+    assert callback.end_epoch == 4
+
+
+def test_ldam_margin_scheduler_value_for_epoch_accepts_tensor_epoch_without_tensor_int(monkeypatch):
+    def fail_int(self):
+        raise AssertionError("LdamMarginScheduler epoch math should stay off tensor.__int__")
+
+    monkeypatch.setattr(torch.Tensor, "__int__", fail_int)
+
+    callback = LdamMarginScheduler(start_value=0.2, end_value=0.5, start_epoch=2, end_epoch=4)
+
+    assert callback._value_for_epoch(torch.tensor(3)) == pytest.approx(0.35)
+
+
+def test_ldam_margin_scheduler_on_fit_start_accepts_tensor_history_without_tensor_int(monkeypatch):
+    def fail_int(self):
+        raise AssertionError("LdamMarginScheduler history should stay off tensor.__int__")
+
+    monkeypatch.setattr(torch.Tensor, "__int__", fail_int)
+
+    callback = LdamMarginScheduler(start_value=0.2, end_value=0.5, start_epoch=2, end_epoch=4)
+    task = GraphClassificationTask(
+        target="label",
+        label_source="graph",
+        loss="ldam",
+        class_count=[3.0, 1.0],
+        ldam_max_margin=0.35,
+    )
+    trainer = Trainer(
+        model=MulticlassToyModel(),
+        task=task,
+        optimizer=torch.optim.SGD,
+        lr=0.0,
+        max_epochs=3,
+        callbacks=[callback],
+    )
+
+    callback.on_fit_start(trainer, history={"completed_epochs": torch.tensor(2)})
+
+    assert callback.current_value == pytest.approx(0.35)
+    assert task.ldam_max_margin == pytest.approx(0.35)
+
+
 def test_ldam_margin_scheduler_updates_task_on_linear_schedule_and_restores_original_value():
     callback = LdamMarginScheduler(start_value=0.2, end_value=0.5, start_epoch=2, end_epoch=4)
     recorder = LdamMarginRecorder()
@@ -1400,6 +1811,57 @@ def test_pos_weight_scheduler_rejects_invalid_configuration():
         PosWeightScheduler(start_value=1.0, end_value=4.0, start_epoch=3, end_epoch=2)
 
 
+def test_pos_weight_scheduler_accepts_tensor_epoch_configuration_without_tensor_int(monkeypatch):
+    def fail_int(self):
+        raise AssertionError("PosWeightScheduler config should stay off tensor.__int__")
+
+    monkeypatch.setattr(torch.Tensor, "__int__", fail_int)
+
+    callback = PosWeightScheduler(
+        start_value=1.0,
+        end_value=4.0,
+        start_epoch=torch.tensor(2),
+        end_epoch=torch.tensor(4),
+    )
+
+    assert callback.start_epoch == 2
+    assert callback.end_epoch == 4
+
+
+def test_pos_weight_scheduler_value_for_epoch_accepts_tensor_epoch_without_tensor_int(monkeypatch):
+    def fail_int(self):
+        raise AssertionError("PosWeightScheduler epoch math should stay off tensor.__int__")
+
+    monkeypatch.setattr(torch.Tensor, "__int__", fail_int)
+
+    callback = PosWeightScheduler(start_value=1.0, end_value=4.0, start_epoch=2, end_epoch=4)
+
+    assert callback._value_for_epoch(torch.tensor(3)) == pytest.approx(2.5)
+
+
+def test_pos_weight_scheduler_on_fit_start_accepts_tensor_history_without_tensor_int(monkeypatch):
+    def fail_int(self):
+        raise AssertionError("PosWeightScheduler history should stay off tensor.__int__")
+
+    monkeypatch.setattr(torch.Tensor, "__int__", fail_int)
+
+    callback = PosWeightScheduler(start_value=1.0, end_value=4.0, start_epoch=2, end_epoch=4)
+    task = LinkPredictionTask(target="label", pos_weight=2.0)
+    trainer = Trainer(
+        model=MulticlassToyModel(),
+        task=task,
+        optimizer=torch.optim.SGD,
+        lr=0.0,
+        max_epochs=3,
+        callbacks=[callback],
+    )
+
+    callback.on_fit_start(trainer, history={"completed_epochs": torch.tensor(2)})
+
+    assert callback.current_value == pytest.approx(2.5)
+    assert torch.allclose(task.pos_weight, torch.tensor([2.5]))
+
+
 def test_pos_weight_scheduler_updates_task_on_linear_schedule_and_restores_original_value():
     callback = PosWeightScheduler(start_value=1.0, end_value=4.0, start_epoch=2, end_epoch=4)
     recorder = PosWeightRecorder()
@@ -1478,6 +1940,61 @@ def test_bootstrap_beta_scheduler_rejects_invalid_configuration():
 
     with pytest.raises(ValueError, match="end_epoch"):
         BootstrapBetaScheduler(start_value=0.2, end_value=0.9, start_epoch=3, end_epoch=2)
+
+
+def test_bootstrap_beta_scheduler_accepts_tensor_epoch_configuration_without_tensor_int(monkeypatch):
+    def fail_int(self):
+        raise AssertionError("BootstrapBetaScheduler config should stay off tensor.__int__")
+
+    monkeypatch.setattr(torch.Tensor, "__int__", fail_int)
+
+    callback = BootstrapBetaScheduler(
+        start_value=0.2,
+        end_value=0.8,
+        start_epoch=torch.tensor(2),
+        end_epoch=torch.tensor(4),
+    )
+
+    assert callback.start_epoch == 2
+    assert callback.end_epoch == 4
+
+
+def test_bootstrap_beta_scheduler_value_for_epoch_accepts_tensor_epoch_without_tensor_int(monkeypatch):
+    def fail_int(self):
+        raise AssertionError("BootstrapBetaScheduler epoch math should stay off tensor.__int__")
+
+    monkeypatch.setattr(torch.Tensor, "__int__", fail_int)
+
+    callback = BootstrapBetaScheduler(start_value=0.2, end_value=0.8, start_epoch=2, end_epoch=4)
+
+    assert callback._value_for_epoch(torch.tensor(3)) == pytest.approx(0.5)
+
+
+def test_bootstrap_beta_scheduler_on_fit_start_accepts_tensor_history_without_tensor_int(monkeypatch):
+    def fail_int(self):
+        raise AssertionError("BootstrapBetaScheduler history should stay off tensor.__int__")
+
+    monkeypatch.setattr(torch.Tensor, "__int__", fail_int)
+
+    callback = BootstrapBetaScheduler(start_value=0.2, end_value=0.8, start_epoch=2, end_epoch=4)
+    task = BootstrapTask(
+        GraphClassificationTask(target="label", label_source="graph"),
+        beta=0.95,
+        mode="soft",
+    )
+    trainer = Trainer(
+        model=MulticlassToyModel(),
+        task=task,
+        optimizer=torch.optim.SGD,
+        lr=0.0,
+        max_epochs=3,
+        callbacks=[callback],
+    )
+
+    callback.on_fit_start(trainer, history={"completed_epochs": torch.tensor(2)})
+
+    assert callback.current_value == pytest.approx(0.5)
+    assert task.beta == pytest.approx(0.5)
 
 
 def test_bootstrap_beta_scheduler_updates_task_on_linear_schedule_and_restores_original_value():
@@ -1572,6 +2089,60 @@ def test_confidence_penalty_scheduler_rejects_invalid_configuration():
         ConfidencePenaltyScheduler(start_value=0.0, end_value=0.3, start_epoch=3, end_epoch=2)
 
 
+def test_confidence_penalty_scheduler_accepts_tensor_epoch_configuration_without_tensor_int(monkeypatch):
+    def fail_int(self):
+        raise AssertionError("ConfidencePenaltyScheduler config should stay off tensor.__int__")
+
+    monkeypatch.setattr(torch.Tensor, "__int__", fail_int)
+
+    callback = ConfidencePenaltyScheduler(
+        start_value=0.0,
+        end_value=0.3,
+        start_epoch=torch.tensor(2),
+        end_epoch=torch.tensor(4),
+    )
+
+    assert callback.start_epoch == 2
+    assert callback.end_epoch == 4
+
+
+def test_confidence_penalty_scheduler_value_for_epoch_accepts_tensor_epoch_without_tensor_int(monkeypatch):
+    def fail_int(self):
+        raise AssertionError("ConfidencePenaltyScheduler epoch math should stay off tensor.__int__")
+
+    monkeypatch.setattr(torch.Tensor, "__int__", fail_int)
+
+    callback = ConfidencePenaltyScheduler(start_value=0.0, end_value=0.3, start_epoch=2, end_epoch=4)
+
+    assert callback._value_for_epoch(torch.tensor(3)) == pytest.approx(0.15)
+
+
+def test_confidence_penalty_scheduler_on_fit_start_accepts_tensor_history_without_tensor_int(monkeypatch):
+    def fail_int(self):
+        raise AssertionError("ConfidencePenaltyScheduler history should stay off tensor.__int__")
+
+    monkeypatch.setattr(torch.Tensor, "__int__", fail_int)
+
+    callback = ConfidencePenaltyScheduler(start_value=0.0, end_value=0.3, start_epoch=2, end_epoch=4)
+    task = ConfidencePenaltyTask(
+        GraphClassificationTask(target="label", label_source="graph"),
+        coefficient=0.1,
+    )
+    trainer = Trainer(
+        model=MulticlassToyModel(),
+        task=task,
+        optimizer=torch.optim.SGD,
+        lr=0.0,
+        max_epochs=3,
+        callbacks=[callback],
+    )
+
+    callback.on_fit_start(trainer, history={"completed_epochs": torch.tensor(2)})
+
+    assert callback.current_value == pytest.approx(0.15)
+    assert task.coefficient == pytest.approx(0.15)
+
+
 def test_confidence_penalty_scheduler_updates_task_on_linear_schedule_and_restores_original_value():
     callback = ConfidencePenaltyScheduler(start_value=0.0, end_value=0.3, start_epoch=2, end_epoch=4)
     recorder = ConfidencePenaltyRecorder()
@@ -1659,6 +2230,60 @@ def test_flooding_level_scheduler_rejects_invalid_configuration():
 
     with pytest.raises(ValueError, match="end_epoch"):
         FloodingLevelScheduler(start_value=0.0, end_value=0.3, start_epoch=3, end_epoch=2)
+
+
+def test_flooding_level_scheduler_accepts_tensor_epoch_configuration_without_tensor_int(monkeypatch):
+    def fail_int(self):
+        raise AssertionError("FloodingLevelScheduler config should stay off tensor.__int__")
+
+    monkeypatch.setattr(torch.Tensor, "__int__", fail_int)
+
+    callback = FloodingLevelScheduler(
+        start_value=0.0,
+        end_value=0.3,
+        start_epoch=torch.tensor(2),
+        end_epoch=torch.tensor(4),
+    )
+
+    assert callback.start_epoch == 2
+    assert callback.end_epoch == 4
+
+
+def test_flooding_level_scheduler_value_for_epoch_accepts_tensor_epoch_without_tensor_int(monkeypatch):
+    def fail_int(self):
+        raise AssertionError("FloodingLevelScheduler epoch math should stay off tensor.__int__")
+
+    monkeypatch.setattr(torch.Tensor, "__int__", fail_int)
+
+    callback = FloodingLevelScheduler(start_value=0.0, end_value=0.3, start_epoch=2, end_epoch=4)
+
+    assert callback._value_for_epoch(torch.tensor(3)) == pytest.approx(0.15)
+
+
+def test_flooding_level_scheduler_on_fit_start_accepts_tensor_history_without_tensor_int(monkeypatch):
+    def fail_int(self):
+        raise AssertionError("FloodingLevelScheduler history should stay off tensor.__int__")
+
+    monkeypatch.setattr(torch.Tensor, "__int__", fail_int)
+
+    callback = FloodingLevelScheduler(start_value=0.0, end_value=0.3, start_epoch=2, end_epoch=4)
+    task = FloodingTask(
+        GraphClassificationTask(target="label", label_source="graph"),
+        level=0.1,
+    )
+    trainer = Trainer(
+        model=MulticlassToyModel(),
+        task=task,
+        optimizer=torch.optim.SGD,
+        lr=0.0,
+        max_epochs=3,
+        callbacks=[callback],
+    )
+
+    callback.on_fit_start(trainer, history={"completed_epochs": torch.tensor(2)})
+
+    assert callback.current_value == pytest.approx(0.15)
+    assert task.level == pytest.approx(0.15)
 
 
 def test_flooding_level_scheduler_updates_task_on_linear_schedule_and_restores_original_value():
@@ -1750,6 +2375,66 @@ def test_generalized_cross_entropy_scheduler_rejects_invalid_configuration():
         GeneralizedCrossEntropyScheduler(start_value=0.3, end_value=0.9, start_epoch=3, end_epoch=2)
 
 
+def test_generalized_cross_entropy_scheduler_accepts_tensor_epoch_configuration_without_tensor_int(
+    monkeypatch,
+):
+    def fail_int(self):
+        raise AssertionError("GeneralizedCrossEntropyScheduler config should stay off tensor.__int__")
+
+    monkeypatch.setattr(torch.Tensor, "__int__", fail_int)
+
+    callback = GeneralizedCrossEntropyScheduler(
+        start_value=0.3,
+        end_value=0.9,
+        start_epoch=torch.tensor(2),
+        end_epoch=torch.tensor(4),
+    )
+
+    assert callback.start_epoch == 2
+    assert callback.end_epoch == 4
+
+
+def test_generalized_cross_entropy_scheduler_value_for_epoch_accepts_tensor_epoch_without_tensor_int(
+    monkeypatch,
+):
+    def fail_int(self):
+        raise AssertionError("GeneralizedCrossEntropyScheduler epoch math should stay off tensor.__int__")
+
+    monkeypatch.setattr(torch.Tensor, "__int__", fail_int)
+
+    callback = GeneralizedCrossEntropyScheduler(start_value=0.3, end_value=0.9, start_epoch=2, end_epoch=4)
+
+    assert callback._value_for_epoch(torch.tensor(3)) == pytest.approx(0.6)
+
+
+def test_generalized_cross_entropy_scheduler_on_fit_start_accepts_tensor_history_without_tensor_int(
+    monkeypatch,
+):
+    def fail_int(self):
+        raise AssertionError("GeneralizedCrossEntropyScheduler history should stay off tensor.__int__")
+
+    monkeypatch.setattr(torch.Tensor, "__int__", fail_int)
+
+    callback = GeneralizedCrossEntropyScheduler(start_value=0.3, end_value=0.9, start_epoch=2, end_epoch=4)
+    task = GeneralizedCrossEntropyTask(
+        GraphClassificationTask(target="label", label_source="graph"),
+        q=0.7,
+    )
+    trainer = Trainer(
+        model=MulticlassToyModel(),
+        task=task,
+        optimizer=torch.optim.SGD,
+        lr=0.0,
+        max_epochs=3,
+        callbacks=[callback],
+    )
+
+    callback.on_fit_start(trainer, history={"completed_epochs": torch.tensor(2)})
+
+    assert callback.current_value == pytest.approx(0.6)
+    assert task.q == pytest.approx(0.6)
+
+
 def test_generalized_cross_entropy_scheduler_updates_task_on_linear_schedule_and_restores_original_value():
     callback = GeneralizedCrossEntropyScheduler(start_value=0.3, end_value=0.9, start_epoch=2, end_epoch=4)
     recorder = GeneralizedCrossEntropyRecorder()
@@ -1837,6 +2522,60 @@ def test_poly1_epsilon_scheduler_rejects_invalid_configuration():
 
     with pytest.raises(ValueError, match="end_epoch"):
         Poly1EpsilonScheduler(start_value=0.3, end_value=0.9, start_epoch=3, end_epoch=2)
+
+
+def test_poly1_epsilon_scheduler_accepts_tensor_epoch_configuration_without_tensor_int(monkeypatch):
+    def fail_int(self):
+        raise AssertionError("Poly1EpsilonScheduler config should stay off tensor.__int__")
+
+    monkeypatch.setattr(torch.Tensor, "__int__", fail_int)
+
+    callback = Poly1EpsilonScheduler(
+        start_value=0.3,
+        end_value=0.9,
+        start_epoch=torch.tensor(2),
+        end_epoch=torch.tensor(4),
+    )
+
+    assert callback.start_epoch == 2
+    assert callback.end_epoch == 4
+
+
+def test_poly1_epsilon_scheduler_value_for_epoch_accepts_tensor_epoch_without_tensor_int(monkeypatch):
+    def fail_int(self):
+        raise AssertionError("Poly1EpsilonScheduler epoch math should stay off tensor.__int__")
+
+    monkeypatch.setattr(torch.Tensor, "__int__", fail_int)
+
+    callback = Poly1EpsilonScheduler(start_value=0.3, end_value=0.9, start_epoch=2, end_epoch=4)
+
+    assert callback._value_for_epoch(torch.tensor(3)) == pytest.approx(0.6)
+
+
+def test_poly1_epsilon_scheduler_on_fit_start_accepts_tensor_history_without_tensor_int(monkeypatch):
+    def fail_int(self):
+        raise AssertionError("Poly1EpsilonScheduler history should stay off tensor.__int__")
+
+    monkeypatch.setattr(torch.Tensor, "__int__", fail_int)
+
+    callback = Poly1EpsilonScheduler(start_value=0.3, end_value=0.9, start_epoch=2, end_epoch=4)
+    task = Poly1CrossEntropyTask(
+        GraphClassificationTask(target="label", label_source="graph"),
+        epsilon=0.7,
+    )
+    trainer = Trainer(
+        model=MulticlassToyModel(),
+        task=task,
+        optimizer=torch.optim.SGD,
+        lr=0.0,
+        max_epochs=3,
+        callbacks=[callback],
+    )
+
+    callback.on_fit_start(trainer, history={"completed_epochs": torch.tensor(2)})
+
+    assert callback.current_value == pytest.approx(0.6)
+    assert task.epsilon == pytest.approx(0.6)
 
 
 def test_poly1_epsilon_scheduler_updates_task_on_linear_schedule_and_restores_original_value():
@@ -2020,6 +2759,56 @@ def test_weight_decay_scheduler_rejects_invalid_configuration():
         WeightDecayScheduler(start_factor=0.0, end_factor=1.0, start_epoch=3, end_epoch=2)
 
 
+def test_weight_decay_scheduler_accepts_tensor_epoch_configuration_without_tensor_int(monkeypatch):
+    def fail_int(self):
+        raise AssertionError("WeightDecayScheduler config should stay off tensor.__int__")
+
+    monkeypatch.setattr(torch.Tensor, "__int__", fail_int)
+
+    callback = WeightDecayScheduler(
+        start_factor=0.0,
+        end_factor=1.5,
+        start_epoch=torch.tensor(2),
+        end_epoch=torch.tensor(4),
+    )
+
+    assert callback.start_epoch == 2
+    assert callback.end_epoch == 4
+
+
+def test_weight_decay_scheduler_value_for_epoch_accepts_tensor_epoch_without_tensor_int(monkeypatch):
+    def fail_int(self):
+        raise AssertionError("WeightDecayScheduler epoch math should stay off tensor.__int__")
+
+    monkeypatch.setattr(torch.Tensor, "__int__", fail_int)
+
+    callback = WeightDecayScheduler(start_factor=0.0, end_factor=1.5, start_epoch=2, end_epoch=4)
+
+    assert callback._value_for_epoch(torch.tensor(3)) == pytest.approx(0.75)
+
+
+def test_weight_decay_scheduler_on_fit_start_accepts_tensor_history_without_tensor_int(monkeypatch):
+    def fail_int(self):
+        raise AssertionError("WeightDecayScheduler history should stay off tensor.__int__")
+
+    monkeypatch.setattr(torch.Tensor, "__int__", fail_int)
+
+    callback = WeightDecayScheduler(start_factor=0.0, end_factor=1.5, start_epoch=2, end_epoch=4)
+    trainer = Trainer(
+        model=ToyModel(),
+        task=ToyTask(),
+        optimizer=lambda params, lr: torch.optim.SGD(params, lr=lr, weight_decay=0.2),
+        lr=0.0,
+        max_epochs=3,
+        callbacks=[callback],
+    )
+
+    callback.on_fit_start(trainer, history={"completed_epochs": torch.tensor(2)})
+
+    assert callback.current_factor == pytest.approx(0.75)
+    assert trainer.optimizer.param_groups[0]["weight_decay"] == pytest.approx(0.15)
+
+
 def test_weight_decay_scheduler_updates_optimizer_on_linear_schedule_and_restores_original_values():
     callback = WeightDecayScheduler(start_factor=0.0, end_factor=1.5, start_epoch=2, end_epoch=4)
     recorder = WeightDecayRecorder()
@@ -2077,6 +2866,17 @@ def test_gradient_noise_injection_rejects_invalid_configuration():
         GradientNoiseInjection(std=0.1, decay_exponent=-0.1)
 
 
+def test_gradient_noise_injection_accepts_tensor_seed_without_tensor_int(monkeypatch):
+    def fail_int(self):
+        raise AssertionError("GradientNoiseInjection seed should stay off tensor.__int__")
+
+    monkeypatch.setattr(torch.Tensor, "__int__", fail_int)
+
+    callback = GradientNoiseInjection(std=0.1, decay_exponent=0.0, seed=torch.tensor(7))
+
+    assert callback.seed == 7
+
+
 def test_gradient_noise_injection_adds_deterministic_noise_to_dense_gradients():
     parameter = torch.tensor([[1.0, -1.0], [0.5, -0.5]], dtype=torch.float32)
     model = GradientHolderModel(parameter)
@@ -2120,3 +2920,31 @@ def test_gradient_noise_injection_state_dict_round_trip_preserves_generator_prog
 
     assert restored.step_count == callback.step_count == 3
     assert torch.allclose(restored_trainer.model.weight.grad, trainer.model.weight.grad)
+
+
+def test_gradient_noise_injection_load_state_dict_accepts_tensor_step_count_without_tensor_int(monkeypatch):
+    def fail_int(self):
+        raise AssertionError("GradientNoiseInjection state loading should stay off tensor.__int__")
+
+    monkeypatch.setattr(torch.Tensor, "__int__", fail_int)
+
+    callback = GradientNoiseInjection(std=0.1, decay_exponent=0.0, seed=7)
+    callback.load_state_dict({"step_count": torch.tensor(2), "generator_state": None})
+
+    assert callback.step_count == 2
+
+
+def test_gradient_noise_injection_on_before_optimizer_step_accepts_tensor_step_without_tensor_int(monkeypatch):
+    def fail_int(self):
+        raise AssertionError("GradientNoiseInjection step handling should stay off tensor.__int__")
+
+    monkeypatch.setattr(torch.Tensor, "__int__", fail_int)
+
+    parameter = torch.tensor([1.0, -1.0], dtype=torch.float32)
+    trainer = DummyTrainer(GradientHolderModel(parameter))
+    trainer.model.weight.grad = torch.zeros_like(trainer.model.weight)
+    callback = GradientNoiseInjection(std=0.1, decay_exponent=0.0, seed=7)
+    callback.on_fit_start(trainer, history={})
+    callback.on_before_optimizer_step(trainer, step=torch.tensor(1))
+
+    assert callback.step_count == 1

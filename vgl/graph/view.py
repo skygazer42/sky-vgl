@@ -6,6 +6,12 @@ from vgl.graph.schema import GraphSchema
 from vgl.graph.stores import EdgeStore, NodeStore
 
 
+def _as_python_int(value) -> int:
+    if isinstance(value, torch.Tensor):
+        return int(value.detach().cpu().numpy().reshape(()).item())
+    return int(value)
+
+
 @dataclass(slots=True)
 class GraphView:
     base: object
@@ -28,7 +34,7 @@ class GraphView:
                 return int(value.size(0))
         graph_store = self.graph_store
         if graph_store is not None:
-            return int(graph_store.num_nodes(node_type))
+            return _as_python_int(graph_store.num_nodes(node_type))
         raise ValueError(f"Cannot infer node count for node type {node_type!r}")
 
     def __getattr__(self, name: str):

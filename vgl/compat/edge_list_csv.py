@@ -74,8 +74,15 @@ def _scalar_edge_value(values: torch.Tensor, index: int, *, column: str):
     value = values[index]
     if not isinstance(value, torch.Tensor) or value.ndim != 0:
         raise ValueError(f"edge feature {column!r} must contain scalar values for CSV export")
-    python_value = value.detach().cpu().item()
-    if isinstance(python_value, bool) or not isinstance(python_value, (int, float)):
+    scalar = value.detach().cpu()
+    scalar_value = scalar.numpy().reshape(()).item()
+    if scalar.dtype == torch.bool:
+        raise ValueError(f"edge feature {column!r} must contain numeric scalar values for CSV export")
+    if torch.is_floating_point(scalar):
+        python_value = float(scalar_value)
+    elif scalar.dtype in (torch.uint8, torch.int8, torch.int16, torch.int32, torch.int64):
+        python_value = int(scalar_value)
+    else:
         raise ValueError(f"edge feature {column!r} must contain numeric scalar values for CSV export")
     return python_value
 
@@ -133,10 +140,11 @@ def to_edge_list_csv(
     with Path(path).open("w", encoding="utf-8", newline="") as handle:
         writer = csv.DictWriter(handle, fieldnames=fieldnames, delimiter=delimiter, lineterminator="\n")
         writer.writeheader()
-        for edge_id in range(int(edge_list.size(0))):
+        edge_rows = edge_list.detach().cpu().numpy()
+        for edge_id, (src_index, dst_index) in enumerate(edge_rows):
             row = {
-                src_column: int(edge_list[edge_id, 0]),
-                dst_column: int(edge_list[edge_id, 1]),
+                src_column: int(src_index),
+                dst_column: int(dst_index),
             }
             for name in resolved_edge_columns:
                 row[name] = _scalar_edge_value(edge_store[name], edge_id, column=name)

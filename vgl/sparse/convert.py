@@ -3,6 +3,32 @@ import torch
 from vgl.sparse.base import SparseLayout, SparseTensor
 
 
+def _expand_interval_values(values: torch.Tensor, counts: torch.Tensor, *, step: int) -> torch.Tensor:
+    values = torch.as_tensor(values, dtype=torch.long).view(-1)
+    counts = torch.as_tensor(counts, dtype=torch.long, device=values.device).view(-1)
+    if values.numel() == 0 or counts.numel() == 0:
+        return values.new_empty(0)
+
+    positive = counts > 0
+    values = values[positive]
+    counts = counts[positive]
+    if values.numel() == 0:
+        return values.new_empty(0)
+
+    offsets = torch.cumsum(counts, dim=0) - counts
+    base = values - step * offsets
+    deltas = torch.empty_like(base)
+    deltas[0] = base[0]
+    if base.numel() > 1:
+        deltas[1:] = base[1:] - base[:-1]
+    markers = torch.zeros(counts.sum(), dtype=values.dtype, device=values.device)
+    markers[offsets] = deltas
+    expanded = torch.cumsum(markers, dim=0)
+    if step != 0:
+        expanded = expanded + step * torch.arange(counts.sum(), dtype=values.dtype, device=values.device)
+    return expanded
+
+
 def _sparse_shape_from_torch(tensor: torch.Tensor) -> tuple[int, int]:
     if not hasattr(tensor, "sparse_dim") or int(tensor.sparse_dim()) != 2:
         raise ValueError("torch sparse tensor must have exactly two sparse dimensions")
@@ -100,9 +126,10 @@ def to_coo(sparse: SparseTensor) -> SparseTensor:
         if crow_indices is None or col_indices is None:
             raise ValueError("crow_indices and col_indices are required for csr layout")
         counts = crow_indices[1:] - crow_indices[:-1]
-        row = torch.repeat_interleave(
+        row = _expand_interval_values(
             torch.arange(sparse.shape[0], dtype=torch.long, device=crow_indices.device),
             counts,
+            step=0,
         )
         return SparseTensor(
             layout=SparseLayout.COO,
@@ -116,9 +143,10 @@ def to_coo(sparse: SparseTensor) -> SparseTensor:
     if ccol_indices is None or row_indices is None:
         raise ValueError("ccol_indices and row_indices are required for csc layout")
     counts = ccol_indices[1:] - ccol_indices[:-1]
-    col = torch.repeat_interleave(
+    col = _expand_interval_values(
         torch.arange(sparse.shape[1], dtype=torch.long, device=ccol_indices.device),
         counts,
+        step=0,
     )
     return SparseTensor(
         layout=SparseLayout.COO,

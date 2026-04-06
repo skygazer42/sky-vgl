@@ -1,6 +1,14 @@
 from copy import deepcopy
 
+import torch
+
 from vgl.metrics.base import Metric
+
+
+def _as_python_int(value) -> int:
+    if isinstance(value, torch.Tensor):
+        return int(value.detach().cpu().numpy().reshape(()).item())
+    return int(value)
 
 
 class Accuracy(Metric):
@@ -25,7 +33,7 @@ class Accuracy(Metric):
             raise ValueError("Accuracy received incompatible prediction/target shape")
         if predicted.shape != targets.shape:
             raise ValueError("Accuracy received incompatible prediction/target shape")
-        self.correct += int((predicted == targets).sum().item())
+        self.correct += _as_python_int((predicted == targets).sum())
         self.total += int(targets.numel())
 
     def compute(self):

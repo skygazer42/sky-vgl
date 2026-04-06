@@ -33,6 +33,38 @@ def test_accuracy_handles_binary_logits():
     assert metric.compute() == 1.0
 
 
+def test_accuracy_avoids_tensor_item(monkeypatch):
+    metric = Accuracy()
+
+    def fail_item(self):
+        raise AssertionError("Accuracy should stay off tensor.item")
+
+    monkeypatch.setattr(torch.Tensor, "item", fail_item)
+
+    metric.update(
+        torch.tensor([1.5, -0.5, 0.1]),
+        torch.tensor([1, 0, 1]),
+    )
+
+    assert metric.compute() == 1.0
+
+
+def test_accuracy_avoids_tensor_int(monkeypatch):
+    metric = Accuracy()
+
+    def fail_int(self):
+        raise AssertionError("Accuracy should stay off tensor.__int__")
+
+    monkeypatch.setattr(torch.Tensor, "__int__", fail_int)
+
+    metric.update(
+        torch.tensor([1.5, -0.5, 0.1]),
+        torch.tensor([1, 0, 1]),
+    )
+
+    assert metric.compute() == 1.0
+
+
 def test_accuracy_rejects_shape_mismatch():
     metric = Accuracy()
 
@@ -68,6 +100,25 @@ def test_hits_at_k_computes_hit_rate_from_query_groups():
 
     assert hits1.compute() == pytest.approx(0.5)
     assert hits3.compute() == pytest.approx(1.0)
+
+
+def test_hits_at_k_accepts_tensor_k_without_tensor_int(monkeypatch):
+    class Batch:
+        query_index = torch.tensor([0, 0, 0, 1, 1, 1])
+
+    def fail_int(self):
+        raise AssertionError("HitsAtK k should stay off tensor.__int__")
+
+    monkeypatch.setattr(torch.Tensor, "__int__", fail_int)
+
+    metric = HitsAtK(torch.tensor(3))
+    metric.update(
+        torch.tensor([3.0, 1.0, 0.0, 0.1, 0.7, 0.2]),
+        torch.tensor([1.0, 0.0, 0.0, 1.0, 0.0, 0.0]),
+        batch=Batch(),
+    )
+
+    assert metric.compute() == pytest.approx(1.0)
 
 
 def test_ranking_metrics_require_query_groups():
@@ -107,9 +158,105 @@ def test_filtered_hits_at_k_ignores_masked_candidates():
     assert metric.compute() == pytest.approx(1.0)
 
 
+def test_filtered_hits_at_k_accepts_tensor_k_without_tensor_int(monkeypatch):
+    class Batch:
+        query_index = torch.tensor([0, 0, 0])
+        filter_mask = torch.tensor([False, True, False])
+
+    def fail_int(self):
+        raise AssertionError("FilteredHitsAtK k should stay off tensor.__int__")
+
+    monkeypatch.setattr(torch.Tensor, "__int__", fail_int)
+
+    metric = FilteredHitsAtK(torch.tensor(1))
+    metric.update(
+        torch.tensor([0.8, 0.9, 0.1]),
+        torch.tensor([1.0, 0.0, 0.0]),
+        batch=Batch(),
+    )
+
+    assert metric.compute() == pytest.approx(1.0)
+
+
 def test_mrr_handles_non_consecutive_query_indices():
     class Batch:
         query_index = torch.tensor([0, 1, 1, 0])
+
+    metric = MRR()
+    metric.update(
+        torch.tensor([0.9, 0.2, 0.8, 0.1]),
+        torch.tensor([1.0, 1.0, 0.0, 0.0]),
+        batch=Batch(),
+    )
+
+    assert metric.compute() == pytest.approx((1.0 + 0.5) / 2.0)
+
+
+def test_mrr_avoids_tensor_tolist_for_query_ids(monkeypatch):
+    class Batch:
+        query_index = torch.tensor([0, 1, 1, 0])
+
+    def fail_tolist(self):
+        raise AssertionError("Ranking metrics should stay off tensor.tolist")
+
+    monkeypatch.setattr(torch.Tensor, "tolist", fail_tolist)
+
+    metric = MRR()
+    metric.update(
+        torch.tensor([0.9, 0.2, 0.8, 0.1]),
+        torch.tensor([1.0, 1.0, 0.0, 0.0]),
+        batch=Batch(),
+    )
+
+    assert metric.compute() == pytest.approx((1.0 + 0.5) / 2.0)
+
+
+def test_mrr_avoids_tensor_item(monkeypatch):
+    class Batch:
+        query_index = torch.tensor([0, 1, 1, 0])
+
+    def fail_item(self):
+        raise AssertionError("Ranking metrics should stay off tensor.item")
+
+    monkeypatch.setattr(torch.Tensor, "item", fail_item)
+
+    metric = MRR()
+    metric.update(
+        torch.tensor([0.9, 0.2, 0.8, 0.1]),
+        torch.tensor([1.0, 1.0, 0.0, 0.0]),
+        batch=Batch(),
+    )
+
+    assert metric.compute() == pytest.approx((1.0 + 0.5) / 2.0)
+
+
+def test_mrr_avoids_tensor_int(monkeypatch):
+    class Batch:
+        query_index = torch.tensor([0, 1, 1, 0])
+
+    def fail_int(self):
+        raise AssertionError("Ranking metrics should stay off tensor.__int__")
+
+    monkeypatch.setattr(torch.Tensor, "__int__", fail_int)
+
+    metric = MRR()
+    metric.update(
+        torch.tensor([0.9, 0.2, 0.8, 0.1]),
+        torch.tensor([1.0, 1.0, 0.0, 0.0]),
+        batch=Batch(),
+    )
+
+    assert metric.compute() == pytest.approx((1.0 + 0.5) / 2.0)
+
+
+def test_mrr_avoids_torch_unique(monkeypatch):
+    class Batch:
+        query_index = torch.tensor([0, 1, 1, 0])
+
+    def fail_unique(*args, **kwargs):
+        raise AssertionError("Ranking metrics should avoid torch.unique")
+
+    monkeypatch.setattr(torch, "unique", fail_unique)
 
     metric = MRR()
     metric.update(

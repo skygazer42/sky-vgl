@@ -1,3 +1,4 @@
+import pytest
 import torch
 
 from vgl import Graph
@@ -113,6 +114,98 @@ def test_local_sampling_coordinator_init_avoids_tensor_tolist(monkeypatch, tmp_p
     assert coordinator.partition_ids() == (0, 1)
 
 
+def test_local_sampling_coordinator_init_and_node_routing_avoid_tensor_item(monkeypatch, tmp_path):
+    graph = Graph.homo(
+        edge_index=torch.tensor([[0, 1, 2, 3], [1, 2, 3, 0]]),
+        x=torch.arange(8, dtype=torch.float32).view(4, 2),
+    )
+    write_partitioned_graph(graph, tmp_path, num_partitions=2)
+    shards = {
+        0: LocalGraphShard.from_partition_dir(tmp_path, partition_id=0),
+        1: LocalGraphShard.from_partition_dir(tmp_path, partition_id=1),
+    }
+
+    def fail_item(self):
+        raise AssertionError("LocalSamplingCoordinator node routing should stay off tensor.item")
+
+    monkeypatch.setattr(torch.Tensor, "item", fail_item)
+
+    coordinator = LocalSamplingCoordinator(shards)
+    routes = coordinator.route_node_ids(torch.tensor([3, 0, 2, 1]))
+
+    assert coordinator.partition_ids() == (0, 1)
+    assert len(routes) == 2
+    assert torch.equal(routes[0].global_ids, torch.tensor([0, 1]))
+    assert torch.equal(routes[1].global_ids, torch.tensor([3, 2]))
+
+
+def test_local_sampling_coordinator_init_and_node_routing_avoid_tensor_int(monkeypatch, tmp_path):
+    graph = Graph.homo(
+        edge_index=torch.tensor([[0, 1, 2, 3], [1, 2, 3, 0]]),
+        x=torch.arange(8, dtype=torch.float32).view(4, 2),
+    )
+    write_partitioned_graph(graph, tmp_path, num_partitions=2)
+    shards = {
+        0: LocalGraphShard.from_partition_dir(tmp_path, partition_id=0),
+        1: LocalGraphShard.from_partition_dir(tmp_path, partition_id=1),
+    }
+
+    def fail_int(self):
+        raise AssertionError("LocalSamplingCoordinator node routing should stay off tensor.__int__")
+
+    monkeypatch.setattr(torch.Tensor, "__int__", fail_int)
+
+    coordinator = LocalSamplingCoordinator(shards)
+    routes = coordinator.route_node_ids(torch.tensor([3, 0, 2, 1]))
+
+    assert coordinator.partition_ids() == (0, 1)
+    assert len(routes) == 2
+    assert torch.equal(routes[0].global_ids, torch.tensor([0, 1]))
+    assert torch.equal(routes[1].global_ids, torch.tensor([3, 2]))
+
+
+def test_local_sampling_coordinator_rejects_out_of_range_node_ids_without_tensor_item(monkeypatch, tmp_path):
+    graph = Graph.homo(
+        edge_index=torch.tensor([[0, 1, 2, 3], [1, 2, 3, 0]]),
+        x=torch.arange(8, dtype=torch.float32).view(4, 2),
+    )
+    write_partitioned_graph(graph, tmp_path, num_partitions=2)
+    shards = {
+        0: LocalGraphShard.from_partition_dir(tmp_path, partition_id=0),
+        1: LocalGraphShard.from_partition_dir(tmp_path, partition_id=1),
+    }
+    coordinator = LocalSamplingCoordinator(shards)
+
+    def fail_item(self):
+        raise AssertionError("LocalSamplingCoordinator route_node_ids should stay off tensor.item")
+
+    monkeypatch.setattr(torch.Tensor, "item", fail_item)
+
+    with pytest.raises(KeyError, match="4"):
+        coordinator.route_node_ids(torch.tensor([4]))
+
+
+def test_local_sampling_coordinator_rejects_out_of_range_node_ids_without_tensor_int(monkeypatch, tmp_path):
+    graph = Graph.homo(
+        edge_index=torch.tensor([[0, 1, 2, 3], [1, 2, 3, 0]]),
+        x=torch.arange(8, dtype=torch.float32).view(4, 2),
+    )
+    write_partitioned_graph(graph, tmp_path, num_partitions=2)
+    shards = {
+        0: LocalGraphShard.from_partition_dir(tmp_path, partition_id=0),
+        1: LocalGraphShard.from_partition_dir(tmp_path, partition_id=1),
+    }
+    coordinator = LocalSamplingCoordinator(shards)
+
+    def fail_int(self):
+        raise AssertionError("LocalSamplingCoordinator route_node_ids should stay off tensor.__int__")
+
+    monkeypatch.setattr(torch.Tensor, "__int__", fail_int)
+
+    with pytest.raises(KeyError, match="4"):
+        coordinator.route_node_ids(torch.tensor([4]))
+
+
 def test_store_backed_sampling_coordinator_routes_nodes_without_per_node_owner_lookup(monkeypatch, tmp_path):
     graph = Graph.homo(
         edge_index=torch.tensor([[0, 1, 2, 3], [1, 2, 3, 0]]),
@@ -202,6 +295,39 @@ def test_local_sampling_coordinator_routes_edges_and_fetches_features_without_te
     assert torch.equal(fetched.values, torch.tensor([9.0, 4.0, 1.0]))
 
 
+def test_local_sampling_coordinator_routes_edges_and_fetches_features_without_tensor_int(monkeypatch, tmp_path):
+    writes = ("author", "writes", "paper")
+    graph = Graph.hetero(
+        nodes={
+            "author": {"x": torch.arange(8, dtype=torch.float32).view(4, 2)},
+            "paper": {"x": torch.arange(10, 18, dtype=torch.float32).view(4, 2)},
+        },
+        edges={
+            writes: {
+                "edge_index": torch.tensor([[0, 1, 2, 3, 0], [1, 0, 3, 2, 2]]),
+                "weight": torch.tensor([1.0, 2.0, 3.0, 4.0, 9.0]),
+            },
+        },
+    )
+    write_partitioned_graph(graph, tmp_path, num_partitions=2)
+    shards = {
+        0: LocalGraphShard.from_partition_dir(tmp_path, partition_id=0),
+        1: LocalGraphShard.from_partition_dir(tmp_path, partition_id=1),
+    }
+    coordinator = LocalSamplingCoordinator(shards)
+
+    def fail_int(self):
+        raise AssertionError("local edge routing should stay off tensor.__int__")
+
+    monkeypatch.setattr(torch.Tensor, "__int__", fail_int)
+
+    routes = coordinator.route_edge_ids(torch.tensor([3, 0, 2]), edge_type=writes)
+    fetched = coordinator.fetch_edge_features(("edge", writes, "weight"), torch.tensor([4, 3, 0]))
+
+    assert len(routes) == 2
+    assert torch.equal(fetched.values, torch.tensor([9.0, 4.0, 1.0]))
+
+
 def test_store_backed_sampling_coordinator_routes_edges_and_fetches_features_without_tensor_tolist(monkeypatch, tmp_path):
     writes = ("author", "writes", "paper")
     graph = Graph.hetero(
@@ -252,6 +378,35 @@ def test_store_backed_sampling_coordinator_routes_edges_and_fetches_features_wit
         raise AssertionError("store-backed edge routing should stay off tensor.item")
 
     monkeypatch.setattr(torch.Tensor, "item", fail_item)
+
+    routes = coordinator.route_edge_ids(torch.tensor([3, 0, 2]), edge_type=writes)
+    fetched = coordinator.fetch_edge_features(("edge", writes, "weight"), torch.tensor([4, 3, 0]))
+
+    assert len(routes) == 2
+    assert torch.equal(fetched.values, torch.tensor([9.0, 4.0, 1.0]))
+
+
+def test_store_backed_sampling_coordinator_routes_edges_and_fetches_features_without_tensor_int(monkeypatch, tmp_path):
+    writes = ("author", "writes", "paper")
+    graph = Graph.hetero(
+        nodes={
+            "author": {"x": torch.arange(8, dtype=torch.float32).view(4, 2)},
+            "paper": {"x": torch.arange(10, 18, dtype=torch.float32).view(4, 2)},
+        },
+        edges={
+            writes: {
+                "edge_index": torch.tensor([[0, 1, 2, 3, 0], [1, 0, 3, 2, 2]]),
+                "weight": torch.tensor([1.0, 2.0, 3.0, 4.0, 9.0]),
+            },
+        },
+    )
+    write_partitioned_graph(graph, tmp_path, num_partitions=2)
+    coordinator = StoreBackedSamplingCoordinator.from_partition_dir(tmp_path)
+
+    def fail_int(self):
+        raise AssertionError("store-backed edge routing should stay off tensor.__int__")
+
+    monkeypatch.setattr(torch.Tensor, "__int__", fail_int)
 
     routes = coordinator.route_edge_ids(torch.tensor([3, 0, 2]), edge_type=writes)
     fetched = coordinator.fetch_edge_features(("edge", writes, "weight"), torch.tensor([4, 3, 0]))

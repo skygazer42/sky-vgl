@@ -10,9 +10,15 @@ from vgl.graph.graph import Graph
 DEFAULT_EDGE_TYPE = ("node", "to", "node")
 
 
+def _as_python_int(value) -> int:
+    if isinstance(value, torch.Tensor):
+        return int(value.detach().cpu().numpy().reshape(()).item())
+    return int(value)
+
+
 def _tensor_int_tuple(values) -> tuple[int, ...]:
     tensor = torch.as_tensor(values, dtype=torch.long).view(-1)
-    return tuple(int(value.item()) for value in tensor)
+    return tuple(_as_python_int(value) for value in tensor)
 
 
 def _slice_node_data(graph: Graph, node_type: str, start: int, end: int, *, device) -> tuple[dict, torch.Tensor]:

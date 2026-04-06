@@ -3,6 +3,7 @@ import torch
 from vgl.graph.block import Block, HeteroBlock
 from vgl.graph.graph import Graph
 from vgl.ops.subgraph import (
+    _as_python_int,
     _ordered_unique,
     _positions_for_endpoint_values,
     _resolve_edge_type,
@@ -45,11 +46,11 @@ def _lookup_positions(index_ids: torch.Tensor, values: torch.Tensor, *, entity_n
     sorted_index_ids, sort_perm = torch.sort(index_ids, stable=True)
     positions = torch.searchsorted(sorted_index_ids, values)
     if bool((positions >= sorted_index_ids.numel()).any()):
-        missing_value = int(values[positions >= sorted_index_ids.numel()][0].item())
+        missing_value = _as_python_int(values[positions >= sorted_index_ids.numel()][0])
         raise KeyError(f"missing {entity_name} id {missing_value}")
     matched_values = sorted_index_ids[positions]
     if bool((matched_values != values).any()):
-        missing_value = int(values[matched_values != values][0].item())
+        missing_value = _as_python_int(values[matched_values != values][0])
         raise KeyError(f"missing {entity_name} id {missing_value}")
     return sort_perm[positions]
 

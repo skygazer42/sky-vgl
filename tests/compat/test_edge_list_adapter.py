@@ -36,6 +36,30 @@ def test_from_edge_list_accepts_python_edge_pairs():
     assert torch.equal(graph.edata["edge_weight"], torch.tensor([0.5, 1.5, 2.5]))
 
 
+def test_from_edge_list_avoids_tensor_item(monkeypatch):
+    def fail_item(self):
+        raise AssertionError("edge list import should stay off tensor.item")
+
+    monkeypatch.setattr(torch.Tensor, "item", fail_item)
+
+    graph = Graph.from_edge_list(torch.tensor([[0, 1], [1, 2]], dtype=torch.long))
+
+    assert torch.equal(graph.edge_index, torch.tensor([[0, 1], [1, 2]]))
+    assert graph.num_nodes() == 3
+
+
+def test_from_edge_list_avoids_tensor_int(monkeypatch):
+    def fail_int(self):
+        raise AssertionError("edge list import should stay off tensor.__int__")
+
+    monkeypatch.setattr(torch.Tensor, "__int__", fail_int)
+
+    graph = Graph.from_edge_list(torch.tensor([[0, 1], [1, 2]], dtype=torch.long))
+
+    assert torch.equal(graph.edge_index, torch.tensor([[0, 1], [1, 2]]))
+    assert graph.num_nodes() == 3
+
+
 def test_graph_from_edge_list_preserves_explicit_num_nodes_for_isolates():
     graph = Graph.from_edge_list([(0, 1)], num_nodes=4)
 
@@ -43,6 +67,19 @@ def test_graph_from_edge_list_preserves_explicit_num_nodes_for_isolates():
     assert torch.equal(graph.n_id, torch.tensor([0, 1, 2, 3]))
     assert graph.adjacency().shape == (4, 4)
     assert torch.equal(graph.to_edge_list(), torch.tensor([[0, 1]]))
+
+
+def test_graph_from_edge_list_accepts_tensor_num_nodes_without_tensor_int(monkeypatch):
+    def fail_int(self):
+        raise AssertionError("edge list import should stay off tensor.__int__ for num_nodes")
+
+    monkeypatch.setattr(torch.Tensor, "__int__", fail_int)
+
+    graph = Graph.from_edge_list([(0, 1)], num_nodes=torch.tensor(4))
+
+    assert graph.num_nodes() == 4
+    assert torch.equal(graph.n_id, torch.tensor([0, 1, 2, 3]))
+    assert graph.adjacency().shape == (4, 4)
 
 
 def test_graph_from_edge_list_accepts_transposed_tensor_input():

@@ -4,6 +4,12 @@ from vgl.sparse import edge_softmax as sparse_edge_softmax
 from vgl.sparse import from_edge_index
 
 
+def _as_python_int(value) -> int:
+    if isinstance(value, torch.Tensor):
+        return int(value.detach().cpu().numpy().reshape(()).item())
+    return int(value)
+
+
 def coerce_homo_inputs(graph_or_x, edge_index, layer_name):
     if edge_index is None:
         if len(graph_or_x.nodes) != 1:
@@ -45,7 +51,7 @@ def symmetric_propagate(x, edge_index):
 def edge_softmax(scores, edge_index, num_nodes):
     num_rows = 0
     if edge_index.numel() > 0:
-        num_rows = int(edge_index[0].max().item()) + 1
+        num_rows = _as_python_int(edge_index[0].max()) + 1
     sparse = from_edge_index(edge_index, shape=(num_rows, num_nodes))
     return sparse_edge_softmax(sparse, scores)
 

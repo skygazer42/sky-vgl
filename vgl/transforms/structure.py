@@ -1,12 +1,70 @@
 from __future__ import annotations
 
-from collections import deque
-
 import torch
 
 from vgl.ops.subgraph import node_subgraph
 from vgl.transforms.base import BaseTransform
 from vgl.transforms._utils import clone_graph, is_edge_aligned, is_homo_graph
+
+
+def _as_python_int(value) -> int:
+    if isinstance(value, torch.Tensor):
+        return int(value.detach().cpu().numpy().reshape(()).item())
+    return int(value)
+
+
+def _edge_pair_keys(edge_index: torch.Tensor, *, dst_count: int) -> torch.Tensor:
+    if edge_index.numel() == 0:
+        return torch.empty(0, dtype=torch.long, device=edge_index.device)
+    return edge_index[0].to(dtype=torch.long) * int(dst_count) + edge_index[1].to(dtype=torch.long)
+
+
+def _sorted_unique_tensor(values) -> torch.Tensor:
+    values = torch.as_tensor(values, dtype=torch.long).view(-1)
+    if values.numel() == 0:
+        return values
+    sorted_values = torch.sort(values, stable=True).values
+    keep = torch.ones(sorted_values.numel(), dtype=torch.bool, device=sorted_values.device)
+    if sorted_values.numel() > 1:
+        keep[1:] = sorted_values[1:] != sorted_values[:-1]
+    return sorted_values[keep]
+
+
+def _sorted_unique_with_inverse(values) -> tuple[torch.Tensor, torch.Tensor]:
+    values = torch.as_tensor(values, dtype=torch.long).view(-1)
+    if values.numel() == 0:
+        return values, values
+    order = torch.argsort(values, stable=True)
+    sorted_values = values.index_select(0, order)
+    keep = torch.ones(sorted_values.numel(), dtype=torch.bool, device=sorted_values.device)
+    if sorted_values.numel() > 1:
+        keep[1:] = sorted_values[1:] != sorted_values[:-1]
+    unique_values = sorted_values[keep]
+    group_ids = torch.cumsum(keep.to(dtype=torch.long), dim=0) - 1
+    inverse = torch.empty_like(group_ids)
+    inverse[order] = group_ids
+    return unique_values, inverse
+
+
+def _membership_mask(values: torch.Tensor, allowed: torch.Tensor) -> torch.Tensor:
+    values = torch.as_tensor(values, dtype=torch.long).view(-1)
+    allowed = torch.as_tensor(allowed, dtype=torch.long, device=values.device).view(-1)
+    if values.numel() == 0 or allowed.numel() == 0:
+        return torch.zeros(values.numel(), dtype=torch.bool, device=values.device)
+    sorted_allowed = _sorted_unique_tensor(allowed)
+    positions = torch.searchsorted(sorted_allowed, values, right=False)
+    capped_positions = positions.clamp_max(sorted_allowed.numel() - 1)
+    return (positions < sorted_allowed.numel()) & (sorted_allowed[capped_positions] == values)
+
+
+def _stable_unique_positions(keys: torch.Tensor) -> torch.Tensor:
+    if keys.numel() == 0:
+        return torch.empty(0, dtype=torch.long, device=keys.device)
+    unique_keys, inverse = _sorted_unique_with_inverse(keys)
+    positions = torch.arange(keys.numel(), dtype=torch.long, device=keys.device)
+    first_positions = torch.full((unique_keys.numel(),), keys.numel(), dtype=torch.long, device=keys.device)
+    first_positions.scatter_reduce_(0, inverse, positions, reduce="amin", include_self=True)
+    return torch.sort(first_positions, stable=True).values
 
 
 class ToUndirected(BaseTransform):
@@ -16,21 +74,23 @@ class ToUndirected(BaseTransform):
         edge_type = graph._default_edge_type()
         store = graph.edges[edge_type]
         edge_index = store.edge_index
-        existing = {tuple(edge.tolist()) for edge in edge_index.t()}
-        added_edges = []
-        mirror_indices = []
-        for edge_id, (src_index, dst_index) in enumerate(edge_index.t().tolist()):
-            reverse = (int(dst_index), int(src_index))
-            if reverse in existing:
-                continue
-            existing.add(reverse)
-            added_edges.append(reverse)
-            mirror_indices.append(edge_id)
-
-        if not added_edges:
+        num_nodes = int(graph.x.size(0))
+        reverse_index = edge_index[[1, 0]].contiguous()
+        missing_mask = ~_membership_mask(
+            _edge_pair_keys(reverse_index, dst_count=num_nodes),
+            _edge_pair_keys(edge_index, dst_count=num_nodes),
+        )
+        if not bool(missing_mask.any()):
             return graph
 
-        added_edge_index = torch.tensor(added_edges, dtype=edge_index.dtype, device=edge_index.device).t().contiguous()
+        candidate_indices = torch.nonzero(missing_mask, as_tuple=False).view(-1)
+        mirror_indices = candidate_indices[
+            _stable_unique_positions(_edge_pair_keys(reverse_index[:, missing_mask], dst_count=num_nodes))
+        ]
+        if mirror_indices.numel() == 0:
+            return graph
+
+        added_edge_index = reverse_index[:, mirror_indices]
         new_edge_index = torch.cat([edge_index, added_edge_index], dim=1)
         edge_count = int(edge_index.size(1))
         edges = {edge_type: {"edge_index": new_edge_index}}
@@ -38,8 +98,7 @@ class ToUndirected(BaseTransform):
             if key == "edge_index":
                 continue
             if is_edge_aligned(value, edge_count):
-                index = torch.tensor(mirror_indices, dtype=torch.long, device=edge_index.device)
-                edges[edge_type][key] = torch.cat([value, value[index]], dim=0)
+                edges[edge_type][key] = torch.cat([value, value[mirror_indices]], dim=0)
             else:
                 edges[edge_type][key] = value
         return clone_graph(graph, edges=edges)
@@ -57,19 +116,17 @@ class AddSelfLoops(BaseTransform):
         edge_index = store.edge_index
         num_nodes = graph.x.size(0)
         loop_mask = edge_index[0] == edge_index[1]
-        loop_nodes = set(edge_index[0, loop_mask].tolist())
-        missing_nodes = [node_id for node_id in range(num_nodes) if node_id not in loop_nodes]
-        if not missing_nodes:
+        has_loop = torch.zeros(num_nodes, dtype=torch.bool, device=edge_index.device)
+        if bool(loop_mask.any()):
+            has_loop[edge_index[0, loop_mask].to(dtype=torch.long)] = True
+        missing_nodes = torch.nonzero(~has_loop, as_tuple=False).view(-1).to(dtype=edge_index.dtype)
+        if missing_nodes.numel() == 0:
             return graph
 
-        added_edge_index = torch.tensor(
-            [[node_id, node_id] for node_id in missing_nodes],
-            dtype=edge_index.dtype,
-            device=edge_index.device,
-        ).t().contiguous()
+        added_edge_index = torch.stack([missing_nodes, missing_nodes], dim=0)
         new_edge_index = torch.cat([edge_index, added_edge_index], dim=1)
         edge_count = int(edge_index.size(1))
-        add_count = len(missing_nodes)
+        add_count = int(missing_nodes.numel())
         edges = {edge_type: {"edge_index": new_edge_index}}
         for key, value in store.data.items():
             if key == "edge_index":
@@ -104,7 +161,7 @@ class RemoveSelfLoops(BaseTransform):
 
 class LargestConnectedComponents(BaseTransform):
     def __init__(self, *, num_components: int = 1):
-        self.num_components = int(num_components)
+        self.num_components = _as_python_int(num_components)
 
     def __call__(self, graph):
         if not is_homo_graph(graph):
@@ -113,33 +170,29 @@ class LargestConnectedComponents(BaseTransform):
             raise ValueError("num_components must be >= 1")
 
         num_nodes = int(graph.x.size(0))
-        adjacency = {node_id: set() for node_id in range(num_nodes)}
-        for src_index, dst_index in graph.edge_index.t().tolist():
-            src_index = int(src_index)
-            dst_index = int(dst_index)
-            adjacency[src_index].add(dst_index)
-            adjacency[dst_index].add(src_index)
+        labels = torch.arange(num_nodes, dtype=torch.long, device=graph.edge_index.device)
+        if graph.edge_index.numel() > 0:
+            src_nodes = graph.edge_index[0].to(dtype=torch.long)
+            dst_nodes = graph.edge_index[1].to(dtype=torch.long)
+            undirected_src = torch.cat((src_nodes, dst_nodes), dim=0)
+            undirected_dst = torch.cat((dst_nodes, src_nodes), dim=0)
 
-        seen = set()
-        components = []
-        for node_id in range(num_nodes):
-            if node_id in seen:
-                continue
-            queue = deque([node_id])
-            component = []
-            seen.add(node_id)
-            while queue:
-                current = queue.popleft()
-                component.append(current)
-                for neighbor in adjacency[current]:
-                    if neighbor in seen:
-                        continue
-                    seen.add(neighbor)
-                    queue.append(neighbor)
-            components.append(sorted(component))
+            for _ in range(num_nodes):
+                propagated = labels.clone()
+                propagated.scatter_reduce_(
+                    0,
+                    undirected_dst,
+                    labels.index_select(0, undirected_src),
+                    reduce="amin",
+                    include_self=True,
+                )
+                if torch.equal(propagated, labels):
+                    break
+                labels = propagated
 
-        components.sort(key=len, reverse=True)
-        kept_nodes = []
-        for component in components[: self.num_components]:
-            kept_nodes.extend(component)
-        return node_subgraph(graph, torch.tensor(sorted(kept_nodes), dtype=torch.long))
+        _, inverse = _sorted_unique_with_inverse(labels)
+        counts = torch.bincount(inverse)
+        selected_components = torch.zeros(counts.numel(), dtype=torch.bool, device=labels.device)
+        selected_components[torch.argsort(counts, descending=True, stable=True)[: self.num_components]] = True
+        kept_nodes = torch.nonzero(selected_components[inverse], as_tuple=False).view(-1)
+        return node_subgraph(graph, kept_nodes)

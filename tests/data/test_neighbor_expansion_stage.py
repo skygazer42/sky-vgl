@@ -1,18 +1,28 @@
 import torch
 import inspect
+import pytest
 
 from vgl import Graph
 from vgl.dataloading.executor import (
     PlanExecutor,
+    _build_stitched_hetero_link_records,
+    _build_stitched_homo_link_records,
+    _build_stitched_hetero_temporal_record,
+    _build_stitched_homo_temporal_record,
     _collect_stitched_hetero_edges,
     _collect_stitched_homo_edges,
     _expand_stitched_hetero_global_node_ids,
     _expand_stitched_homo_global_node_ids,
+    _incident_edge_positions,
+    _lookup_positions,
     _relabel_stitched_edge_index,
     _relabel_stitched_edge_index_by_type,
+    _stitched_hetero_link_seed_global_ids,
+    _stitched_hetero_temporal_seed_global_ids,
 )
 from vgl.dataloading.plan import PlanStage, SamplingPlan
 from vgl.dataloading.requests import NodeSeedRequest
+from vgl.dataloading.records import LinkPredictionRecord, TemporalEventRecord
 from vgl.distributed import LocalGraphShard, LocalSamplingCoordinator, write_partitioned_graph
 
 
@@ -180,6 +190,359 @@ def test_executor_expands_hetero_node_seeds_without_torch_isin(monkeypatch):
     assert torch.equal(context.state["node_ids_by_type"]["author"], torch.tensor([0]))
 
 
+def test_executor_lookup_positions_avoids_tensor_item_in_missing_id_errors(monkeypatch):
+    def fail_item(self):
+        raise AssertionError("executor lookup should stay off tensor.item")
+
+    monkeypatch.setattr(torch.Tensor, "item", fail_item)
+
+    with pytest.raises(KeyError, match="missing stitched node id 7"):
+        _lookup_positions(torch.tensor([0, 2, 6]), torch.tensor([7]), entity_name="stitched node")
+
+    with pytest.raises(KeyError, match="missing stitched node id 4"):
+        _lookup_positions(torch.tensor([0, 2, 6]), torch.tensor([2, 4]), entity_name="stitched node")
+
+
+def test_executor_lookup_positions_avoids_tensor_int_in_missing_id_errors(monkeypatch):
+    def fail_int(self):
+        raise AssertionError("executor lookup should stay off tensor.__int__")
+
+    monkeypatch.setattr(torch.Tensor, "__int__", fail_int)
+
+    with pytest.raises(KeyError, match="missing stitched node id 7"):
+        _lookup_positions(torch.tensor([0, 2, 6]), torch.tensor([7]), entity_name="stitched node")
+
+    with pytest.raises(KeyError, match="missing stitched node id 4"):
+        _lookup_positions(torch.tensor([0, 2, 6]), torch.tensor([2, 4]), entity_name="stitched node")
+
+
+def test_build_stitched_homo_temporal_record_avoids_tensor_int(monkeypatch):
+    graph = Graph.temporal(
+        nodes={
+            "node": {
+                "x": torch.randn(3, 2),
+                "n_id": torch.tensor([10, 11, 12]),
+            }
+        },
+        edges={
+            ("node", "to", "node"): {
+                "edge_index": torch.tensor([[0, 1], [1, 2]]),
+                "ts": torch.tensor([3, 4]),
+            }
+        },
+        time_attr="ts",
+    )
+    stitched_graph = Graph.temporal(
+        nodes={
+            "node": {
+                "x": torch.randn(4, 2),
+                "n_id": torch.tensor([9, 11, 12, 13]),
+            }
+        },
+        edges={
+            ("node", "to", "node"): {
+                "edge_index": torch.tensor([[1], [2]]),
+                "ts": torch.tensor([4]),
+            }
+        },
+        time_attr="ts",
+    )
+
+    def fail_int(self):
+        raise AssertionError("stitched homo temporal record should stay off tensor.__int__")
+
+    monkeypatch.setattr(torch.Tensor, "__int__", fail_int)
+
+    record = _build_stitched_homo_temporal_record(
+        graph,
+        TemporalEventRecord(
+            graph=graph,
+            src_index=torch.tensor(1),
+            dst_index=torch.tensor(2),
+            timestamp=torch.tensor(7),
+            label=torch.tensor(1),
+        ),
+        stitched_graph,
+    )
+
+    assert record.graph is stitched_graph
+    assert record.src_index == 1
+    assert record.dst_index == 2
+    assert record.timestamp == 7
+    assert record.label == 1
+
+
+def test_build_stitched_hetero_temporal_record_avoids_tensor_int(monkeypatch):
+    graph = Graph.temporal(
+        nodes={
+            "author": {
+                "x": torch.randn(2, 2),
+                "n_id": torch.tensor([10, 11]),
+            },
+            "paper": {
+                "x": torch.randn(3, 2),
+                "n_id": torch.tensor([20, 21, 22]),
+            },
+        },
+        edges={
+            ("author", "writes", "paper"): {
+                "edge_index": torch.tensor([[0, 1], [1, 2]]),
+                "ts": torch.tensor([3, 4]),
+            }
+        },
+        time_attr="ts",
+    )
+    stitched_graph = Graph.temporal(
+        nodes={
+            "author": {
+                "x": torch.randn(2, 2),
+                "n_id": torch.tensor([8, 10]),
+            },
+            "paper": {
+                "x": torch.randn(3, 2),
+                "n_id": torch.tensor([19, 21, 22]),
+            },
+        },
+        edges={
+            ("author", "writes", "paper"): {
+                "edge_index": torch.tensor([[1], [1]]),
+                "ts": torch.tensor([4]),
+            }
+        },
+        time_attr="ts",
+    )
+
+    def fail_int(self):
+        raise AssertionError("stitched hetero temporal record should stay off tensor.__int__")
+
+    monkeypatch.setattr(torch.Tensor, "__int__", fail_int)
+
+    record = _build_stitched_hetero_temporal_record(
+        graph,
+        TemporalEventRecord(
+            graph=graph,
+            src_index=torch.tensor(0),
+            dst_index=torch.tensor(1),
+            timestamp=torch.tensor(9),
+            label=torch.tensor(1),
+            edge_type=("author", "writes", "paper"),
+        ),
+        stitched_graph,
+    )
+
+    assert record.graph is stitched_graph
+    assert record.edge_type == ("author", "writes", "paper")
+    assert record.src_index == 1
+    assert record.dst_index == 1
+    assert record.timestamp == 9
+    assert record.label == 1
+
+
+def test_build_stitched_homo_link_records_avoids_tensor_int(monkeypatch):
+    graph = Graph.homo(
+        edge_index=torch.tensor([[0, 1], [1, 2]]),
+        x=torch.randn(3, 2),
+    )
+    graph.nodes["node"].data["n_id"] = torch.tensor([10, 11, 12])
+    stitched_graph = Graph.homo(
+        edge_index=torch.tensor([[1], [2]]),
+        x=torch.randn(4, 2),
+    )
+    stitched_graph.nodes["node"].data["n_id"] = torch.tensor([9, 11, 12, 13])
+
+    def fail_int(self):
+        raise AssertionError("stitched homo link records should stay off tensor.__int__")
+
+    monkeypatch.setattr(torch.Tensor, "__int__", fail_int)
+
+    records = _build_stitched_homo_link_records(
+        graph,
+        [
+            LinkPredictionRecord(
+                graph=graph,
+                src_index=torch.tensor(1),
+                dst_index=torch.tensor(2),
+                label=torch.tensor(1),
+            ),
+            LinkPredictionRecord(
+                graph=graph,
+                src_index=torch.tensor(2),
+                dst_index=torch.tensor(1),
+                label=torch.tensor(0),
+            ),
+        ],
+        stitched_graph,
+    )
+
+    assert [record.graph for record in records] == [stitched_graph, stitched_graph]
+    assert [record.src_index for record in records] == [1, 2]
+    assert [record.dst_index for record in records] == [2, 1]
+    assert [record.label for record in records] == [1, 0]
+
+
+def test_build_stitched_hetero_link_records_avoids_tensor_int(monkeypatch):
+    graph = Graph.hetero(
+        nodes={
+            "author": {
+                "x": torch.randn(2, 2),
+                "n_id": torch.tensor([10, 11]),
+            },
+            "paper": {
+                "x": torch.randn(3, 2),
+                "n_id": torch.tensor([20, 21, 22]),
+            },
+        },
+        edges={
+            ("author", "writes", "paper"): {
+                "edge_index": torch.tensor([[0, 1], [1, 2]])
+            }
+        },
+    )
+    stitched_graph = Graph.hetero(
+        nodes={
+            "author": {
+                "x": torch.randn(2, 2),
+                "n_id": torch.tensor([8, 10]),
+            },
+            "paper": {
+                "x": torch.randn(4, 2),
+                "n_id": torch.tensor([19, 20, 21, 22]),
+            },
+        },
+        edges={
+            ("author", "writes", "paper"): {
+                "edge_index": torch.tensor([[1, 1], [2, 3]])
+            }
+        },
+    )
+
+    def fail_int(self):
+        raise AssertionError("stitched hetero link records should stay off tensor.__int__")
+
+    monkeypatch.setattr(torch.Tensor, "__int__", fail_int)
+
+    records = _build_stitched_hetero_link_records(
+        graph,
+        [
+            LinkPredictionRecord(
+                graph=graph,
+                src_index=torch.tensor(0),
+                dst_index=torch.tensor(1),
+                label=torch.tensor(1),
+                edge_type=("author", "writes", "paper"),
+            ),
+            LinkPredictionRecord(
+                graph=graph,
+                src_index=torch.tensor(0),
+                dst_index=torch.tensor(2),
+                label=torch.tensor(0),
+                edge_type=("author", "writes", "paper"),
+            ),
+        ],
+        stitched_graph,
+    )
+
+    assert [record.graph for record in records] == [stitched_graph, stitched_graph]
+    assert [record.edge_type for record in records] == [
+        ("author", "writes", "paper"),
+        ("author", "writes", "paper"),
+    ]
+    assert [record.src_index for record in records] == [1, 1]
+    assert [record.dst_index for record in records] == [2, 3]
+    assert [record.label for record in records] == [1, 0]
+
+
+def test_stitched_hetero_link_seed_global_ids_avoids_tensor_int(monkeypatch):
+    graph = Graph.hetero(
+        nodes={
+            "author": {
+                "x": torch.randn(3, 2),
+                "n_id": torch.tensor([10, 11, 12]),
+            },
+            "paper": {
+                "x": torch.randn(4, 2),
+                "n_id": torch.tensor([20, 21, 22, 23]),
+            },
+        },
+        edges={
+            ("author", "writes", "paper"): {
+                "edge_index": torch.tensor([[0, 1], [2, 3]])
+            }
+        },
+    )
+
+    def fail_int(self):
+        raise AssertionError("stitched hetero link seed global ids should stay off tensor.__int__")
+
+    monkeypatch.setattr(torch.Tensor, "__int__", fail_int)
+
+    seed_global_ids_by_type = _stitched_hetero_link_seed_global_ids(
+        graph,
+        [
+            LinkPredictionRecord(
+                graph=graph,
+                src_index=torch.tensor(1),
+                dst_index=torch.tensor(3),
+                label=torch.tensor(1),
+                edge_type=("author", "writes", "paper"),
+            ),
+            LinkPredictionRecord(
+                graph=graph,
+                src_index=torch.tensor(0),
+                dst_index=torch.tensor(2),
+                label=torch.tensor(0),
+                edge_type=("author", "writes", "paper"),
+            ),
+        ],
+    )
+
+    assert torch.equal(seed_global_ids_by_type["author"], torch.tensor([10, 11]))
+    assert torch.equal(seed_global_ids_by_type["paper"], torch.tensor([22, 23]))
+
+
+def test_stitched_hetero_temporal_seed_global_ids_avoids_tensor_int(monkeypatch):
+    graph = Graph.temporal(
+        nodes={
+            "author": {
+                "x": torch.randn(2, 2),
+                "n_id": torch.tensor([10, 11]),
+            },
+            "paper": {
+                "x": torch.randn(3, 2),
+                "n_id": torch.tensor([20, 21, 22]),
+            },
+        },
+        edges={
+            ("author", "writes", "paper"): {
+                "edge_index": torch.tensor([[0, 1], [1, 2]]),
+                "ts": torch.tensor([3, 4]),
+            }
+        },
+        time_attr="ts",
+    )
+
+    def fail_int(self):
+        raise AssertionError("stitched hetero temporal seed global ids should stay off tensor.__int__")
+
+    monkeypatch.setattr(torch.Tensor, "__int__", fail_int)
+
+    seed_global_ids_by_type = _stitched_hetero_temporal_seed_global_ids(
+        graph,
+        TemporalEventRecord(
+            graph=graph,
+            src_index=torch.tensor(1),
+            dst_index=torch.tensor(2),
+            timestamp=torch.tensor(9),
+            label=torch.tensor(1),
+            edge_type=("author", "writes", "paper"),
+        ),
+        edge_type=("author", "writes", "paper"),
+    )
+
+    assert torch.equal(seed_global_ids_by_type["author"], torch.tensor([11]))
+    assert torch.equal(seed_global_ids_by_type["paper"], torch.tensor([22]))
+
+
 def test_stitched_homo_neighbor_expansion_avoids_tensor_tolist(monkeypatch, tmp_path):
     graph = Graph.homo(
         edge_index=torch.tensor([[0, 1, 3], [1, 2, 1]]),
@@ -197,6 +560,34 @@ def test_stitched_homo_neighbor_expansion_avoids_tensor_tolist(monkeypatch, tmp_
         raise AssertionError("stitched homo expansion should stay on tensors")
 
     monkeypatch.setattr(torch.Tensor, "tolist", fail_tolist)
+
+    sampled = _expand_stitched_homo_global_node_ids(
+        coordinator,
+        torch.tensor([1]),
+        fanouts=(-1,),
+        edge_type=graph._default_edge_type(),
+    )
+
+    assert torch.equal(sampled, torch.tensor([0, 1, 2, 3]))
+
+
+def test_stitched_homo_neighbor_expansion_avoids_torch_unique(monkeypatch, tmp_path):
+    graph = Graph.homo(
+        edge_index=torch.tensor([[0, 1, 3], [1, 2, 1]]),
+        x=torch.arange(12, dtype=torch.float32).view(4, 3),
+    )
+    write_partitioned_graph(graph, tmp_path, num_partitions=2)
+    coordinator = LocalSamplingCoordinator(
+        {
+            0: LocalGraphShard.from_partition_dir(tmp_path, partition_id=0),
+            1: LocalGraphShard.from_partition_dir(tmp_path, partition_id=1),
+        }
+    )
+
+    def fail_unique(*args, **kwargs):
+        raise AssertionError("stitched homo expansion should avoid torch.unique")
+
+    monkeypatch.setattr(torch, "unique", fail_unique)
 
     sampled = _expand_stitched_homo_global_node_ids(
         coordinator,
@@ -253,6 +644,51 @@ def test_stitched_hetero_neighbor_expansion_avoids_tensor_tolist(monkeypatch, tm
     assert torch.equal(sampled["author"], torch.tensor([0]))
 
 
+def test_stitched_hetero_neighbor_expansion_avoids_torch_unique(monkeypatch, tmp_path):
+    graph = Graph.hetero(
+        nodes={
+            "paper": {"x": torch.randn(3, 4)},
+            "author": {"x": torch.randn(2, 4)},
+        },
+        edges={
+            ("author", "writes", "paper"): {
+                "edge_index": torch.tensor([[0, 1], [1, 2]])
+            },
+            ("paper", "written_by", "author"): {
+                "edge_index": torch.tensor([[1, 2], [0, 1]])
+            },
+            ("paper", "cites", "paper"): {
+                "edge_index": torch.tensor([[1], [0]])
+            },
+        },
+    )
+    write_partitioned_graph(graph, tmp_path, num_partitions=2)
+    coordinator = LocalSamplingCoordinator(
+        {
+            0: LocalGraphShard.from_partition_dir(tmp_path, partition_id=0),
+            1: LocalGraphShard.from_partition_dir(tmp_path, partition_id=1),
+        }
+    )
+
+    def fail_unique(*args, **kwargs):
+        raise AssertionError("stitched hetero expansion should avoid torch.unique")
+
+    monkeypatch.setattr(torch, "unique", fail_unique)
+
+    sampled = _expand_stitched_hetero_global_node_ids(
+        coordinator,
+        {
+            "paper": torch.tensor([1]),
+            "author": torch.empty(0, dtype=torch.long),
+        },
+        edge_types=tuple(graph.edges),
+        fanouts=(-1,),
+    )
+
+    assert torch.equal(sampled["paper"], torch.tensor([0, 1]))
+    assert torch.equal(sampled["author"], torch.tensor([0]))
+
+
 def test_collect_and_relabel_stitched_homo_edges_avoid_tensor_tolist(monkeypatch, tmp_path):
     graph = Graph.homo(
         edge_index=torch.tensor([[0, 1, 3], [1, 2, 1]]),
@@ -280,6 +716,20 @@ def test_collect_and_relabel_stitched_homo_edges_avoid_tensor_tolist(monkeypatch
 
     assert torch.equal(edge_ids, torch.tensor([0, 1, 2]))
     assert torch.equal(relabeled, torch.tensor([[0, 1, 3], [1, 2, 1]]))
+
+
+def test_incident_edge_positions_avoid_torch_unique(monkeypatch):
+    def fail_unique(*args, **kwargs):
+        raise AssertionError("incident edge position lookup should avoid torch.unique")
+
+    monkeypatch.setattr(torch, "unique", fail_unique)
+
+    positions = _incident_edge_positions(
+        torch.tensor([[0, 1, 3], [1, 2, 1]]),
+        torch.tensor([1]),
+    )
+
+    assert torch.equal(positions, torch.tensor([0, 1, 2]))
 
 
 def test_collect_and_relabel_stitched_homo_edges_avoid_torch_isin(monkeypatch, tmp_path):

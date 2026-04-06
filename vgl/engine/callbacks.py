@@ -7,6 +7,22 @@ from vgl.engine.checkpoints import checkpoint_event_fields
 from vgl.engine.monitoring import extract_monitor_value, is_improvement, resolve_monitor_mode
 
 
+def _as_python_int(value) -> int:
+    if isinstance(value, torch.Tensor):
+        return int(value.detach().cpu().numpy().reshape(()).item())
+    return int(value)
+
+
+def _is_integral_scalar(value) -> bool:
+    if isinstance(value, bool):
+        return False
+    if isinstance(value, int):
+        return True
+    if isinstance(value, torch.Tensor):
+        return value.ndim == 0 and value.dtype != torch.bool and not torch.is_floating_point(value)
+    return False
+
+
 class Callback:
     def on_fit_start(self, trainer, history):
         del trainer, history
@@ -202,7 +218,7 @@ class GradientNoiseInjection(Callback):
             raise ValueError("decay_exponent must be >= 0")
         self.std = float(std)
         self.decay_exponent = float(decay_exponent)
-        self.seed = int(seed)
+        self.seed = _as_python_int(seed)
         self.step_count = 0
         self._generator = None
 
@@ -213,7 +229,7 @@ class GradientNoiseInjection(Callback):
         return self._generator
 
     def _std_for_step(self, step):
-        step = int(step)
+        step = _as_python_int(step)
         return self.std / (float(step) ** self.decay_exponent)
 
     def on_fit_start(self, trainer, history):
@@ -232,7 +248,7 @@ class GradientNoiseInjection(Callback):
         }
 
     def load_state_dict(self, state):
-        self.step_count = int(state.get("step_count", 0))
+        self.step_count = _as_python_int(state.get("step_count", 0))
         generator_state = state.get("generator_state")
         if generator_state is None:
             return
@@ -252,7 +268,7 @@ class GradientNoiseInjection(Callback):
                 dtype=torch.float32,
             ).to(device=grad.device, dtype=grad.dtype)
             grad.add_(noise, alpha=current_std)
-        self.step_count = int(step)
+        self.step_count = _as_python_int(step)
 
 
 class DeferredReweighting(Callback):
@@ -337,6 +353,10 @@ class DeferredReweighting(Callback):
 
 class LabelSmoothingScheduler(Callback):
     def __init__(self, start_value, end_value, *, start_epoch=1, end_epoch=1):
+        if isinstance(start_epoch, torch.Tensor):
+            start_epoch = _as_python_int(start_epoch)
+        if isinstance(end_epoch, torch.Tensor):
+            end_epoch = _as_python_int(end_epoch)
         if start_value < 0.0 or start_value >= 1.0:
             raise ValueError("start_value must be in [0, 1)")
         if end_value < 0.0 or end_value >= 1.0:
@@ -363,7 +383,7 @@ class LabelSmoothingScheduler(Callback):
             raise ValueError("LabelSmoothingScheduler requires task.label_smoothing")
 
     def _value_for_epoch(self, epoch):
-        epoch = int(epoch)
+        epoch = _as_python_int(epoch)
         if epoch < self.start_epoch:
             return self.start_value
         if self.end_epoch == self.start_epoch:
@@ -381,7 +401,7 @@ class LabelSmoothingScheduler(Callback):
         self._task = self._resolve_task(trainer.task)
         self._validate_task(self._task)
         self.original_label_smoothing = float(self._task.label_smoothing)
-        next_epoch = int(history["completed_epochs"]) + 1
+        next_epoch = _as_python_int(history["completed_epochs"]) + 1
         self.current_value = self._value_for_epoch(next_epoch)
         self._apply_label_smoothing()
 
@@ -409,6 +429,10 @@ class LabelSmoothingScheduler(Callback):
 
 class FocalGammaScheduler(Callback):
     def __init__(self, start_value, end_value, *, start_epoch=1, end_epoch=1):
+        if isinstance(start_epoch, torch.Tensor):
+            start_epoch = _as_python_int(start_epoch)
+        if isinstance(end_epoch, torch.Tensor):
+            end_epoch = _as_python_int(end_epoch)
         if start_value < 0.0:
             raise ValueError("start_value must be >= 0")
         if end_value < 0.0:
@@ -435,7 +459,7 @@ class FocalGammaScheduler(Callback):
             raise ValueError("FocalGammaScheduler requires task.focal_gamma")
 
     def _value_for_epoch(self, epoch):
-        epoch = int(epoch)
+        epoch = _as_python_int(epoch)
         if epoch < self.start_epoch:
             return self.start_value
         if self.end_epoch == self.start_epoch:
@@ -453,7 +477,7 @@ class FocalGammaScheduler(Callback):
         self._task = self._resolve_task(trainer.task)
         self._validate_task(self._task)
         self.original_focal_gamma = float(self._task.focal_gamma)
-        next_epoch = int(history["completed_epochs"]) + 1
+        next_epoch = _as_python_int(history["completed_epochs"]) + 1
         self.current_value = self._value_for_epoch(next_epoch)
         self._apply_focal_gamma()
 
@@ -481,6 +505,10 @@ class FocalGammaScheduler(Callback):
 
 class LogitAdjustTauScheduler(Callback):
     def __init__(self, start_value, end_value, *, start_epoch=1, end_epoch=1):
+        if isinstance(start_epoch, torch.Tensor):
+            start_epoch = _as_python_int(start_epoch)
+        if isinstance(end_epoch, torch.Tensor):
+            end_epoch = _as_python_int(end_epoch)
         if start_value < 0.0:
             raise ValueError("start_value must be >= 0")
         if end_value < 0.0:
@@ -507,7 +535,7 @@ class LogitAdjustTauScheduler(Callback):
             raise ValueError("LogitAdjustTauScheduler requires task.logit_adjust_tau")
 
     def _value_for_epoch(self, epoch):
-        epoch = int(epoch)
+        epoch = _as_python_int(epoch)
         if epoch < self.start_epoch:
             return self.start_value
         if self.end_epoch == self.start_epoch:
@@ -525,7 +553,7 @@ class LogitAdjustTauScheduler(Callback):
         self._task = self._resolve_task(trainer.task)
         self._validate_task(self._task)
         self.original_logit_adjust_tau = float(self._task.logit_adjust_tau)
-        next_epoch = int(history["completed_epochs"]) + 1
+        next_epoch = _as_python_int(history["completed_epochs"]) + 1
         self.current_value = self._value_for_epoch(next_epoch)
         self._apply_logit_adjust_tau()
 
@@ -553,6 +581,10 @@ class LogitAdjustTauScheduler(Callback):
 
 class LdamMarginScheduler(Callback):
     def __init__(self, start_value, end_value, *, start_epoch=1, end_epoch=1):
+        if isinstance(start_epoch, torch.Tensor):
+            start_epoch = _as_python_int(start_epoch)
+        if isinstance(end_epoch, torch.Tensor):
+            end_epoch = _as_python_int(end_epoch)
         if start_value <= 0.0:
             raise ValueError("start_value must be > 0")
         if end_value <= 0.0:
@@ -579,7 +611,7 @@ class LdamMarginScheduler(Callback):
             raise ValueError("LdamMarginScheduler requires task.ldam_max_margin")
 
     def _value_for_epoch(self, epoch):
-        epoch = int(epoch)
+        epoch = _as_python_int(epoch)
         if epoch < self.start_epoch:
             return self.start_value
         if self.end_epoch == self.start_epoch:
@@ -597,7 +629,7 @@ class LdamMarginScheduler(Callback):
         self._task = self._resolve_task(trainer.task)
         self._validate_task(self._task)
         self.original_ldam_max_margin = float(self._task.ldam_max_margin)
-        next_epoch = int(history["completed_epochs"]) + 1
+        next_epoch = _as_python_int(history["completed_epochs"]) + 1
         self.current_value = self._value_for_epoch(next_epoch)
         self._apply_ldam_max_margin()
 
@@ -625,6 +657,10 @@ class LdamMarginScheduler(Callback):
 
 class PosWeightScheduler(Callback):
     def __init__(self, start_value, end_value, *, start_epoch=1, end_epoch=1):
+        if isinstance(start_epoch, torch.Tensor):
+            start_epoch = _as_python_int(start_epoch)
+        if isinstance(end_epoch, torch.Tensor):
+            end_epoch = _as_python_int(end_epoch)
         if start_value <= 0.0:
             raise ValueError("start_value must be > 0")
         if end_value <= 0.0:
@@ -651,7 +687,7 @@ class PosWeightScheduler(Callback):
             raise ValueError("PosWeightScheduler requires task.pos_weight")
 
     def _value_for_epoch(self, epoch):
-        epoch = int(epoch)
+        epoch = _as_python_int(epoch)
         if epoch < self.start_epoch:
             return self.start_value
         if self.end_epoch == self.start_epoch:
@@ -677,7 +713,7 @@ class PosWeightScheduler(Callback):
             self.original_pos_weight = None
         else:
             self.original_pos_weight = self._task.pos_weight.detach().clone()
-        next_epoch = int(history["completed_epochs"]) + 1
+        next_epoch = _as_python_int(history["completed_epochs"]) + 1
         self.current_value = self._value_for_epoch(next_epoch)
         self._apply_pos_weight()
 
@@ -709,6 +745,10 @@ class PosWeightScheduler(Callback):
 
 class BootstrapBetaScheduler(Callback):
     def __init__(self, start_value, end_value, *, start_epoch=1, end_epoch=1):
+        if isinstance(start_epoch, torch.Tensor):
+            start_epoch = _as_python_int(start_epoch)
+        if isinstance(end_epoch, torch.Tensor):
+            end_epoch = _as_python_int(end_epoch)
         if start_value < 0.0 or start_value > 1.0:
             raise ValueError("start_value must be in [0, 1]")
         if end_value < 0.0 or end_value > 1.0:
@@ -733,7 +773,7 @@ class BootstrapBetaScheduler(Callback):
         return task
 
     def _value_for_epoch(self, epoch):
-        epoch = int(epoch)
+        epoch = _as_python_int(epoch)
         if epoch < self.start_epoch:
             return self.start_value
         if self.end_epoch == self.start_epoch:
@@ -750,7 +790,7 @@ class BootstrapBetaScheduler(Callback):
     def on_fit_start(self, trainer, history):
         self._task = self._resolve_task(trainer.task)
         self.original_beta = float(self._task.beta)
-        next_epoch = int(history["completed_epochs"]) + 1
+        next_epoch = _as_python_int(history["completed_epochs"]) + 1
         self.current_value = self._value_for_epoch(next_epoch)
         self._apply_beta()
 
@@ -778,6 +818,10 @@ class BootstrapBetaScheduler(Callback):
 
 class ConfidencePenaltyScheduler(Callback):
     def __init__(self, start_value, end_value, *, start_epoch=1, end_epoch=1):
+        if isinstance(start_epoch, torch.Tensor):
+            start_epoch = _as_python_int(start_epoch)
+        if isinstance(end_epoch, torch.Tensor):
+            end_epoch = _as_python_int(end_epoch)
         if start_value < 0.0:
             raise ValueError("start_value must be >= 0")
         if end_value < 0.0:
@@ -802,7 +846,7 @@ class ConfidencePenaltyScheduler(Callback):
         return task
 
     def _value_for_epoch(self, epoch):
-        epoch = int(epoch)
+        epoch = _as_python_int(epoch)
         if epoch < self.start_epoch:
             return self.start_value
         if self.end_epoch == self.start_epoch:
@@ -819,7 +863,7 @@ class ConfidencePenaltyScheduler(Callback):
     def on_fit_start(self, trainer, history):
         self._task = self._resolve_task(trainer.task)
         self.original_coefficient = float(self._task.coefficient)
-        next_epoch = int(history["completed_epochs"]) + 1
+        next_epoch = _as_python_int(history["completed_epochs"]) + 1
         self.current_value = self._value_for_epoch(next_epoch)
         self._apply_coefficient()
 
@@ -847,6 +891,10 @@ class ConfidencePenaltyScheduler(Callback):
 
 class FloodingLevelScheduler(Callback):
     def __init__(self, start_value, end_value, *, start_epoch=1, end_epoch=1):
+        if isinstance(start_epoch, torch.Tensor):
+            start_epoch = _as_python_int(start_epoch)
+        if isinstance(end_epoch, torch.Tensor):
+            end_epoch = _as_python_int(end_epoch)
         if start_value < 0.0:
             raise ValueError("start_value must be >= 0")
         if end_value < 0.0:
@@ -871,7 +919,7 @@ class FloodingLevelScheduler(Callback):
         return task
 
     def _value_for_epoch(self, epoch):
-        epoch = int(epoch)
+        epoch = _as_python_int(epoch)
         if epoch < self.start_epoch:
             return self.start_value
         if self.end_epoch == self.start_epoch:
@@ -888,7 +936,7 @@ class FloodingLevelScheduler(Callback):
     def on_fit_start(self, trainer, history):
         self._task = self._resolve_task(trainer.task)
         self.original_level = float(self._task.level)
-        next_epoch = int(history["completed_epochs"]) + 1
+        next_epoch = _as_python_int(history["completed_epochs"]) + 1
         self.current_value = self._value_for_epoch(next_epoch)
         self._apply_level()
 
@@ -916,6 +964,10 @@ class FloodingLevelScheduler(Callback):
 
 class GeneralizedCrossEntropyScheduler(Callback):
     def __init__(self, start_value, end_value, *, start_epoch=1, end_epoch=1):
+        if isinstance(start_epoch, torch.Tensor):
+            start_epoch = _as_python_int(start_epoch)
+        if isinstance(end_epoch, torch.Tensor):
+            end_epoch = _as_python_int(end_epoch)
         if start_value <= 0.0 or start_value > 1.0:
             raise ValueError("start_value must be in (0, 1]")
         if end_value <= 0.0 or end_value > 1.0:
@@ -940,7 +992,7 @@ class GeneralizedCrossEntropyScheduler(Callback):
         return task
 
     def _value_for_epoch(self, epoch):
-        epoch = int(epoch)
+        epoch = _as_python_int(epoch)
         if epoch < self.start_epoch:
             return self.start_value
         if self.end_epoch == self.start_epoch:
@@ -957,7 +1009,7 @@ class GeneralizedCrossEntropyScheduler(Callback):
     def on_fit_start(self, trainer, history):
         self._task = self._resolve_task(trainer.task)
         self.original_q = float(self._task.q)
-        next_epoch = int(history["completed_epochs"]) + 1
+        next_epoch = _as_python_int(history["completed_epochs"]) + 1
         self.current_value = self._value_for_epoch(next_epoch)
         self._apply_q()
 
@@ -985,6 +1037,10 @@ class GeneralizedCrossEntropyScheduler(Callback):
 
 class Poly1EpsilonScheduler(Callback):
     def __init__(self, start_value, end_value, *, start_epoch=1, end_epoch=1):
+        if isinstance(start_epoch, torch.Tensor):
+            start_epoch = _as_python_int(start_epoch)
+        if isinstance(end_epoch, torch.Tensor):
+            end_epoch = _as_python_int(end_epoch)
         if start_value < 0.0:
             raise ValueError("start_value must be >= 0")
         if end_value < 0.0:
@@ -1009,7 +1065,7 @@ class Poly1EpsilonScheduler(Callback):
         return task
 
     def _value_for_epoch(self, epoch):
-        epoch = int(epoch)
+        epoch = _as_python_int(epoch)
         if epoch < self.start_epoch:
             return self.start_value
         if self.end_epoch == self.start_epoch:
@@ -1026,7 +1082,7 @@ class Poly1EpsilonScheduler(Callback):
     def on_fit_start(self, trainer, history):
         self._task = self._resolve_task(trainer.task)
         self.original_epsilon = float(self._task.epsilon)
-        next_epoch = int(history["completed_epochs"]) + 1
+        next_epoch = _as_python_int(history["completed_epochs"]) + 1
         self.current_value = self._value_for_epoch(next_epoch)
         self._apply_epsilon()
 
@@ -1142,25 +1198,27 @@ class GradientAccumulationScheduler(Callback):
 
         normalized = {}
         for epoch, accumulate_grad_batches in items:
-            if not isinstance(epoch, int) or isinstance(epoch, bool):
+            if not _is_integral_scalar(epoch):
                 raise TypeError("scheduling epoch keys must be integers")
+            epoch = _as_python_int(epoch)
             if epoch < 1:
                 raise ValueError("scheduling epoch keys must be >= 1")
-            if not isinstance(accumulate_grad_batches, int) or isinstance(accumulate_grad_batches, bool):
+            if not _is_integral_scalar(accumulate_grad_batches):
                 raise TypeError("scheduling accumulation values must be integers")
+            accumulate_grad_batches = _as_python_int(accumulate_grad_batches)
             if accumulate_grad_batches < 1:
                 raise ValueError("scheduling accumulation values must be >= 1")
-            normalized[int(epoch)] = int(accumulate_grad_batches)
+            normalized[epoch] = accumulate_grad_batches
         return tuple(sorted(normalized.items()))
 
     def _value_for_epoch(self, epoch):
         if self.original_accumulate_grad_batches is None:
             raise RuntimeError("GradientAccumulationScheduler is not initialized")
-        value = int(self.original_accumulate_grad_batches)
+        value = _as_python_int(self.original_accumulate_grad_batches)
         for start_epoch, scheduled_accumulation in self.scheduling:
             if epoch < start_epoch:
                 break
-            value = int(scheduled_accumulation)
+            value = _as_python_int(scheduled_accumulation)
         return value
 
     def _apply_to_trainer(self):
@@ -1168,12 +1226,12 @@ class GradientAccumulationScheduler(Callback):
             return
         if self.current_accumulate_grad_batches is None:
             return
-        self._trainer.accumulate_grad_batches = int(self.current_accumulate_grad_batches)
+        self._trainer.accumulate_grad_batches = _as_python_int(self.current_accumulate_grad_batches)
 
     def on_fit_start(self, trainer, history):
         self._trainer = trainer
-        self.original_accumulate_grad_batches = int(trainer.accumulate_grad_batches)
-        next_epoch = int(history["completed_epochs"]) + 1
+        self.original_accumulate_grad_batches = _as_python_int(trainer.accumulate_grad_batches)
+        next_epoch = _as_python_int(history["completed_epochs"]) + 1
         self.current_accumulate_grad_batches = self._value_for_epoch(next_epoch)
         self._apply_to_trainer()
 
@@ -1186,10 +1244,10 @@ class GradientAccumulationScheduler(Callback):
     def load_state_dict(self, state):
         original = state.get("original_accumulate_grad_batches")
         if original is not None:
-            self.original_accumulate_grad_batches = int(original)
+            self.original_accumulate_grad_batches = _as_python_int(original)
         current = state.get("current_accumulate_grad_batches")
         if current is not None:
-            self.current_accumulate_grad_batches = int(current)
+            self.current_accumulate_grad_batches = _as_python_int(current)
         self._apply_to_trainer()
 
     def on_epoch_end(self, trainer, epoch, train_summary, val_summary, history):
@@ -1203,7 +1261,7 @@ class GradientAccumulationScheduler(Callback):
         del trainer, history
         if self._trainer is None or self.original_accumulate_grad_batches is None:
             return
-        self._trainer.accumulate_grad_batches = int(self.original_accumulate_grad_batches)
+        self._trainer.accumulate_grad_batches = _as_python_int(self.original_accumulate_grad_batches)
 
 
 class ModelCheckpoint(Callback):
@@ -1223,16 +1281,18 @@ class ModelCheckpoint(Callback):
             raise ValueError("filename must be a non-empty string")
         if mode not in {None, "min", "max"}:
             raise ValueError("mode must be 'min', 'max', or None")
-        if not isinstance(save_top_k, int) or isinstance(save_top_k, bool):
+        if not _is_integral_scalar(save_top_k):
             raise TypeError("save_top_k must be an integer")
+        save_top_k = _as_python_int(save_top_k)
         if save_top_k < -1:
             raise ValueError("save_top_k must be >= -1")
         if not isinstance(save_last, bool):
             raise TypeError("save_last must be a bool")
         if not isinstance(save_on_exception, bool):
             raise TypeError("save_on_exception must be a bool")
-        if not isinstance(every_n_epochs, int) or isinstance(every_n_epochs, bool):
+        if not _is_integral_scalar(every_n_epochs):
             raise TypeError("every_n_epochs must be an integer")
+        every_n_epochs = _as_python_int(every_n_epochs)
         if every_n_epochs < 1:
             raise ValueError("every_n_epochs must be >= 1")
 
@@ -1240,10 +1300,10 @@ class ModelCheckpoint(Callback):
         self.filename = filename
         self.monitor = monitor
         self.mode = mode
-        self.save_top_k = int(save_top_k)
+        self.save_top_k = save_top_k
         self.save_last = bool(save_last)
         self.save_on_exception = bool(save_on_exception)
-        self.every_n_epochs = int(every_n_epochs)
+        self.every_n_epochs = every_n_epochs
         self.active_monitor = None
         self.active_mode = None
         self.best_k_models = []
@@ -1486,6 +1546,10 @@ class ModelCheckpoint(Callback):
 
 class WeightDecayScheduler(Callback):
     def __init__(self, start_factor, end_factor, *, start_epoch=1, end_epoch=1):
+        if isinstance(start_epoch, torch.Tensor):
+            start_epoch = _as_python_int(start_epoch)
+        if isinstance(end_epoch, torch.Tensor):
+            end_epoch = _as_python_int(end_epoch)
         if start_factor < 0.0:
             raise ValueError("start_factor must be >= 0")
         if end_factor < 0.0:
@@ -1503,7 +1567,7 @@ class WeightDecayScheduler(Callback):
         self._optimizer = None
 
     def _value_for_epoch(self, epoch):
-        epoch = int(epoch)
+        epoch = _as_python_int(epoch)
         if epoch < self.start_epoch:
             return self.start_factor
         if self.end_epoch == self.start_epoch:
@@ -1525,7 +1589,7 @@ class WeightDecayScheduler(Callback):
             float(group.get("weight_decay", 0.0))
             for group in self._optimizer.param_groups
         ]
-        next_epoch = int(history["completed_epochs"]) + 1
+        next_epoch = _as_python_int(history["completed_epochs"]) + 1
         self.current_factor = self._value_for_epoch(next_epoch)
         self._apply_weight_decay()
 
@@ -1561,6 +1625,10 @@ class WeightDecayScheduler(Callback):
 
 class GradualUnfreezing(Callback):
     def __init__(self, module_name_groups, start_epoch=2, frequency=1):
+        if isinstance(start_epoch, torch.Tensor):
+            start_epoch = _as_python_int(start_epoch)
+        if isinstance(frequency, torch.Tensor):
+            frequency = _as_python_int(frequency)
         if start_epoch < 1:
             raise ValueError("start_epoch must be >= 1")
         if frequency < 1:
@@ -1663,7 +1731,7 @@ class GradualUnfreezing(Callback):
             if current_names and set(state_requires_grad) != current_names:
                 raise ValueError("GradualUnfreezing tracked parameters do not match checkpoint state")
             self.original_requires_grad = state_requires_grad
-        self.unfrozen_group_count = int(state.get("unfrozen_group_count", 0))
+        self.unfrozen_group_count = _as_python_int(state.get("unfrozen_group_count", 0))
         if self.unfrozen_group_count < 0 or self.unfrozen_group_count > len(self.group_param_names):
             raise ValueError("GradualUnfreezing checkpoint state is out of range")
         self._apply_requires_grad_state()
@@ -1750,7 +1818,7 @@ class Lookahead(Callback):
             raise ValueError("sync_period must be >= 1")
         if slow_step_size <= 0.0 or slow_step_size > 1.0:
             raise ValueError("slow_step_size must be in (0, 1]")
-        self.sync_period = int(sync_period)
+        self.sync_period = _as_python_int(sync_period)
         self.slow_step_size = float(slow_step_size)
         self.slow_state = None
         self.step_count = 0
@@ -1793,12 +1861,12 @@ class Lookahead(Callback):
                 name: tensor.detach().clone()
                 for name, tensor in slow_state.items()
             }
-        self.step_count = int(state.get("step_count", 0))
+        self.step_count = _as_python_int(state.get("step_count", 0))
 
     def on_after_optimizer_step(self, trainer, step):
         if self.slow_state is None:
             return
-        self.step_count = int(step)
+        self.step_count = _as_python_int(step)
         if self.step_count % self.sync_period != 0:
             return
         state_dict = trainer.model.state_dict()
@@ -1810,6 +1878,10 @@ class Lookahead(Callback):
 
 class StochasticWeightAveraging(Callback):
     def __init__(self, start_epoch=1, frequency=1, apply_on_fit_end=False):
+        if isinstance(start_epoch, torch.Tensor):
+            start_epoch = _as_python_int(start_epoch)
+        if isinstance(frequency, torch.Tensor):
+            frequency = _as_python_int(frequency)
         if start_epoch < 1:
             raise ValueError("start_epoch must be >= 1")
         if frequency < 1:
@@ -1877,7 +1949,7 @@ class StochasticWeightAveraging(Callback):
                 name: tensor.detach().clone()
                 for name, tensor in avg_state.items()
             }
-        self.num_averaged = int(state.get("num_averaged", 0))
+        self.num_averaged = _as_python_int(state.get("num_averaged", 0))
 
     def on_fit_end(self, trainer, history):
         del history

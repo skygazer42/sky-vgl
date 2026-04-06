@@ -105,6 +105,26 @@ def test_uniform_negative_link_sampler_avoids_tensor_tolist(monkeypatch):
     assert all(int(current.dst_index) != 1 for current in sampled[1:])
 
 
+def test_uniform_negative_link_sampler_avoids_tensor_item(monkeypatch):
+    graph = Graph.homo(
+        edge_index=torch.tensor([[0, 1], [1, 2]]),
+        x=torch.randn(4, 4),
+    )
+    sampler = UniformNegativeLinkSampler(num_negatives=2)
+    record = LinkPredictionRecord(graph=graph, src_index=0, dst_index=1, label=1)
+
+    def fail_item(self):
+        raise AssertionError("uniform negative sampling should stay off tensor.item")
+
+    monkeypatch.setattr(torch.Tensor, "item", fail_item)
+
+    sampled = sampler.sample(record)
+
+    assert len(sampled) == 3
+    assert sampled[0].label == 1
+    assert all(int(current.dst_index) != 1 for current in sampled[1:])
+
+
 def test_uniform_negative_link_sampler_avoids_torch_isin_when_excluding_destinations(monkeypatch):
     graph = Graph.homo(
         edge_index=torch.tensor([[0, 1], [1, 2]]),
@@ -123,6 +143,26 @@ def test_uniform_negative_link_sampler_avoids_torch_isin_when_excluding_destinat
     assert sampled.numel() == 2
     assert torch.all(sampled != 1)
     assert torch.all(sampled != 3)
+
+
+def test_uniform_negative_link_sampler_avoids_torch_unique(monkeypatch):
+    graph = Graph.homo(
+        edge_index=torch.tensor([[0, 0, 1], [1, 2, 2]]),
+        x=torch.randn(5, 4),
+    )
+    sampler = UniformNegativeLinkSampler(num_negatives=2)
+    record = LinkPredictionRecord(graph=graph, src_index=0, dst_index=1, label=1)
+
+    def fail_unique(*args, **kwargs):
+        raise AssertionError("uniform negative sampling should avoid torch.unique")
+
+    monkeypatch.setattr(torch, "unique", fail_unique)
+
+    sampled = sampler.sample(record)
+
+    assert len(sampled) == 3
+    assert sampled[0].label == 1
+    assert all(int(current.dst_index) != 1 for current in sampled[1:])
 
 
 def test_uniform_negative_link_sampler_small_candidate_path_avoids_repeat_interleave(monkeypatch):
@@ -345,6 +385,32 @@ def test_hard_negative_link_sampler_avoids_tensor_tolist(monkeypatch):
     assert {(0, 3), (0, 4)}.issubset({(int(current.src_index), int(current.dst_index)) for current in sampled[1:]})
 
 
+def test_hard_negative_link_sampler_avoids_tensor_item(monkeypatch):
+    graph = Graph.homo(
+        edge_index=torch.tensor([[0, 0, 1], [1, 2, 2]]),
+        x=torch.randn(5, 4),
+    )
+    sampler = HardNegativeLinkSampler(num_negatives=3, num_hard_negatives=2)
+    record = LinkPredictionRecord(
+        graph=graph,
+        src_index=0,
+        dst_index=1,
+        label=1,
+        hard_negative_dst=[3, 4],
+    )
+
+    def fail_item(self):
+        raise AssertionError("hard negative sampling should stay off tensor.item")
+
+    monkeypatch.setattr(torch.Tensor, "item", fail_item)
+
+    sampled = sampler.sample(record)
+
+    assert len(sampled) == 4
+    assert sampled[0].label == 1
+    assert {(0, 3), (0, 4)}.issubset({(int(current.src_index), int(current.dst_index)) for current in sampled[1:]})
+
+
 def test_hard_negative_link_sampler_avoids_torch_isin(monkeypatch):
     graph = Graph.homo(
         edge_index=torch.tensor([[0, 0, 1], [1, 2, 2]]),
@@ -363,6 +429,31 @@ def test_hard_negative_link_sampler_avoids_torch_isin(monkeypatch):
         raise AssertionError("hard negative candidate filtering should avoid torch.isin")
 
     monkeypatch.setattr(torch, "isin", fail_isin)
+
+    sampled = sampler.sample(record)
+
+    assert len(sampled) == 4
+    assert {(0, 3), (0, 4)}.issubset({(int(current.src_index), int(current.dst_index)) for current in sampled[1:]})
+
+
+def test_hard_negative_link_sampler_avoids_torch_unique(monkeypatch):
+    graph = Graph.homo(
+        edge_index=torch.tensor([[0, 0, 1], [1, 2, 2]]),
+        x=torch.randn(5, 4),
+    )
+    sampler = HardNegativeLinkSampler(num_negatives=3, num_hard_negatives=2)
+    record = LinkPredictionRecord(
+        graph=graph,
+        src_index=0,
+        dst_index=1,
+        label=1,
+        hard_negative_dst=[3, 4],
+    )
+
+    def fail_unique(*args, **kwargs):
+        raise AssertionError("hard negative sampling should avoid torch.unique")
+
+    monkeypatch.setattr(torch, "unique", fail_unique)
 
     sampled = sampler.sample(record)
 
@@ -531,6 +622,31 @@ def test_candidate_link_sampler_avoids_tensor_tolist(monkeypatch):
         raise AssertionError("candidate link sampling should stay on tensors")
 
     monkeypatch.setattr(torch.Tensor, "tolist", fail_tolist)
+
+    sampled = sampler.sample(record)
+
+    assert [int(current.dst_index) for current in sampled] == [1, 3, 2]
+    assert [bool(current.filter_ranking) for current in sampled] == [False, False, True]
+
+
+def test_candidate_link_sampler_avoids_tensor_item(monkeypatch):
+    graph = Graph.homo(
+        edge_index=torch.tensor([[0, 0], [1, 2]]),
+        x=torch.randn(5, 4),
+    )
+    sampler = CandidateLinkSampler()
+    record = LinkPredictionRecord(
+        graph=graph,
+        src_index=0,
+        dst_index=1,
+        label=1,
+        candidate_dst=[3, 2, 3],
+    )
+
+    def fail_item(self):
+        raise AssertionError("candidate link sampling should stay off tensor.item")
+
+    monkeypatch.setattr(torch.Tensor, "item", fail_item)
 
     sampled = sampler.sample(record)
 

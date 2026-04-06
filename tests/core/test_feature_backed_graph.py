@@ -1,10 +1,10 @@
 import torch
 
 from vgl import Graph
-from vgl.graph import GraphSchema
+from vgl.graph import GraphSchema, GraphView
 from vgl.sparse import SparseLayout, to_coo
 from vgl.storage import FeatureStore, InMemoryGraphStore, InMemoryTensorStore
-from vgl.ops import in_subgraph, out_subgraph
+from vgl.ops import in_subgraph, num_nodes, out_subgraph
 
 
 class RecordingTensorStore:
@@ -60,6 +60,11 @@ class RecordingGraphStore:
 
     def adjacency(self, *, edge_type=None, layout="coo"):
         return self._store.adjacency(edge_type=edge_type, layout=layout)
+
+
+class TensorNumNodesGraphStore(RecordingGraphStore):
+    def num_nodes(self, node_type: str = "node"):
+        return torch.tensor(self._store.num_nodes(node_type))
 
 
 HOMO_EDGE = ("node", "to", "node")
@@ -214,6 +219,57 @@ def test_graph_from_storage_fetches_edge_structure_lazily_and_caches_it():
     adjacency = graph.adjacency()
     assert graph_store.edge_index_calls == [HOMO_EDGE]
     assert adjacency.shape == (3, 3)
+
+
+def test_graph_num_nodes_avoids_tensor_int_for_graph_store_counts(monkeypatch):
+    schema = GraphSchema(
+        node_types=("node",),
+        edge_types=(HOMO_EDGE,),
+        node_features={"node": ()},
+        edge_features={HOMO_EDGE: ("edge_index",)},
+    )
+    graph_store = TensorNumNodesGraphStore(
+        {HOMO_EDGE: torch.tensor([[0, 1], [1, 0]])},
+        num_nodes={"node": 4},
+    )
+    graph = Graph.from_storage(
+        schema=schema,
+        feature_store=FeatureStore({}),
+        graph_store=graph_store,
+    )
+
+    def fail_int(self):
+        raise AssertionError("Graph.num_nodes should stay off tensor.__int__ for graph_store counts")
+
+    monkeypatch.setattr(torch.Tensor, "__int__", fail_int)
+
+    assert graph.num_nodes() == 4
+
+
+def test_graph_view_num_nodes_avoids_tensor_int_for_graph_store_counts(monkeypatch):
+    schema = GraphSchema(
+        node_types=("node",),
+        edge_types=(HOMO_EDGE,),
+        node_features={"node": ()},
+        edge_features={HOMO_EDGE: ("edge_index",)},
+    )
+    graph_store = TensorNumNodesGraphStore(
+        {HOMO_EDGE: torch.tensor([[0, 1], [1, 0]])},
+        num_nodes={"node": 4},
+    )
+    graph = Graph.from_storage(
+        schema=schema,
+        feature_store=FeatureStore({}),
+        graph_store=graph_store,
+    )
+    view = GraphView(base=graph, nodes=graph.nodes, edges=graph.edges, schema=graph.schema)
+
+    def fail_int(self):
+        raise AssertionError("GraphView node counts should stay off tensor.__int__ for graph_store counts")
+
+    monkeypatch.setattr(torch.Tensor, "__int__", fail_int)
+
+    assert num_nodes(view) == 4
 
 
 def test_graph_from_storage_retains_feature_store_context():

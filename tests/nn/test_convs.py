@@ -947,6 +947,32 @@ def test_transformer_conv_accepts_graph_input():
     assert out.shape == (3, 3)
 
 
+def test_transformer_conv_avoids_tensor_item_in_edge_softmax(monkeypatch):
+    conv = TransformerConv(in_channels=4, out_channels=3, heads=2, concat=False)
+
+    def fail_item(self):
+        raise AssertionError("homo edge_softmax should stay off tensor.item")
+
+    monkeypatch.setattr(torch.Tensor, "item", fail_item)
+
+    out = conv(_homo_graph())
+
+    assert out.shape == (3, 3)
+
+
+def test_transformer_conv_avoids_tensor_int_in_edge_softmax(monkeypatch):
+    conv = TransformerConv(in_channels=4, out_channels=3, heads=2, concat=False)
+
+    def fail_int(self):
+        raise AssertionError("homo edge_softmax should stay off tensor.__int__")
+
+    monkeypatch.setattr(torch.Tensor, "__int__", fail_int)
+
+    out = conv(_homo_graph())
+
+    assert out.shape == (3, 3)
+
+
 def test_transformer_conv_accepts_x_and_edge_index():
     x = torch.randn(3, 4)
     edge_index = torch.tensor([[0, 1, 2], [1, 2, 0]])

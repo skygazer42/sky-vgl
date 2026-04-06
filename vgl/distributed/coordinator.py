@@ -3,6 +3,7 @@ from typing import Protocol
 
 import torch
 
+from vgl._neighbor_sampling import _sorted_unique_tensor
 from vgl.distributed.partition import PartitionManifest, PartitionShard
 from vgl.distributed.shard import LocalGraphShard
 from vgl.distributed.store import (
@@ -120,9 +121,15 @@ def _build_routes(grouped: dict[int, dict[str, list[int]]]) -> tuple[ShardRoute,
     return tuple(routes)
 
 
+def _as_python_int(value) -> int:
+    if isinstance(value, torch.Tensor):
+        return int(value.detach().cpu().numpy().reshape(()).item())
+    return int(value)
+
+
 def _tensor_ints(values: torch.Tensor) -> tuple[int, ...]:
     tensor = torch.as_tensor(values, dtype=torch.long).view(-1)
-    return tuple(int(value.item()) for value in tensor)
+    return tuple(_as_python_int(value) for value in tensor)
 
 
 def _build_int_lookup(mapping: dict[int, int]) -> tuple[torch.Tensor, torch.Tensor]:
@@ -130,7 +137,7 @@ def _build_int_lookup(mapping: dict[int, int]) -> tuple[torch.Tensor, torch.Tens
         empty = torch.empty(0, dtype=torch.long)
         return empty, empty
     keys = torch.tensor(sorted(mapping), dtype=torch.long)
-    values = torch.tensor([mapping[int(key)] for key in keys], dtype=torch.long)
+    values = torch.tensor([mapping[_as_python_int(key)] for key in keys], dtype=torch.long)
     return keys, values
 
 
@@ -141,16 +148,16 @@ def _lookup_tensor_values(index_ids: torch.Tensor, query_ids: torch.Tensor, look
     if query_ids.numel() == 0:
         return torch.empty(0, dtype=torch.long, device=index_ids.device)
     if index_ids.numel() == 0:
-        raise KeyError(f"{entity_name} {int(query_ids[0])} is not present")
+        raise KeyError(f"{entity_name} {_as_python_int(query_ids[0])} is not present")
 
     positions = torch.searchsorted(index_ids, query_ids.contiguous())
     missing = positions >= index_ids.numel()
     if bool(missing.any()):
-        raise KeyError(f"{entity_name} {int(query_ids[missing][0])} is not present")
+        raise KeyError(f"{entity_name} {_as_python_int(query_ids[missing][0])} is not present")
     matched = index_ids.index_select(0, positions)
     mismatch = matched != query_ids
     if bool(mismatch.any()):
-        raise KeyError(f"{entity_name} {int(query_ids[mismatch][0])} is not present")
+        raise KeyError(f"{entity_name} {_as_python_int(query_ids[mismatch][0])} is not present")
     return lookup_values.index_select(0, positions)
 
 
@@ -190,8 +197,8 @@ def _group_partitioned_ids(
     else:
         positions = torch.as_tensor(positions, dtype=torch.long, device=global_ids.device).view(-1)
     groups = []
-    for partition_id_tensor in torch.unique(partition_ids, sorted=True):
-        partition_id = int(partition_id_tensor)
+    for partition_id_tensor in _sorted_unique_tensor(partition_ids):
+        partition_id = _as_python_int(partition_id_tensor)
         mask = partition_ids == partition_id_tensor
         groups.append((partition_id, global_ids[mask], positions[mask]))
     return tuple(groups)
@@ -239,26 +246,26 @@ def _route_node_ids_with_lookup(
 
     invalid_range = (node_ids < 0) | (node_ids >= typed_count)
     if bool(invalid_range.any()):
-        raise KeyError(int(node_ids[invalid_range][0].item()))
+        raise KeyError(_as_python_int(node_ids[invalid_range][0]))
     if ends.numel() == 0:
-        raise KeyError(int(node_ids[0].item()))
+        raise KeyError(_as_python_int(node_ids[0]))
 
     route_index = torch.searchsorted(ends, node_ids, right=True)
     invalid_partition = route_index >= ends.numel()
     if bool(invalid_partition.any()):
-        raise KeyError(int(node_ids[invalid_partition][0].item()))
+        raise KeyError(_as_python_int(node_ids[invalid_partition][0]))
     local_starts = starts.index_select(0, route_index)
     valid = local_starts <= node_ids
     if bool((~valid).any()):
-        raise KeyError(int(node_ids[~valid][0].item()))
+        raise KeyError(_as_python_int(node_ids[~valid][0]))
 
     local_ids = node_ids - local_starts
     routed_partition_ids = partition_ids.index_select(0, route_index)
     positions = torch.arange(node_ids.numel(), dtype=torch.long)
     routes = []
-    for partition_id_tensor in torch.unique(routed_partition_ids, sorted=True):
-        partition_id = int(partition_id_tensor.item())
-        partition_mask = routed_partition_ids == partition_id
+    for partition_id_tensor in _sorted_unique_tensor(routed_partition_ids):
+        partition_id = _as_python_int(partition_id_tensor)
+        partition_mask = routed_partition_ids == partition_id_tensor
         partition_positions = positions[partition_mask]
         routes.append(
             ShardRoute(
@@ -452,7 +459,7 @@ class LocalSamplingCoordinator:
         boundary_mask = (~local_mask) & (boundary_partition_ids >= 0)
         unresolved_mask = (~local_mask) & (~boundary_mask)
         if bool(unresolved_mask.any()):
-            missing_edge_id = int(edge_ids[unresolved_mask][0])
+            missing_edge_id = _as_python_int(edge_ids[unresolved_mask][0])
             raise KeyError(f"edge {missing_edge_id} is not present for edge type {edge_type!r}")
 
         values = None
@@ -738,7 +745,7 @@ class StoreBackedSamplingCoordinator:
         boundary_mask = (~local_mask) & (boundary_partition_ids >= 0)
         unresolved_mask = (~local_mask) & (~boundary_mask)
         if bool(unresolved_mask.any()):
-            missing_edge_id = int(edge_ids[unresolved_mask][0])
+            missing_edge_id = _as_python_int(edge_ids[unresolved_mask][0])
             raise KeyError(f"edge {missing_edge_id} is not present for edge type {edge_type!r}")
 
         values = None

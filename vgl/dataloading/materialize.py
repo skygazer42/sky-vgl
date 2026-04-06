@@ -2,6 +2,7 @@ from dataclasses import replace
 
 import torch
 
+from vgl.dataloading.executor import _as_python_int
 from vgl.dataloading.executor import MaterializationContext, _lookup_positions
 from vgl.dataloading.records import LinkPredictionRecord, SampleRecord, TemporalEventRecord
 from vgl.graph.batch import (
@@ -291,7 +292,7 @@ def _link_message_passing_graph(graph: Graph, records: list[LinkPredictionRecord
     supervision_edges_by_type: dict[tuple[str, str, str], set[tuple[int, int]]] = {}
     reverse_supervision_edges: dict[tuple[str, str, str], set[tuple[int, int]]] = {}
     for record in records:
-        if int(record.label) != 1:
+        if _as_python_int(record.label) != 1:
             continue
         if not (bool(getattr(record, "exclude_seed_edge", False)) or bool(record.metadata.get("exclude_seed_edges", False))):
             continue
@@ -299,13 +300,17 @@ def _link_message_passing_graph(graph: Graph, records: list[LinkPredictionRecord
         if edge_type is None:
             edge_type = graph._default_edge_type()
         edge_type = tuple(edge_type)
-        supervision_edges_by_type.setdefault(edge_type, set()).add((int(record.src_index), int(record.dst_index)))
+        supervision_edges_by_type.setdefault(edge_type, set()).add(
+            (_as_python_int(record.src_index), _as_python_int(record.dst_index))
+        )
         reverse_edge_type = getattr(record, "reverse_edge_type", None)
         if reverse_edge_type is None:
             reverse_edge_type = record.metadata.get("reverse_edge_type")
         if reverse_edge_type is not None:
             reverse_edge_type = tuple(reverse_edge_type)
-            reverse_supervision_edges.setdefault(reverse_edge_type, set()).add((int(record.dst_index), int(record.src_index)))
+            reverse_supervision_edges.setdefault(reverse_edge_type, set()).add(
+                (_as_python_int(record.dst_index), _as_python_int(record.src_index))
+            )
     if set(graph.nodes) == {"node"} and len(graph.edges) == 1:
         supervision_edges = supervision_edges_by_type.get(graph._default_edge_type(), set())
         if reverse_supervision_edges:
@@ -483,7 +488,7 @@ def _node_context_to_sample(context: MaterializationContext) -> SampleRecord | l
     samples = []
     for index in range(seeds.numel()):
         sample_metadata = dict(metadata)
-        sample_metadata["seed"] = int(seeds[index].item())
+        sample_metadata["seed"] = _as_python_int(seeds[index])
         if node_type != "node":
             sample_metadata.setdefault("node_type", node_type)
         samples.append(
@@ -492,7 +497,7 @@ def _node_context_to_sample(context: MaterializationContext) -> SampleRecord | l
                 metadata=sample_metadata,
                 sample_id=sample_id,
                 source_graph_id=source_graph_id,
-                subgraph_seed=int(subgraph_seeds[index].item()),
+                subgraph_seed=_as_python_int(subgraph_seeds[index]),
                 blocks=blocks,
             )
         )

@@ -17,6 +17,12 @@ from vgl.graph.schema import GraphSchema
 EdgeType = tuple[str, str, str]
 
 
+def _as_python_int(value) -> int:
+    if isinstance(value, torch.Tensor):
+        return int(value.detach().cpu().numpy().reshape(()).item())
+    return int(value)
+
+
 def _sorted_lookup_state(ids: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
     ids = torch.as_tensor(ids, dtype=torch.long).view(-1)
     if ids.numel() == 0:
@@ -39,11 +45,11 @@ def _lookup_local_positions(
 
     positions = torch.searchsorted(sorted_ids, ids)
     if bool((positions >= sorted_ids.numel()).any()):
-        missing_id = int(ids[positions >= sorted_ids.numel()][0].item())
+        missing_id = _as_python_int(ids[positions >= sorted_ids.numel()][0])
         raise KeyError(missing_message.format(id=missing_id))
     matched_ids = sorted_ids[positions]
     if bool((matched_ids != ids).any()):
-        missing_id = int(ids[matched_ids != ids][0].item())
+        missing_id = _as_python_int(ids[matched_ids != ids][0])
         raise KeyError(missing_message.format(id=missing_id))
     return sort_perm[positions]
 

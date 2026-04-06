@@ -4,8 +4,12 @@ import inspect
 from vgl import Graph
 from vgl.core.batch import GraphBatch, LinkPredictionBatch, NodeBatch, TemporalEventBatch
 from vgl.data.sample import LinkPredictionRecord, TemporalEventRecord
-from vgl.dataloading.executor import MaterializationContext
-from vgl.dataloading.materialize import materialize_batch, materialize_context
+from vgl.dataloading.executor import (
+    MaterializationContext,
+    _build_stitched_hetero_node_samples,
+    _build_stitched_node_samples,
+)
+from vgl.dataloading.materialize import _link_message_passing_graph, materialize_batch, materialize_context
 from vgl.dataloading.requests import GraphSeedRequest, LinkSeedRequest, NodeSeedRequest, TemporalSeedRequest
 
 
@@ -215,6 +219,177 @@ def test_materialize_batch_builds_hetero_node_batch_from_multi_seed_node_context
     ]
 
 
+def test_materialize_multi_seed_homo_node_context_avoids_tensor_item(monkeypatch):
+    graph = Graph.homo(
+        edge_index=torch.tensor([[0, 2, 4], [2, 4, 0]]),
+        x=torch.randn(5, 4),
+        y=torch.tensor([0, 1, 0, 1, 0]),
+    )
+    context = MaterializationContext(
+        request=NodeSeedRequest(
+            node_ids=torch.tensor([2, 4]),
+            node_type="node",
+            metadata={"seed": [2, 4], "sample_id": "n24"},
+        ),
+        state={"node_ids": torch.tensor([0, 2, 4])},
+        metadata={"sample_id": "n24"},
+        graph=graph,
+    )
+
+    def fail_item(self):
+        raise AssertionError("homo node materialization should stay off tensor.item")
+
+    monkeypatch.setattr(torch.Tensor, "item", fail_item)
+
+    samples = materialize_context(context)
+
+    assert [sample.metadata["seed"] for sample in samples] == [2, 4]
+    assert [sample.subgraph_seed for sample in samples] == [1, 2]
+
+
+def test_materialize_multi_seed_homo_node_context_avoids_tensor_int(monkeypatch):
+    graph = Graph.homo(
+        edge_index=torch.tensor([[0, 2, 4], [2, 4, 0]]),
+        x=torch.randn(5, 4),
+        y=torch.tensor([0, 1, 0, 1, 0]),
+    )
+    context = MaterializationContext(
+        request=NodeSeedRequest(
+            node_ids=torch.tensor([2, 4]),
+            node_type="node",
+            metadata={"seed": [2, 4], "sample_id": "n24"},
+        ),
+        state={"node_ids": torch.tensor([0, 2, 4])},
+        metadata={"sample_id": "n24"},
+        graph=graph,
+    )
+
+    def fail_int(self):
+        raise AssertionError("homo node materialization should stay off tensor.__int__")
+
+    monkeypatch.setattr(torch.Tensor, "__int__", fail_int)
+
+    samples = materialize_context(context)
+
+    assert [sample.metadata["seed"] for sample in samples] == [2, 4]
+    assert [sample.subgraph_seed for sample in samples] == [1, 2]
+
+
+def test_materialize_multi_seed_hetero_node_context_avoids_tensor_item(monkeypatch):
+    writes = ("author", "writes", "paper")
+    written_by = ("paper", "written_by", "author")
+    graph = Graph.hetero(
+        nodes={
+            "paper": {"x": torch.randn(3, 4), "y": torch.tensor([0, 1, 0])},
+            "author": {"x": torch.randn(2, 4)},
+        },
+        edges={
+            writes: {"edge_index": torch.tensor([[0, 1], [1, 2]])},
+            written_by: {"edge_index": torch.tensor([[1, 2], [0, 1]])},
+        },
+    )
+    context = MaterializationContext(
+        request=NodeSeedRequest(
+            node_ids=torch.tensor([1, 2]),
+            node_type="paper",
+            metadata={"seed": [1, 2], "node_type": "paper", "sample_id": "p12"},
+        ),
+        state={
+            "node_ids_by_type": {
+                "paper": torch.tensor([1, 2]),
+                "author": torch.tensor([0, 1]),
+            }
+        },
+        metadata={"sample_id": "p12"},
+        graph=graph,
+    )
+
+    def fail_item(self):
+        raise AssertionError("hetero node materialization should stay off tensor.item")
+
+    monkeypatch.setattr(torch.Tensor, "item", fail_item)
+
+    samples = materialize_context(context)
+
+    assert [sample.metadata["seed"] for sample in samples] == [1, 2]
+    assert [sample.metadata["node_type"] for sample in samples] == ["paper", "paper"]
+    assert [sample.subgraph_seed for sample in samples] == [0, 1]
+
+
+def test_materialize_multi_seed_hetero_node_context_avoids_tensor_int(monkeypatch):
+    writes = ("author", "writes", "paper")
+    written_by = ("paper", "written_by", "author")
+    graph = Graph.hetero(
+        nodes={
+            "paper": {"x": torch.randn(3, 4), "y": torch.tensor([0, 1, 0])},
+            "author": {"x": torch.randn(2, 4)},
+        },
+        edges={
+            writes: {"edge_index": torch.tensor([[0, 1], [1, 2]])},
+            written_by: {"edge_index": torch.tensor([[1, 2], [0, 1]])},
+        },
+    )
+    context = MaterializationContext(
+        request=NodeSeedRequest(
+            node_ids=torch.tensor([1, 2]),
+            node_type="paper",
+            metadata={"seed": [1, 2], "node_type": "paper", "sample_id": "p12"},
+        ),
+        state={
+            "node_ids_by_type": {
+                "paper": torch.tensor([1, 2]),
+                "author": torch.tensor([0, 1]),
+            }
+        },
+        metadata={"sample_id": "p12"},
+        graph=graph,
+    )
+
+    def fail_int(self):
+        raise AssertionError("hetero node materialization should stay off tensor.__int__")
+
+    monkeypatch.setattr(torch.Tensor, "__int__", fail_int)
+
+    samples = materialize_context(context)
+
+    assert [sample.metadata["seed"] for sample in samples] == [1, 2]
+    assert [sample.metadata["node_type"] for sample in samples] == ["paper", "paper"]
+    assert [sample.subgraph_seed for sample in samples] == [0, 1]
+
+
+def test_link_message_passing_graph_avoids_tensor_int(monkeypatch):
+    graph = Graph.homo(
+        edge_index=torch.tensor([[0, 1, 1], [1, 2, 0]]),
+        x=torch.randn(3, 4),
+    )
+
+    def fail_int(self):
+        raise AssertionError("link message passing graph filtering should stay off tensor.__int__")
+
+    monkeypatch.setattr(torch.Tensor, "__int__", fail_int)
+
+    message_passing_graph = _link_message_passing_graph(
+        graph,
+        [
+            LinkPredictionRecord(
+                graph=graph,
+                src_index=torch.tensor(0),
+                dst_index=torch.tensor(1),
+                label=torch.tensor(1),
+                metadata={"exclude_seed_edges": True},
+            ),
+            LinkPredictionRecord(
+                graph=graph,
+                src_index=torch.tensor(2),
+                dst_index=torch.tensor(0),
+                label=torch.tensor(0),
+            ),
+        ],
+    )
+
+    assert torch.equal(message_passing_graph.edge_index, torch.tensor([[1, 1], [2, 0]]))
+
+
 def test_materialize_node_context_homo_avoids_dense_node_masks(monkeypatch):
     graph = Graph.homo(
         edge_index=torch.tensor([[0, 1, 3], [1, 2, 1]]),
@@ -371,3 +546,141 @@ def test_materialize_node_context_hetero_avoids_dense_node_mappings(monkeypatch)
     assert torch.equal(sample.graph.nodes["paper"].n_id, torch.tensor([1]))
     assert torch.equal(sample.graph.nodes["author"].n_id, torch.tensor([0]))
     assert sample.subgraph_seed == 0
+
+
+def test_build_stitched_node_samples_avoids_tensor_item(monkeypatch):
+    stitched_graph = Graph.homo(
+        edge_index=torch.tensor([[0], [1]]),
+        x=torch.arange(6, dtype=torch.float32).view(3, 2),
+        n_id=torch.tensor([10, 11, 12]),
+    )
+    context = MaterializationContext(
+        request=NodeSeedRequest(
+            node_ids=torch.tensor([11]),
+            node_type="node",
+            metadata={"seed": 11, "sample_id": "n11"},
+        ),
+        metadata={"sample_id": "n11"},
+    )
+
+    def fail_item(self):
+        raise AssertionError("stitched homo node sample building should stay off tensor.item")
+
+    monkeypatch.setattr(torch.Tensor, "item", fail_item)
+
+    sample = _build_stitched_node_samples(
+        context,
+        stitched_graph,
+        torch.tensor([1]),
+        torch.tensor([11]),
+    )
+
+    assert sample.metadata["seed"] == 1
+    assert sample.subgraph_seed == 1
+
+
+def test_build_stitched_node_samples_avoids_tensor_int(monkeypatch):
+    stitched_graph = Graph.homo(
+        edge_index=torch.tensor([[0], [1]]),
+        x=torch.arange(6, dtype=torch.float32).view(3, 2),
+        n_id=torch.tensor([10, 11, 12]),
+    )
+    context = MaterializationContext(
+        request=NodeSeedRequest(
+            node_ids=torch.tensor([11]),
+            node_type="node",
+            metadata={"seed": 11, "sample_id": "n11"},
+        ),
+        metadata={"sample_id": "n11"},
+    )
+
+    def fail_int(self):
+        raise AssertionError("stitched homo node sample building should stay off tensor.__int__")
+
+    monkeypatch.setattr(torch.Tensor, "__int__", fail_int)
+
+    sample = _build_stitched_node_samples(
+        context,
+        stitched_graph,
+        torch.tensor([1]),
+        torch.tensor([11]),
+    )
+
+    assert sample.metadata["seed"] == 1
+    assert sample.subgraph_seed == 1
+
+
+def test_build_stitched_hetero_node_samples_avoids_tensor_item(monkeypatch):
+    writes = ("author", "writes", "paper")
+    stitched_graph = Graph.hetero(
+        nodes={
+            "author": {"x": torch.tensor([[10.0]]), "n_id": torch.tensor([20])},
+            "paper": {"x": torch.tensor([[1.0], [2.0]]), "n_id": torch.tensor([30, 31])},
+        },
+        edges={
+            writes: {"edge_index": torch.tensor([[0], [1]])},
+        },
+    )
+    context = MaterializationContext(
+        request=NodeSeedRequest(
+            node_ids=torch.tensor([31]),
+            node_type="paper",
+            metadata={"seed": 31, "node_type": "paper", "sample_id": "p31"},
+        ),
+        metadata={"sample_id": "p31"},
+    )
+
+    def fail_item(self):
+        raise AssertionError("stitched hetero node sample building should stay off tensor.item")
+
+    monkeypatch.setattr(torch.Tensor, "item", fail_item)
+
+    sample = _build_stitched_hetero_node_samples(
+        context,
+        stitched_graph,
+        torch.tensor([1]),
+        torch.tensor([31]),
+        node_type="paper",
+    )
+
+    assert sample.metadata["seed"] == 1
+    assert sample.metadata["node_type"] == "paper"
+    assert sample.subgraph_seed == 1
+
+
+def test_build_stitched_hetero_node_samples_avoids_tensor_int(monkeypatch):
+    writes = ("author", "writes", "paper")
+    stitched_graph = Graph.hetero(
+        nodes={
+            "author": {"x": torch.tensor([[10.0]]), "n_id": torch.tensor([20])},
+            "paper": {"x": torch.tensor([[1.0], [2.0]]), "n_id": torch.tensor([30, 31])},
+        },
+        edges={
+            writes: {"edge_index": torch.tensor([[0], [1]])},
+        },
+    )
+    context = MaterializationContext(
+        request=NodeSeedRequest(
+            node_ids=torch.tensor([31]),
+            node_type="paper",
+            metadata={"seed": 31, "node_type": "paper", "sample_id": "p31"},
+        ),
+        metadata={"sample_id": "p31"},
+    )
+
+    def fail_int(self):
+        raise AssertionError("stitched hetero node sample building should stay off tensor.__int__")
+
+    monkeypatch.setattr(torch.Tensor, "__int__", fail_int)
+
+    sample = _build_stitched_hetero_node_samples(
+        context,
+        stitched_graph,
+        torch.tensor([1]),
+        torch.tensor([31]),
+        node_type="paper",
+    )
+
+    assert sample.metadata["seed"] == 1
+    assert sample.metadata["node_type"] == "paper"
+    assert sample.subgraph_seed == 1

@@ -8,11 +8,15 @@ from vgl.data.sample import TemporalEventRecord
 from vgl.data.sampler import TemporalNeighborSampler
 from vgl.dataloading.sampler import _sorted_membership_mask
 from vgl.dataloading.executor import (
+    MaterializationContext,
+    PlanExecutor,
     _build_stitched_hetero_temporal_history,
     _build_stitched_homo_temporal_history,
     _expand_stitched_hetero_temporal_node_ids,
     _expand_stitched_homo_temporal_node_ids,
 )
+from vgl.dataloading.plan import PlanStage
+from vgl.dataloading.requests import TemporalSeedRequest
 from vgl.distributed import LocalGraphShard, LocalSamplingCoordinator, write_partitioned_graph
 from vgl.distributed.coordinator import StoreBackedSamplingCoordinator
 from vgl.storage import FeatureStore, InMemoryTensorStore
@@ -55,6 +59,72 @@ def test_temporal_neighbor_sampler_extracts_strict_history_subgraph():
     assert record.dst_index == 2
 
 
+def test_temporal_neighbor_sampler_homo_local_record_avoids_tensor_item(monkeypatch):
+    graph = _graph()
+    sampler = TemporalNeighborSampler(num_neighbors=[-1])
+
+    def fail_item(self):
+        raise AssertionError("temporal homo local record mapping should stay off tensor.item")
+
+    monkeypatch.setattr(torch.Tensor, "item", fail_item)
+
+    record = sampler.sample(
+        TemporalEventRecord(graph=graph, src_index=1, dst_index=2, timestamp=3, label=1)
+    )
+
+    assert torch.equal(record.graph.n_id, torch.tensor([0, 1, 2]))
+    assert record.src_index == 1
+    assert record.dst_index == 2
+
+
+def test_temporal_neighbor_sampler_homo_local_record_avoids_tensor_int(monkeypatch):
+    graph = _graph()
+    sampler = TemporalNeighborSampler(num_neighbors=[-1])
+
+    def fail_int(self):
+        raise AssertionError("temporal homo local record mapping should stay off tensor.__int__")
+
+    monkeypatch.setattr(torch.Tensor, "__int__", fail_int)
+
+    record = sampler.sample(
+        TemporalEventRecord(
+            graph=graph,
+            src_index=torch.tensor(1),
+            dst_index=torch.tensor(2),
+            timestamp=torch.tensor(3),
+            label=torch.tensor(1),
+        )
+    )
+
+    assert torch.equal(record.graph.n_id, torch.tensor([0, 1, 2]))
+    assert record.src_index == 1
+    assert record.dst_index == 2
+
+
+def test_temporal_neighbor_sampler_accepts_tensor_ctor_scalars_without_tensor_int(monkeypatch):
+    with torch.random.fork_rng(devices=[]):
+        torch.manual_seed(0)
+        graph = _graph()
+
+        def fail_int(self):
+            raise AssertionError("TemporalNeighborSampler constructor scalars should stay off tensor.__int__")
+
+        monkeypatch.setattr(torch.Tensor, "__int__", fail_int)
+
+        record = TemporalNeighborSampler(
+            num_neighbors=[torch.tensor(-1)],
+            time_window=torch.tensor(3),
+            max_events=torch.tensor(2),
+            seed=torch.tensor(0),
+        ).sample(
+            TemporalEventRecord(graph=graph, src_index=1, dst_index=2, timestamp=3, label=1)
+        )
+
+        assert torch.equal(record.graph.n_id, torch.tensor([0, 1, 2]))
+        assert record.src_index == 1
+        assert record.dst_index == 2
+
+
 def test_temporal_neighbor_sampler_homo_frontier_expansion_avoids_tensor_tolist(monkeypatch):
     graph = _graph()
     sampler = TemporalNeighborSampler(num_neighbors=[-1])
@@ -68,6 +138,51 @@ def test_temporal_neighbor_sampler_homo_frontier_expansion_avoids_tensor_tolist(
     sampled = sampler._sample_node_ids(edge_index, 1, 2)
 
     assert torch.equal(sampled, torch.tensor([0, 1, 2]))
+
+
+def test_temporal_neighbor_sampler_homo_frontier_expansion_avoids_tensor_int(monkeypatch):
+    graph = _graph()
+    sampler = TemporalNeighborSampler(num_neighbors=[-1])
+    edge_index = graph.edges[EDGE_TYPE].edge_index
+
+    def fail_int(self):
+        raise AssertionError("temporal frontier expansion should stay off tensor.__int__")
+
+    monkeypatch.setattr(torch.Tensor, "__int__", fail_int)
+
+    sampled = sampler._sample_node_ids(edge_index, torch.tensor(1), torch.tensor(2))
+
+    assert torch.equal(sampled, torch.tensor([0, 1, 2]))
+
+
+def test_temporal_neighbor_sampler_homo_next_frontier_avoids_tensor_item(monkeypatch):
+    graph = _graph()
+    sampler = TemporalNeighborSampler(num_neighbors=[-1])
+    edge_index = graph.edges[EDGE_TYPE].edge_index
+
+    def fail_item(self):
+        raise AssertionError("temporal next frontier should stay off tensor.item")
+
+    monkeypatch.setattr(torch.Tensor, "item", fail_item)
+
+    sampled = sampler._next_frontier_from_edge_index(edge_index, frontier={1, 2}, visited={1, 2}, fanout=-1)
+
+    assert sampled == {0}
+
+
+def test_temporal_neighbor_sampler_homo_next_frontier_avoids_tensor_int(monkeypatch):
+    graph = _graph()
+    sampler = TemporalNeighborSampler(num_neighbors=[-1])
+    edge_index = graph.edges[EDGE_TYPE].edge_index
+
+    def fail_int(self):
+        raise AssertionError("temporal next frontier should stay off tensor.__int__")
+
+    monkeypatch.setattr(torch.Tensor, "__int__", fail_int)
+
+    sampled = sampler._next_frontier_from_edge_index(edge_index, frontier={1, 2}, visited={1, 2}, fanout=-1)
+
+    assert sampled == {0}
 
 
 def test_temporal_neighbor_sampler_homo_history_subgraph_avoids_dense_bool_masks(monkeypatch):
@@ -299,6 +414,27 @@ def test_temporal_neighbor_sampler_relation_frontier_expansion_avoids_tensor_tol
     assert torch.equal(sampled["paper"], torch.tensor([1]))
 
 
+def test_temporal_neighbor_sampler_relation_frontier_expansion_avoids_torch_unique(monkeypatch):
+    sampler = TemporalNeighborSampler(num_neighbors=[-1])
+    edge_index = torch.tensor([[0, 2], [1, 1]])
+
+    def fail_unique(*args, **kwargs):
+        raise AssertionError("relation frontier expansion should avoid torch.unique")
+
+    monkeypatch.setattr(torch, "unique", fail_unique)
+
+    sampled = sampler._relation_sample_node_ids(
+        edge_index,
+        0,
+        1,
+        src_type="author",
+        dst_type="paper",
+    )
+
+    assert torch.equal(sampled["author"], torch.tensor([0, 2]))
+    assert torch.equal(sampled["paper"], torch.tensor([1]))
+
+
 def test_temporal_neighbor_sampler_relation_history_subgraph_avoids_dense_bool_masks(monkeypatch):
     graph = _hetero_graph()
     sampler = TemporalNeighborSampler(num_neighbors=[-1])
@@ -402,6 +538,42 @@ def test_stitched_homo_temporal_history_and_expansion_avoid_tensor_tolist(monkey
     assert torch.equal(sampled, torch.tensor([0, 1, 2]))
 
 
+def test_stitched_homo_temporal_history_avoids_tensor_int(monkeypatch, tmp_path):
+    graph = _graph()
+    write_partitioned_graph(graph, tmp_path, num_partitions=2)
+    coordinator = LocalSamplingCoordinator(
+        {
+            0: LocalGraphShard.from_partition_dir(tmp_path, partition_id=0),
+            1: LocalGraphShard.from_partition_dir(tmp_path, partition_id=1),
+        }
+    )
+    sampler = TemporalNeighborSampler(num_neighbors=[-1])
+    record = TemporalEventRecord(
+        graph=graph,
+        src_index=torch.tensor(1),
+        dst_index=torch.tensor(2),
+        timestamp=torch.tensor(3),
+        label=torch.tensor(1),
+        edge_type=EDGE_TYPE,
+    )
+
+    def fail_int(self):
+        raise AssertionError("stitched homo temporal history should stay off tensor.__int__")
+
+    monkeypatch.setattr(torch.Tensor, "__int__", fail_int)
+
+    edge_ids, edge_index = _build_stitched_homo_temporal_history(
+        graph,
+        coordinator,
+        sampler,
+        record,
+        edge_type=EDGE_TYPE,
+    )
+
+    assert torch.equal(edge_ids, torch.tensor([0]))
+    assert torch.equal(edge_index, torch.tensor([[0], [1]]))
+
+
 def test_stitched_hetero_temporal_history_and_expansion_avoid_tensor_tolist(monkeypatch, tmp_path):
     graph = _hetero_graph()
     write_partitioned_graph(graph, tmp_path, num_partitions=2)
@@ -449,6 +621,89 @@ def test_stitched_hetero_temporal_history_and_expansion_avoid_tensor_tolist(monk
     assert torch.equal(sampled["paper"], torch.tensor([0, 2]))
 
 
+def test_stitched_hetero_temporal_history_avoids_tensor_int(monkeypatch, tmp_path):
+    graph = _hetero_graph()
+    write_partitioned_graph(graph, tmp_path, num_partitions=2)
+    coordinator = LocalSamplingCoordinator(
+        {
+            0: LocalGraphShard.from_partition_dir(tmp_path, partition_id=0),
+            1: LocalGraphShard.from_partition_dir(tmp_path, partition_id=1),
+        }
+    )
+    sampler = TemporalNeighborSampler(num_neighbors=[-1])
+    record = TemporalEventRecord(
+        graph=graph,
+        src_index=torch.tensor(1),
+        dst_index=torch.tensor(2),
+        timestamp=torch.tensor(5),
+        label=torch.tensor(1),
+        edge_type=HETERO_EDGE_TYPE,
+    )
+
+    def fail_int(self):
+        raise AssertionError("stitched hetero temporal history should stay off tensor.__int__")
+
+    monkeypatch.setattr(torch.Tensor, "__int__", fail_int)
+
+    edge_ids, edge_index = _build_stitched_hetero_temporal_history(
+        graph,
+        coordinator,
+        sampler,
+        record,
+        edge_type=HETERO_EDGE_TYPE,
+    )
+
+    assert torch.equal(edge_ids, torch.tensor([0, 1]))
+    assert torch.equal(edge_index, torch.tensor([[0, 1], [1, 0]]))
+
+
+def test_stitched_hetero_temporal_history_and_expansion_avoid_torch_unique(monkeypatch, tmp_path):
+    graph = _hetero_graph()
+    write_partitioned_graph(graph, tmp_path, num_partitions=2)
+    coordinator = LocalSamplingCoordinator(
+        {
+            0: LocalGraphShard.from_partition_dir(tmp_path, partition_id=0),
+            1: LocalGraphShard.from_partition_dir(tmp_path, partition_id=1),
+        }
+    )
+    sampler = TemporalNeighborSampler(num_neighbors=[-1])
+    record = TemporalEventRecord(
+        graph=graph,
+        src_index=1,
+        dst_index=2,
+        timestamp=5,
+        label=1,
+        edge_type=HETERO_EDGE_TYPE,
+    )
+
+    def fail_unique(*args, **kwargs):
+        raise AssertionError("stitched hetero temporal expansion should avoid torch.unique")
+
+    monkeypatch.setattr(torch, "unique", fail_unique)
+
+    edge_ids, edge_index = _build_stitched_hetero_temporal_history(
+        graph,
+        coordinator,
+        sampler,
+        record,
+        edge_type=HETERO_EDGE_TYPE,
+    )
+    sampled = _expand_stitched_hetero_temporal_node_ids(
+        {
+            "author": torch.tensor([1]),
+            "paper": torch.tensor([2]),
+        },
+        edge_index,
+        src_type="author",
+        dst_type="paper",
+        fanouts=(-1,),
+    )
+
+    assert torch.equal(edge_ids, torch.tensor([0, 1]))
+    assert torch.equal(sampled["author"], torch.tensor([1]))
+    assert torch.equal(sampled["paper"], torch.tensor([0, 2]))
+
+
 def test_loader_routes_temporal_neighbor_sampler_through_plan_execution():
     graph = _graph()
     dataset = ListDataset(
@@ -468,6 +723,57 @@ def test_loader_routes_temporal_neighbor_sampler_through_plan_execution():
 
     assert torch.equal(batch.timestamp, torch.tensor([3]))
     assert torch.equal(batch.graph.edges[edge_type].timestamp, torch.tensor([1]))
+
+
+def test_stitched_homo_temporal_plan_execution_avoids_tensor_int(monkeypatch, tmp_path):
+    graph = _graph()
+    write_partitioned_graph(graph, tmp_path, num_partitions=2)
+    shard = LocalGraphShard.from_partition_dir(tmp_path, partition_id=0)
+    coordinator = LocalSamplingCoordinator(
+        {
+            0: shard,
+            1: LocalGraphShard.from_partition_dir(tmp_path, partition_id=1),
+        }
+    )
+    sampler = TemporalNeighborSampler(num_neighbors=[-1])
+    record = TemporalEventRecord(
+        graph=shard.graph,
+        src_index=torch.tensor(0),
+        dst_index=torch.tensor(1),
+        timestamp=torch.tensor(3),
+        label=torch.tensor(1),
+        edge_type=EDGE_TYPE,
+    )
+    stage = PlanStage(
+        "sample_temporal_neighbors",
+        params={
+            "sampler": sampler,
+            "record": record,
+        },
+    )
+    context = MaterializationContext(
+        request=TemporalSeedRequest(
+            src_ids=torch.tensor([0]),
+            dst_ids=torch.tensor([1]),
+            timestamps=torch.tensor([3]),
+            edge_type=EDGE_TYPE,
+        ),
+        feature_store=coordinator,
+    )
+
+    def fail_int(self):
+        raise AssertionError("stitched homo temporal plan execution should stay off tensor.__int__")
+
+    monkeypatch.setattr(torch.Tensor, "__int__", fail_int)
+
+    sampled_context = PlanExecutor._sample_temporal_neighbors(stage, context)
+    sampled_record = sampled_context.state["record"]
+
+    assert torch.equal(sampled_record.graph.n_id, torch.tensor([0, 1]))
+    assert sampled_record.src_index == 0
+    assert sampled_record.dst_index == 1
+    assert sampled_record.timestamp == 3
+    assert sampled_record.label == 1
 
 def test_temporal_neighbor_sampler_prefetch_option_materializes_features_into_record_graph():
     graph = Graph.temporal(
@@ -581,6 +887,82 @@ def test_temporal_neighbor_sampler_extracts_relation_local_hetero_history_subgra
     assert torch.equal(record.graph.nodes["paper"].n_id, torch.tensor([0, 2]))
     assert torch.equal(record.graph.edges[HETERO_EDGE_TYPE].edge_index, torch.tensor([[0], [0]]))
     assert torch.equal(record.graph.edges[HETERO_EDGE_TYPE].timestamp, torch.tensor([4]))
+    assert record.src_index == 0
+    assert record.dst_index == 1
+
+
+def test_temporal_neighbor_sampler_relation_history_frontier_avoids_torch_unique(monkeypatch):
+    graph = _hetero_graph()
+    sampler = TemporalNeighborSampler(num_neighbors=[-1])
+    history_edge_ids = torch.tensor([0, 1])
+
+    def fail_unique(*args, **kwargs):
+        raise AssertionError("relation history frontier expansion should avoid torch.unique")
+
+    monkeypatch.setattr(torch, "unique", fail_unique)
+
+    sampled = sampler._relation_sample_history_node_ids(
+        graph.edges[HETERO_EDGE_TYPE],
+        history_edge_ids,
+        1,
+        2,
+        src_type="author",
+        dst_type="paper",
+    )
+
+    assert torch.equal(sampled["author"], torch.tensor([1]))
+    assert torch.equal(sampled["paper"], torch.tensor([0, 2]))
+
+
+def test_temporal_neighbor_sampler_relation_local_record_avoids_tensor_item(monkeypatch):
+    graph = _hetero_graph()
+    sampler = TemporalNeighborSampler(num_neighbors=[-1])
+
+    def fail_item(self):
+        raise AssertionError("temporal hetero local record mapping should stay off tensor.item")
+
+    monkeypatch.setattr(torch.Tensor, "item", fail_item)
+
+    record = sampler.sample(
+        TemporalEventRecord(
+            graph=graph,
+            src_index=1,
+            dst_index=2,
+            timestamp=5,
+            label=1,
+            edge_type=HETERO_EDGE_TYPE,
+        )
+    )
+
+    assert record.edge_type == HETERO_EDGE_TYPE
+    assert torch.equal(record.graph.nodes["author"].n_id, torch.tensor([1]))
+    assert torch.equal(record.graph.nodes["paper"].n_id, torch.tensor([0, 2]))
+    assert record.src_index == 0
+
+
+def test_temporal_neighbor_sampler_relation_local_record_avoids_tensor_int(monkeypatch):
+    graph = _hetero_graph()
+    sampler = TemporalNeighborSampler(num_neighbors=[-1])
+
+    def fail_int(self):
+        raise AssertionError("temporal hetero local record mapping should stay off tensor.__int__")
+
+    monkeypatch.setattr(torch.Tensor, "__int__", fail_int)
+
+    record = sampler.sample(
+        TemporalEventRecord(
+            graph=graph,
+            src_index=torch.tensor(1),
+            dst_index=torch.tensor(2),
+            timestamp=torch.tensor(5),
+            label=torch.tensor(1),
+            edge_type=HETERO_EDGE_TYPE,
+        )
+    )
+
+    assert record.edge_type == HETERO_EDGE_TYPE
+    assert torch.equal(record.graph.nodes["author"].n_id, torch.tensor([1]))
+    assert torch.equal(record.graph.nodes["paper"].n_id, torch.tensor([0, 2]))
     assert record.src_index == 0
     assert record.dst_index == 1
 
@@ -716,6 +1098,59 @@ def test_temporal_neighbor_sampler_stitched_temporal_sampling_crosses_partition_
     assert torch.equal(batch.graph.edges[EDGE_TYPE].timestamp, torch.tensor([1, 3]))
     assert torch.equal(batch.graph.x, torch.tensor([[0.0], [1.0], [2.0]]))
     assert torch.equal(batch.graph.edges[EDGE_TYPE].edge_weight, torch.tensor([10.0, 20.0]))
+    assert torch.equal(batch.src_index, torch.tensor([0]))
+    assert torch.equal(batch.dst_index, torch.tensor([1]))
+
+
+def test_temporal_neighbor_sampler_stitched_temporal_materialization_avoids_tensor_item(
+    monkeypatch,
+    tmp_path,
+):
+    graph = Graph.temporal(
+        nodes={"node": {"x": torch.arange(4, dtype=torch.float32).view(4, 1)}},
+        edges={
+            EDGE_TYPE: {
+                "edge_index": torch.tensor([[0, 1, 2], [1, 2, 3]]),
+                "timestamp": torch.tensor([1, 3, 5]),
+                "edge_weight": torch.tensor([10.0, 20.0, 30.0]),
+            }
+        },
+        time_attr="timestamp",
+    )
+    write_partitioned_graph(graph, tmp_path, num_partitions=2)
+    shards = {
+        0: LocalGraphShard.from_partition_dir(tmp_path, partition_id=0),
+        1: LocalGraphShard.from_partition_dir(tmp_path, partition_id=1),
+    }
+    coordinator = LocalSamplingCoordinator(shards)
+    loader = Loader(
+        dataset=ListDataset(
+            [
+                TemporalEventRecord(
+                    graph=shards[0].graph,
+                    src_index=0,
+                    dst_index=1,
+                    timestamp=4,
+                    label=1,
+                )
+            ]
+        ),
+        sampler=TemporalNeighborSampler(
+            num_neighbors=[-1],
+            node_feature_names=("x",),
+            edge_feature_names=("edge_weight",),
+        ),
+        batch_size=1,
+        feature_store=coordinator,
+    )
+
+    def fail_item(self):
+        raise AssertionError("stitched homo temporal materialization should stay off tensor.item")
+
+    monkeypatch.setattr(torch.Tensor, "item", fail_item)
+
+    batch = next(iter(loader))
+
     assert torch.equal(batch.src_index, torch.tensor([0]))
     assert torch.equal(batch.dst_index, torch.tensor([1]))
 
@@ -938,6 +1373,120 @@ def test_temporal_neighbor_sampler_stitched_hetero_temporal_sampling_crosses_par
     assert torch.equal(batch.graph.edges[HETERO_EDGE_TYPE].e_id, torch.tensor([0, 1]))
     assert torch.equal(batch.graph.edges[HETERO_EDGE_TYPE].timestamp, torch.tensor([1, 3]))
     assert torch.equal(batch.graph.edges[HETERO_EDGE_TYPE].edge_weight, torch.tensor([10.0, 20.0]))
+
+
+def test_temporal_neighbor_sampler_stitched_hetero_temporal_materialization_avoids_tensor_item(
+    monkeypatch,
+    tmp_path,
+):
+    graph = Graph.temporal(
+        nodes={
+            "author": {"x": torch.tensor([[10.0], [20.0], [30.0]])},
+            "paper": {"x": torch.tensor([[1.0], [2.0]])},
+        },
+        edges={
+            HETERO_EDGE_TYPE: {
+                "edge_index": torch.tensor([[0, 2, 1], [0, 0, 1]]),
+                "timestamp": torch.tensor([1, 3, 6]),
+                "edge_weight": torch.tensor([10.0, 20.0, 30.0]),
+            }
+        },
+        time_attr="timestamp",
+    )
+    write_partitioned_graph(graph, tmp_path, num_partitions=2)
+    shards = {
+        0: LocalGraphShard.from_partition_dir(tmp_path, partition_id=0),
+        1: LocalGraphShard.from_partition_dir(tmp_path, partition_id=1),
+    }
+    coordinator = LocalSamplingCoordinator(shards)
+    loader = Loader(
+        dataset=ListDataset(
+            [
+                TemporalEventRecord(
+                    graph=shards[0].graph,
+                    src_index=0,
+                    dst_index=0,
+                    timestamp=4,
+                    label=1,
+                    edge_type=HETERO_EDGE_TYPE,
+                )
+            ]
+        ),
+        sampler=TemporalNeighborSampler(
+            num_neighbors=[-1],
+            node_feature_names={"author": ("x",), "paper": ("x",)},
+            edge_feature_names={HETERO_EDGE_TYPE: ("edge_weight",)},
+        ),
+        batch_size=1,
+        feature_store=coordinator,
+    )
+
+    def fail_item(self):
+        raise AssertionError("stitched hetero temporal materialization should stay off tensor.item")
+
+    monkeypatch.setattr(torch.Tensor, "item", fail_item)
+
+    batch = next(iter(loader))
+
+    assert torch.equal(batch.src_index, torch.tensor([0]))
+    assert torch.equal(batch.dst_index, torch.tensor([0]))
+    assert torch.equal(batch.src_index, torch.tensor([0]))
+    assert torch.equal(batch.dst_index, torch.tensor([0]))
+
+
+def test_temporal_neighbor_sampler_stitched_hetero_temporal_materialization_avoids_torch_unique(
+    monkeypatch,
+    tmp_path,
+):
+    graph = Graph.temporal(
+        nodes={
+            "author": {"x": torch.tensor([[10.0], [20.0], [30.0]])},
+            "paper": {"x": torch.tensor([[1.0], [2.0]])},
+        },
+        edges={
+            HETERO_EDGE_TYPE: {
+                "edge_index": torch.tensor([[0, 2, 1], [0, 0, 1]]),
+                "timestamp": torch.tensor([1, 3, 6]),
+                "edge_weight": torch.tensor([10.0, 20.0, 30.0]),
+            }
+        },
+        time_attr="timestamp",
+    )
+    write_partitioned_graph(graph, tmp_path, num_partitions=2)
+    shards = {
+        0: LocalGraphShard.from_partition_dir(tmp_path, partition_id=0),
+        1: LocalGraphShard.from_partition_dir(tmp_path, partition_id=1),
+    }
+    coordinator = LocalSamplingCoordinator(shards)
+    loader = Loader(
+        dataset=ListDataset(
+            [
+                TemporalEventRecord(
+                    graph=shards[0].graph,
+                    src_index=0,
+                    dst_index=0,
+                    timestamp=4,
+                    label=1,
+                    edge_type=HETERO_EDGE_TYPE,
+                )
+            ]
+        ),
+        sampler=TemporalNeighborSampler(
+            num_neighbors=[-1],
+            node_feature_names={"author": ("x",), "paper": ("x",)},
+            edge_feature_names={HETERO_EDGE_TYPE: ("edge_weight",)},
+        ),
+        batch_size=1,
+        feature_store=coordinator,
+    )
+
+    def fail_unique(*args, **kwargs):
+        raise AssertionError("stitched hetero temporal materialization should avoid torch.unique")
+
+    monkeypatch.setattr(torch, "unique", fail_unique)
+
+    batch = next(iter(loader))
+
     assert torch.equal(batch.src_index, torch.tensor([0]))
     assert torch.equal(batch.dst_index, torch.tensor([0]))
 

@@ -1,4 +1,5 @@
 import torch
+import vgl.nn.encoders as encoder_impl
 
 from vgl import Graph
 from vgl.nn import GPSLayer
@@ -38,6 +39,56 @@ def test_graph_transformer_encoder_accepts_x_and_edge_index():
 
 def test_graphormer_encoder_layer_accepts_graph_input():
     encoder = GraphormerEncoderLayer(channels=4, heads=2, max_distance=4, dropout=0.0)
+
+    out = encoder(_graph())
+
+    assert out.shape == (3, 4)
+
+
+def test_shortest_path_buckets_match_expected_distances():
+    edge_index = torch.tensor([[0, 1, 2, 3], [1, 2, 3, 2]])
+
+    distances = encoder_impl._shortest_path_buckets(
+        edge_index=edge_index,
+        num_nodes=5,
+        max_distance=2,
+        device=edge_index.device,
+    )
+
+    assert torch.equal(
+        distances,
+        torch.tensor(
+            [
+                [0, 1, 2, 3, 3],
+                [1, 0, 1, 2, 3],
+                [2, 1, 0, 1, 3],
+                [3, 2, 1, 0, 3],
+                [3, 3, 3, 3, 0],
+            ]
+        ),
+    )
+
+
+def test_graphormer_encoder_layer_avoids_tensor_tolist(monkeypatch):
+    encoder = GraphormerEncoderLayer(channels=4, heads=2, max_distance=4, dropout=0.0)
+
+    def fail_tolist(self):
+        raise AssertionError("Graphormer shortest-path buckets should stay off tensor.tolist")
+
+    monkeypatch.setattr(torch.Tensor, "tolist", fail_tolist)
+
+    out = encoder(_graph())
+
+    assert out.shape == (3, 4)
+
+
+def test_graphormer_encoder_layer_avoids_tensor_item(monkeypatch):
+    encoder = GraphormerEncoderLayer(channels=4, heads=2, max_distance=4, dropout=0.0)
+
+    def fail_item(self):
+        raise AssertionError("Graphormer shortest-path buckets should stay off tensor.item")
+
+    monkeypatch.setattr(torch.Tensor, "item", fail_item)
 
     out = encoder(_graph())
 

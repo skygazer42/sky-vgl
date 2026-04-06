@@ -48,10 +48,15 @@ def _stable_unique_positions(keys: torch.Tensor) -> tuple[torch.Tensor, torch.Te
         empty = torch.empty(0, dtype=torch.long, device=keys.device)
         return empty, empty
 
-    unique_keys, inverse, counts = torch.unique(keys, sorted=True, return_inverse=True, return_counts=True)
-    positions = torch.arange(keys.numel(), dtype=torch.long, device=keys.device)
-    first_positions = torch.full((unique_keys.numel(),), keys.numel(), dtype=torch.long, device=keys.device)
-    first_positions.scatter_reduce_(0, inverse, positions, reduce="amin", include_self=True)
+    sorted_order = torch.argsort(keys, stable=True)
+    sorted_keys = keys.index_select(0, sorted_order)
+    group_starts = torch.ones(sorted_keys.numel(), dtype=torch.bool, device=keys.device)
+    group_starts[1:] = sorted_keys[1:] != sorted_keys[:-1]
+
+    first_positions = sorted_order[group_starts]
+    group_ids = torch.cumsum(group_starts.to(dtype=torch.long), dim=0) - 1
+    counts = torch.bincount(group_ids)
+
     order = torch.argsort(first_positions, stable=True)
     return first_positions.index_select(0, order), counts.index_select(0, order)
 

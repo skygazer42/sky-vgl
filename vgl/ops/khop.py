@@ -2,12 +2,20 @@ import torch
 
 from vgl._neighbor_sampling import (
     _directional_neighbor_candidates,
+    _merge_sorted_unique_tensors,
     _relation_neighbor_candidates,
     _sample_fanout,
     _sample_homo_node_ids,
+    _sorted_unique_tensor,
 )
 from vgl.graph.graph import Graph
 from vgl.ops.subgraph import _ordered_unique, node_subgraph
+
+
+def _as_python_int(value) -> int:
+    if isinstance(value, torch.Tensor):
+        return int(value.detach().cpu().numpy().reshape(()).item())
+    return int(value)
 
 
 def _resolve_edge_type(graph: Graph, edge_type=None) -> tuple[str, str, str]:
@@ -19,7 +27,7 @@ def _resolve_edge_type(graph: Graph, edge_type=None) -> tuple[str, str, str]:
 def _normalize_fanouts(num_neighbors) -> list[int]:
     if isinstance(num_neighbors, int):
         num_neighbors = [num_neighbors]
-    fanouts = [int(value) for value in num_neighbors]
+    fanouts = [_as_python_int(value) for value in num_neighbors]
     if not fanouts:
         raise ValueError("num_neighbors must contain at least one hop")
     if any(value < -1 or value == 0 for value in fanouts):
@@ -59,7 +67,7 @@ def _hetero_directional_khop_nodes(graph: Graph, seeds, *, num_hops: int, direct
     edge_index = graph.edges[edge_type].edge_index
 
     visited = {
-        node_type: torch.unique(node_ids.to(device=device))
+        node_type: _sorted_unique_tensor(node_ids.to(device=device))
         for node_type, node_ids in normalized_seeds.items()
     }
     frontier = {
@@ -82,7 +90,7 @@ def _hetero_directional_khop_nodes(graph: Graph, seeds, *, num_hops: int, direct
             if next_dst.numel() == 0:
                 break
             frontier = {dst_type: next_dst}
-            visited[dst_type] = torch.unique(torch.cat((visited[dst_type], next_dst)))
+            visited[dst_type] = _merge_sorted_unique_tensors(visited[dst_type], next_dst)
         else:
             current = frontier.get(dst_type)
             if current is None or current.numel() == 0 or edge_index.numel() == 0:
@@ -96,7 +104,7 @@ def _hetero_directional_khop_nodes(graph: Graph, seeds, *, num_hops: int, direct
             if next_src.numel() == 0:
                 break
             frontier = {src_type: next_src}
-            visited[src_type] = torch.unique(torch.cat((visited[src_type], next_src)))
+            visited[src_type] = _merge_sorted_unique_tensors(visited[src_type], next_src)
 
     return {
         node_type: visited[node_type].clone()
@@ -144,7 +152,7 @@ def expand_neighbors(
         )
         for current_type in graph.schema.node_types
     }
-    visited[node_type] = torch.unique(seed_tensor.to(device=visited[node_type].device))
+    visited[node_type] = _sorted_unique_tensor(seed_tensor.to(device=visited[node_type].device))
     frontier = {node_type: visited[node_type].clone()}
     hop_nodes = [_snapshot(visited)] if return_hops else None
     for fanout in fanouts:
@@ -174,11 +182,11 @@ def expand_neighbors(
         for current_type, node_ids_list in candidates.items():
             if not node_ids_list:
                 continue
-            candidate_tensor = torch.unique(torch.cat(node_ids_list))
+            candidate_tensor = _sorted_unique_tensor(torch.cat(node_ids_list))
             candidate_tensor = _sample_fanout(candidate_tensor, fanout, generator=generator)
             if candidate_tensor.numel() > 0:
                 next_frontier[current_type] = candidate_tensor
-                visited[current_type] = torch.unique(torch.cat((visited[current_type], candidate_tensor)))
+                visited[current_type] = _merge_sorted_unique_tensors(visited[current_type], candidate_tensor)
         if hop_nodes is not None:
             hop_nodes.append(_snapshot(visited))
         elif not next_frontier:
@@ -211,7 +219,7 @@ def khop_nodes(graph: Graph, seeds, *, num_hops: int, direction: str = "out", ed
             edge_type=edge_type,
         )
 
-    frontier = torch.unique(torch.as_tensor(seeds, dtype=torch.long, device=edge_index.device).view(-1))
+    frontier = _sorted_unique_tensor(torch.as_tensor(seeds, dtype=torch.long, device=edge_index.device).view(-1))
     visited = frontier.clone()
     for _ in range(num_hops):
         if frontier.numel() == 0 or edge_index.numel() == 0:
@@ -233,7 +241,7 @@ def khop_nodes(graph: Graph, seeds, *, num_hops: int, direction: str = "out", ed
         if next_nodes.numel() == 0:
             break
         frontier = next_nodes
-        visited = torch.unique(torch.cat((visited, next_nodes)))
+        visited = _merge_sorted_unique_tensors(visited, next_nodes)
     return visited
 
 

@@ -17,7 +17,7 @@ def _slice_node_data(graph: Graph, node_ids: torch.Tensor, *, node_type: str) ->
 
 
 def _mapping_dict(node_ids: torch.Tensor) -> dict[int, int]:
-    return {int(node_id.item()): index for index, node_id in enumerate(node_ids)}
+    return {int(node_id): index for index, node_id in enumerate(node_ids)}
 
 
 def _relabel_edge_index(edge_index: torch.Tensor, src_node_ids: torch.Tensor, dst_node_ids: torch.Tensor) -> torch.Tensor:

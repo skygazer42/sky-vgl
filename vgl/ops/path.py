@@ -53,21 +53,94 @@ def _source_edge_state(edge_index: torch.Tensor, *, num_src_nodes: int) -> tuple
     return sort_perm, starts, counts
 
 
-def _edge_pairs(edge_index: torch.Tensor) -> list[tuple[int, int]]:
-    return [
-        (int(src.item()), int(dst.item()))
-        for src, dst in zip(edge_index[0], edge_index[1])
-    ]
+def _expand_interval_positions(starts: torch.Tensor, counts: torch.Tensor) -> torch.Tensor:
+    starts = torch.as_tensor(starts, dtype=torch.long).view(-1)
+    counts = torch.as_tensor(counts, dtype=torch.long, device=starts.device).view(-1)
+    if starts.numel() == 0 or counts.numel() == 0:
+        return torch.empty(0, dtype=torch.long, device=starts.device)
+
+    positive = counts > 0
+    starts = starts[positive]
+    counts = counts[positive]
+    if starts.numel() == 0:
+        return torch.empty(0, dtype=torch.long, device=starts.device)
+
+    offsets = torch.cumsum(counts, dim=0) - counts
+    bases = starts - offsets
+    deltas = torch.empty_like(bases)
+    deltas[0] = bases[0]
+    if bases.numel() > 1:
+        deltas[1:] = bases[1:] - bases[:-1]
+    expanded = torch.zeros(counts.sum(), dtype=torch.long, device=starts.device)
+    expanded[offsets] = deltas
+    expanded = torch.cumsum(expanded, dim=0)
+    expanded += torch.arange(counts.sum(), dtype=torch.long, device=starts.device)
+    return expanded
+
+
+def _expand_interval_values(values: torch.Tensor, counts: torch.Tensor, *, step: int) -> torch.Tensor:
+    values = torch.as_tensor(values, dtype=torch.long).view(-1)
+    counts = torch.as_tensor(counts, dtype=torch.long, device=values.device).view(-1)
+    if values.numel() == 0 or counts.numel() == 0:
+        return values.new_empty(0)
+
+    positive = counts > 0
+    values = values[positive]
+    counts = counts[positive]
+    if values.numel() == 0:
+        return values.new_empty(0)
+
+    offsets = torch.cumsum(counts, dim=0) - counts
+    base = values - step * offsets
+    deltas = torch.empty_like(base)
+    deltas[0] = base[0]
+    if base.numel() > 1:
+        deltas[1:] = base[1:] - base[:-1]
+    markers = torch.zeros(counts.sum(), dtype=values.dtype, device=values.device)
+    markers[offsets] = deltas
+    expanded = torch.cumsum(markers, dim=0)
+    if step != 0:
+        expanded = expanded + step * torch.arange(counts.sum(), dtype=values.dtype, device=values.device)
+    return expanded
+
+
+def _edge_pair_keys(edge_index: torch.Tensor, *, dst_count: int) -> torch.Tensor:
+    if edge_index.numel() == 0:
+        return torch.empty(0, dtype=torch.long, device=edge_index.device)
+    return edge_index[0].to(dtype=torch.long) * int(dst_count) + edge_index[1].to(dtype=torch.long)
+
+
+def _stable_unique_positions(keys: torch.Tensor) -> torch.Tensor:
+    if keys.numel() == 0:
+        return torch.empty(0, dtype=torch.long, device=keys.device)
+    sorted_order = torch.argsort(keys, stable=True)
+    sorted_keys = keys.index_select(0, sorted_order)
+    group_starts = torch.ones(sorted_keys.numel(), dtype=torch.bool, device=keys.device)
+    group_starts[1:] = sorted_keys[1:] != sorted_keys[:-1]
+    return torch.sort(sorted_order[group_starts], stable=True).values
 
 
 def _sample_offsets(counts: torch.Tensor) -> torch.Tensor:
-    offsets = torch.empty_like(counts)
-    for degree_tensor in torch.unique(counts, sorted=True):
-        degree = int(degree_tensor.item())
-        if degree <= 0:
+    offsets = torch.zeros_like(counts)
+    if counts.numel() == 0:
+        return offsets
+
+    sorted_counts = torch.sort(counts, stable=True).values
+    positive_counts = sorted_counts[sorted_counts > 0]
+    if positive_counts.numel() == 0:
+        return offsets
+
+    group_starts = torch.ones(positive_counts.numel(), dtype=torch.bool, device=counts.device)
+    group_starts[1:] = positive_counts[1:] != positive_counts[:-1]
+    for degree_tensor in positive_counts[group_starts]:
+        if bool(degree_tensor <= 0):
             continue
         mask = counts == degree_tensor
-        offsets[mask] = torch.randint(degree, (int(mask.sum().item()),), device=counts.device)
+        offsets[mask] = torch.randint(
+            high=degree_tensor,
+            size=(mask.sum(),),
+            device=counts.device,
+        )
     return offsets
 
 
@@ -104,28 +177,23 @@ def line_graph(graph: Graph, *, edge_type=None, backtracking: bool = True, copy_
     store = graph.edges[edge_type]
     edge_index = store.edge_index
     sorted_edge_ids, starts, counts = _source_edge_state(edge_index, num_src_nodes=graph._node_count(src_type))
-    line_sources = []
-    line_targets = []
     src_nodes = edge_index[0].to(dtype=torch.long)
     dst_nodes = edge_index[1].to(dtype=torch.long)
-    for source_edge_id in range(edge_index.size(1)):
-        dst = int(dst_nodes[source_edge_id].item())
-        degree = int(counts[dst].item())
-        if degree == 0:
-            continue
-        start = int(starts[dst].item())
-        target_edge_ids = sorted_edge_ids[start : start + degree]
-        if not backtracking:
-            target_edge_ids = target_edge_ids[dst_nodes.index_select(0, target_edge_ids) != src_nodes[source_edge_id]]
-            if target_edge_ids.numel() == 0:
-                continue
-        line_sources.append(
-            torch.full((target_edge_ids.numel(),), source_edge_id, dtype=torch.long, device=edge_index.device)
+    source_edge_ids = torch.arange(edge_index.size(1), dtype=torch.long, device=edge_index.device)
+    target_counts = counts.index_select(0, dst_nodes)
+    active_sources = target_counts > 0
+    if bool(active_sources.any()):
+        line_sources = _expand_interval_values(source_edge_ids[active_sources], target_counts[active_sources], step=0)
+        target_positions = _expand_interval_positions(
+            starts.index_select(0, dst_nodes[active_sources]),
+            target_counts[active_sources],
         )
-        line_targets.append(target_edge_ids.to(dtype=torch.long, device=edge_index.device))
-
-    if line_sources:
-        line_edge_index = torch.stack((torch.cat(line_sources), torch.cat(line_targets)), dim=0)
+        line_targets = sorted_edge_ids.index_select(0, target_positions)
+        if not backtracking:
+            keep = dst_nodes.index_select(0, line_targets) != src_nodes.index_select(0, line_sources)
+            line_sources = line_sources[keep]
+            line_targets = line_targets[keep]
+        line_edge_index = torch.stack((line_sources, line_targets), dim=0)
     else:
         line_edge_index = torch.empty((2, 0), dtype=torch.long, device=edge_index.device)
 
@@ -185,26 +253,38 @@ def _normalize_metapath(graph: Graph, metapath) -> tuple[tuple[str, str, str], .
     return normalized
 
 
-def _metapath_pairs(graph: Graph, metapath: tuple[tuple[str, str, str], ...]) -> list[tuple[int, int]]:
-    current_pairs = _edge_pairs(graph.edges[metapath[0]].edge_index)
+def _metapath_pairs(graph: Graph, metapath: tuple[tuple[str, str, str], ...]) -> torch.Tensor:
+    current_pairs = graph.edges[metapath[0]].edge_index.to(dtype=torch.long)
     for edge_type in metapath[1:]:
-        next_edges: dict[int, list[int]] = {}
-        for src, dst in _edge_pairs(graph.edges[edge_type].edge_index):
-            next_edges.setdefault(int(src), []).append(int(dst))
-        expanded = []
-        for start, middle in current_pairs:
-            for dst in next_edges.get(int(middle), ()):
-                expanded.append((int(start), int(dst)))
-        current_pairs = expanded
+        if current_pairs.numel() == 0:
+            return current_pairs
+        next_edge_index = graph.edges[edge_type].edge_index.to(dtype=torch.long, device=current_pairs.device)
+        starts, counts, sorted_dst = _successor_state(
+            next_edge_index,
+            num_src_nodes=graph._node_count(edge_type[0]),
+        )
+        middle_nodes = current_pairs[1]
+        target_counts = counts.index_select(0, middle_nodes)
+        active_pairs = target_counts > 0
+        if not bool(active_pairs.any()):
+            return current_pairs[:, :0]
+        expanded_starts = current_pairs[0, active_pairs]
+        expanded_positions = _expand_interval_positions(
+            starts.index_select(0, middle_nodes[active_pairs]),
+            target_counts[active_pairs],
+        )
+        current_pairs = torch.stack(
+            (
+                _expand_interval_values(expanded_starts, target_counts[active_pairs], step=0),
+                sorted_dst.index_select(0, expanded_positions),
+            ),
+            dim=0,
+        )
 
-    deduplicated = []
-    seen = set()
-    for pair in current_pairs:
-        if pair in seen:
-            continue
-        seen.add(pair)
-        deduplicated.append(pair)
-    return deduplicated
+    representatives = _stable_unique_positions(
+        _edge_pair_keys(current_pairs, dst_count=graph._node_count(metapath[-1][2]))
+    )
+    return current_pairs.index_select(1, representatives)
 
 
 def metapath_reachable_graph(graph: Graph, metapath, *, relation_name: str | None = None) -> Graph:
@@ -214,11 +294,10 @@ def metapath_reachable_graph(graph: Graph, metapath, *, relation_name: str | Non
     relation_name = relation_name or "__".join(relation for _, relation, _ in normalized)
     derived_edge_type = (start_type, relation_name, end_type)
 
-    pairs = _metapath_pairs(graph, normalized)
+    edge_index = _metapath_pairs(graph, normalized)
     device = graph.edges[normalized[0]].edge_index.device
-    if pairs:
-        edge_index = torch.tensor(pairs, dtype=torch.long, device=device).t().contiguous()
-    else:
+    edge_index = edge_index.to(device=device, dtype=torch.long)
+    if edge_index.numel() == 0:
         edge_index = torch.empty((2, 0), dtype=torch.long, device=device)
 
     nodes = {start_type: dict(graph.nodes[start_type].data)}

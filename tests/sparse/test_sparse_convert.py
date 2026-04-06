@@ -34,6 +34,20 @@ def test_to_coo_round_trips_from_csr():
     assert torch.equal(torch.stack((coo.row, coo.col)), edge_index)
 
 
+def test_to_coo_from_csr_avoids_repeat_interleave(monkeypatch):
+    edge_index = torch.tensor([[0, 0, 1, 2], [1, 2, 0, 1]])
+
+    def fail_repeat_interleave(*args, **kwargs):
+        raise AssertionError("CSR to COO conversion should avoid repeat_interleave")
+
+    monkeypatch.setattr(torch, "repeat_interleave", fail_repeat_interleave)
+
+    csr = from_edge_index(edge_index, shape=(3, 3), layout=SparseLayout.CSR)
+    coo = to_coo(csr)
+
+    assert torch.equal(torch.stack((coo.row, coo.col)), edge_index)
+
+
 def test_to_csc_converts_coo_tensor_with_values():
     edge_index = torch.tensor([[1, 0, 1], [3, 2, 0]])
     values = torch.tensor([1.5, 2.0, 3.5])
@@ -61,6 +75,22 @@ def test_to_csr_preserves_multi_dimensional_values():
 def test_to_coo_round_trips_multi_dimensional_values_from_csc():
     edge_index = torch.tensor([[1, 0, 1], [3, 2, 0]])
     values = torch.tensor([[1.0, 10.0], [2.0, 20.0], [3.0, 30.0]])
+
+    csc = to_csc(from_edge_index(edge_index, shape=(2, 4), values=values))
+    coo = to_coo(csc)
+
+    assert torch.equal(torch.stack((coo.row, coo.col)), torch.tensor([[1, 0, 1], [0, 2, 3]]))
+    assert torch.equal(coo.values, torch.tensor([[3.0, 30.0], [2.0, 20.0], [1.0, 10.0]]))
+
+
+def test_to_coo_from_csc_avoids_repeat_interleave(monkeypatch):
+    edge_index = torch.tensor([[1, 0, 1], [3, 2, 0]])
+    values = torch.tensor([[1.0, 10.0], [2.0, 20.0], [3.0, 30.0]])
+
+    def fail_repeat_interleave(*args, **kwargs):
+        raise AssertionError("CSC to COO conversion should avoid repeat_interleave")
+
+    monkeypatch.setattr(torch, "repeat_interleave", fail_repeat_interleave)
 
     csc = to_csc(from_edge_index(edge_index, shape=(2, 4), values=values))
     coo = to_coo(csc)

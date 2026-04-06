@@ -76,6 +76,42 @@ def _expand_interval_values(values: torch.Tensor, counts: torch.Tensor, *, step:
     return expanded
 
 
+def _sorted_unique_tensor(values) -> torch.Tensor:
+    values = torch.as_tensor(values, dtype=torch.long).view(-1)
+    if values.numel() == 0:
+        return values
+    sorted_values = torch.sort(values, stable=True).values
+    keep = torch.ones(sorted_values.numel(), dtype=torch.bool, device=sorted_values.device)
+    if sorted_values.numel() > 1:
+        keep[1:] = sorted_values[1:] != sorted_values[:-1]
+    return sorted_values[keep]
+
+
+def _merge_sorted_unique_tensors(left, right) -> torch.Tensor:
+    left = _sorted_unique_tensor(left)
+    if left.numel() == 0:
+        return _sorted_unique_tensor(right)
+    right = _sorted_unique_tensor(torch.as_tensor(right, dtype=torch.long, device=left.device))
+    if right.numel() == 0:
+        return left
+
+    positions = torch.searchsorted(left, right)
+    capped_positions = positions.clamp_max(left.numel() - 1)
+    keep_right = (positions >= left.numel()) | (left[capped_positions] != right)
+    right = right[keep_right]
+    positions = positions[keep_right]
+    if right.numel() == 0:
+        return left
+
+    right_positions = positions + torch.arange(right.numel(), dtype=torch.long, device=left.device)
+    merged = torch.empty(left.numel() + right.numel(), dtype=torch.long, device=left.device)
+    left_mask = torch.ones(merged.numel(), dtype=torch.bool, device=left.device)
+    left_mask[right_positions] = False
+    merged[right_positions] = right
+    merged[left_mask] = left
+    return merged
+
+
 def _grouped_neighbors(edge_index, frontier, *, endpoint: int) -> torch.Tensor:
     edge_index = torch.as_tensor(edge_index, dtype=torch.long)
     frontier = torch.as_tensor(frontier, dtype=torch.long, device=edge_index.device).view(-1)
@@ -83,7 +119,7 @@ def _grouped_neighbors(edge_index, frontier, *, endpoint: int) -> torch.Tensor:
         return torch.empty(0, dtype=torch.long, device=edge_index.device)
 
     sorted_major, sorted_minor = _endpoint_lookup(edge_index, endpoint=endpoint)
-    frontier = torch.unique(frontier)
+    frontier = _sorted_unique_tensor(frontier)
     starts = torch.searchsorted(sorted_major, frontier, right=False)
     ends = torch.searchsorted(sorted_major, frontier, right=True)
     counts = ends - starts
@@ -101,12 +137,12 @@ def _exclude_members(candidates, visited) -> torch.Tensor:
     candidates = torch.as_tensor(candidates, dtype=torch.long).view(-1)
     if candidates.numel() == 0:
         return candidates
-    candidates = torch.unique(candidates)
+    candidates = _sorted_unique_tensor(candidates)
 
     visited = torch.as_tensor(visited, dtype=torch.long, device=candidates.device).view(-1)
     if visited.numel() == 0:
         return candidates
-    visited = torch.unique(visited)
+    visited = _sorted_unique_tensor(visited)
 
     positions = torch.searchsorted(visited, candidates)
     capped_positions = positions.clamp_max(visited.numel() - 1)
@@ -153,7 +189,7 @@ def _sample_homo_next_frontier(edge_index, frontier, visited, fanout, *, generat
 
 def _sample_homo_node_ids(edge_index, seed_nodes, num_neighbors, *, generator, return_hops: bool = False):
     edge_index = torch.as_tensor(edge_index, dtype=torch.long)
-    visited = torch.unique(
+    visited = _sorted_unique_tensor(
         torch.as_tensor(seed_nodes, dtype=torch.long, device=edge_index.device).view(-1)
     )
     frontier = visited
@@ -167,7 +203,7 @@ def _sample_homo_node_ids(edge_index, seed_nodes, num_neighbors, *, generator, r
             generator=generator,
         )
         if frontier.numel() > 0:
-            visited = torch.unique(torch.cat((visited, frontier)))
+            visited = _merge_sorted_unique_tensors(visited, frontier)
         if hop_nodes is not None:
             hop_nodes.append(visited.clone())
         elif frontier.numel() == 0:

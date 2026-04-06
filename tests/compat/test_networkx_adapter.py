@@ -68,6 +68,29 @@ def test_graph_from_networkx_preserves_parallel_edges_from_multidigraph():
     assert torch.equal(restored[0][1][1]["edge_weight"], torch.tensor(1.5))
 
 
+def test_to_networkx_avoids_tensor_int(monkeypatch):
+    graph = Graph.homo(
+        edge_index=torch.tensor([[0, 0, 1], [1, 1, 2]]),
+        x=torch.tensor([[1.0, 0.0], [2.0, 0.0], [3.0, 0.0]]),
+        y=torch.tensor([0, 1, 0]),
+        edge_data={
+            "edge_weight": torch.tensor([0.5, 1.5, 2.5]),
+            "e_id": torch.tensor([10, 11, 12]),
+        },
+    )
+
+    def fail_int(self):
+        raise AssertionError("NetworkX export should stay off tensor.__int__")
+
+    monkeypatch.setattr(torch.Tensor, "__int__", fail_int)
+
+    nx_graph = graph.to_networkx()
+
+    assert isinstance(nx_graph, nx.MultiDiGraph)
+    assert nx_graph.number_of_edges() == 3
+    assert torch.equal(nx_graph[0][1][0]["edge_weight"], torch.tensor(0.5))
+
+
 def test_to_networkx_rejects_heterogeneous_graphs():
     graph = Graph.hetero(
         nodes={

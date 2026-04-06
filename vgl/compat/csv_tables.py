@@ -115,8 +115,15 @@ def _scalar_numeric_value(values: torch.Tensor, index: int, *, entity_kind: str,
     value = values[index]
     if not isinstance(value, torch.Tensor) or value.ndim != 0:
         raise ValueError(f"{entity_kind} feature {column!r} must contain scalar values for CSV export")
-    python_value = value.detach().cpu().item()
-    if isinstance(python_value, bool) or not isinstance(python_value, (int, float)):
+    scalar = value.detach().cpu()
+    scalar_value = scalar.numpy().reshape(()).item()
+    if scalar.dtype == torch.bool:
+        raise ValueError(f"{entity_kind} feature {column!r} must contain numeric scalar values for CSV export")
+    if torch.is_floating_point(scalar):
+        python_value = float(scalar_value)
+    elif scalar.dtype in (torch.uint8, torch.int8, torch.int16, torch.int32, torch.int64):
+        python_value = int(scalar_value)
+    else:
         raise ValueError(f"{entity_kind} feature {column!r} must contain numeric scalar values for CSV export")
     return python_value
 
@@ -207,8 +214,9 @@ def to_csv_tables(
             lineterminator="\n",
         )
         writer.writeheader()
-        for node_id in range(node_count):
-            row = {node_id_column: int(public_ids[node_id])}
+        public_node_ids = public_ids.detach().cpu().numpy().reshape(-1)
+        for node_id, public_node_id in enumerate(public_node_ids):
+            row = {node_id_column: int(public_node_id)}
             for column in node_columns:
                 row[column] = _scalar_numeric_value(graph.ndata[column], node_id, entity_kind="node", column=column)
             writer.writerow(row)
@@ -221,9 +229,10 @@ def to_csv_tables(
             lineterminator="\n",
         )
         writer.writeheader()
-        for edge_id in range(edge_count):
-            src = int(public_ids[int(graph.edge_index[0, edge_id])])
-            dst = int(public_ids[int(graph.edge_index[1, edge_id])])
+        edge_rows = graph.edge_index.t().detach().cpu().numpy()
+        for edge_id, (src_index, dst_index) in enumerate(edge_rows):
+            src = int(public_node_ids[int(src_index)])
+            dst = int(public_node_ids[int(dst_index)])
             row = {src_column: src, dst_column: dst}
             for column in edge_columns:
                 row[column] = _scalar_numeric_value(graph.edata[column], edge_id, entity_kind="edge", column=column)

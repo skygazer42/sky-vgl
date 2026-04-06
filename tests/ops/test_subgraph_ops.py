@@ -3,7 +3,7 @@ import torch
 
 from vgl import Graph
 from vgl.ops import edge_subgraph, in_subgraph, node_subgraph, out_subgraph
-from vgl.ops.subgraph import _membership_mask
+from vgl.ops.subgraph import _lookup_positions, _membership_mask
 
 
 def test_node_subgraph_filters_edges_and_relabels_nodes():
@@ -44,6 +44,22 @@ def test_node_subgraph_homo_avoids_torch_isin(monkeypatch):
         raise AssertionError("homo node_subgraph should avoid torch.isin scans")
 
     monkeypatch.setattr(torch, "isin", fail_isin)
+
+    subgraph = node_subgraph(graph, torch.tensor([0, 2, 3]))
+
+    assert torch.equal(subgraph.edge_index, torch.tensor([[0, 1, 2], [1, 2, 0]]))
+
+
+def test_node_subgraph_homo_avoids_tensor_int(monkeypatch):
+    graph = Graph.homo(
+        edge_index=torch.tensor([[0, 2, 3, 1], [2, 3, 0, 3]]),
+        x=torch.tensor([[1.0], [2.0], [3.0], [4.0]]),
+    )
+
+    def fail_int(self):
+        raise AssertionError("homo node_subgraph should stay off tensor.__int__")
+
+    monkeypatch.setattr(torch.Tensor, "__int__", fail_int)
 
     subgraph = node_subgraph(graph, torch.tensor([0, 2, 3]))
 
@@ -91,6 +107,32 @@ def test_membership_mask_contiguous_ranges_avoid_searchsorted(monkeypatch):
     )
 
     assert torch.equal(mask, torch.tensor([False, True, True, False]))
+
+
+def test_lookup_positions_avoids_tensor_item_in_missing_id_errors(monkeypatch):
+    def fail_item(self):
+        raise AssertionError("subgraph lookup should stay off tensor.item")
+
+    monkeypatch.setattr(torch.Tensor, "item", fail_item)
+
+    with pytest.raises(KeyError, match="missing node id 7"):
+        _lookup_positions(torch.tensor([0, 2, 6]), torch.tensor([7]), entity_name="node")
+
+    with pytest.raises(KeyError, match="missing node id 4"):
+        _lookup_positions(torch.tensor([0, 2, 6]), torch.tensor([2, 4]), entity_name="node")
+
+
+def test_lookup_positions_avoids_tensor_int_in_missing_id_errors(monkeypatch):
+    def fail_int(self):
+        raise AssertionError("subgraph lookup should stay off tensor.__int__")
+
+    monkeypatch.setattr(torch.Tensor, "__int__", fail_int)
+
+    with pytest.raises(KeyError, match="missing node id 7"):
+        _lookup_positions(torch.tensor([0, 2, 6]), torch.tensor([7]), entity_name="node")
+
+    with pytest.raises(KeyError, match="missing node id 4"):
+        _lookup_positions(torch.tensor([0, 2, 6]), torch.tensor([2, 4]), entity_name="node")
 
 
 def test_edge_subgraph_filters_edges_and_preserves_node_space():

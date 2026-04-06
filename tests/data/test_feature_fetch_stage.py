@@ -1,7 +1,8 @@
+import pytest
 import torch
 
 from vgl import Graph
-from vgl.dataloading.executor import PlanExecutor
+from vgl.dataloading.executor import PlanExecutor, _fallback_routed_edge_tensor_slice
 from vgl.dataloading.materialize import _align_tensor_slice
 from vgl.dataloading.plan import PlanStage, SamplingPlan
 from vgl.dataloading.requests import NodeSeedRequest
@@ -208,6 +209,76 @@ def test_executor_falls_back_to_routed_edge_tensor_slice_without_tensor_tolist(m
 
     assert torch.equal(edge_slice.index, torch.tensor([4, 3, 0]))
     assert torch.equal(edge_slice.values, torch.tensor([9.0, 4.0, 1.0]))
+
+
+def test_executor_fallback_routed_edge_tensor_slice_missing_ids_avoids_tensor_item(monkeypatch, tmp_path):
+    writes = ("author", "writes", "paper")
+    graph = Graph.hetero(
+        nodes={
+            "author": {"x": torch.arange(8, dtype=torch.float32).view(4, 2)},
+            "paper": {"x": torch.arange(10, 18, dtype=torch.float32).view(4, 2)},
+        },
+        edges={
+            writes: {
+                "edge_index": torch.tensor([[0, 1, 2, 3, 0], [1, 0, 3, 2, 2]]),
+                "weight": torch.tensor([1.0, 2.0, 3.0, 4.0, 9.0]),
+            },
+        },
+    )
+    write_partitioned_graph(graph, tmp_path, num_partitions=2)
+    coordinator = LocalSamplingCoordinator(
+        {
+            0: LocalGraphShard.from_partition_dir(tmp_path, partition_id=0),
+            1: LocalGraphShard.from_partition_dir(tmp_path, partition_id=1),
+        }
+    )
+
+    def fail_item(self):
+        raise AssertionError("routed edge feature fallback errors should stay off tensor.item")
+
+    monkeypatch.setattr(torch.Tensor, "item", fail_item)
+
+    with pytest.raises(KeyError, match="edge ids: 9"):
+        _fallback_routed_edge_tensor_slice(
+            coordinator,
+            ("edge", writes, "weight"),
+            torch.tensor([4, 9]),
+        )
+
+
+def test_executor_fallback_routed_edge_tensor_slice_missing_ids_avoids_tensor_int(monkeypatch, tmp_path):
+    writes = ("author", "writes", "paper")
+    graph = Graph.hetero(
+        nodes={
+            "author": {"x": torch.arange(8, dtype=torch.float32).view(4, 2)},
+            "paper": {"x": torch.arange(10, 18, dtype=torch.float32).view(4, 2)},
+        },
+        edges={
+            writes: {
+                "edge_index": torch.tensor([[0, 1, 2, 3, 0], [1, 0, 3, 2, 2]]),
+                "weight": torch.tensor([1.0, 2.0, 3.0, 4.0, 9.0]),
+            },
+        },
+    )
+    write_partitioned_graph(graph, tmp_path, num_partitions=2)
+    coordinator = LocalSamplingCoordinator(
+        {
+            0: LocalGraphShard.from_partition_dir(tmp_path, partition_id=0),
+            1: LocalGraphShard.from_partition_dir(tmp_path, partition_id=1),
+        }
+    )
+
+    def fail_int(self):
+        raise AssertionError("routed edge feature fallback errors should stay off tensor.__int__")
+
+    monkeypatch.setattr(torch.Tensor, "__int__", fail_int)
+
+    with pytest.raises(KeyError, match="edge ids: 9"):
+        _fallback_routed_edge_tensor_slice(
+            coordinator,
+            ("edge", writes, "weight"),
+            torch.tensor([4, 9]),
+        )
 
 
 def test_executor_fetches_node_and_edge_features_from_store_backed_sampling_coordinator(tmp_path):

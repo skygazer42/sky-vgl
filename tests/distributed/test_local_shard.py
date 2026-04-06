@@ -143,6 +143,42 @@ def test_local_graph_shard_global_to_local_rejects_nodes_outside_partition(tmp_p
         shard.global_to_local(torch.tensor([1]))
 
 
+def test_local_graph_shard_global_to_local_rejects_nodes_without_tensor_item(monkeypatch, tmp_path):
+    graph = Graph.homo(
+        edge_index=torch.tensor([[0, 1, 2, 3], [1, 2, 3, 0]]),
+        x=torch.arange(8, dtype=torch.float32).view(4, 2),
+    )
+    write_partitioned_graph(graph, tmp_path, num_partitions=2)
+
+    shard = LocalGraphShard.from_partition_dir(tmp_path, partition_id=1)
+
+    def fail_item(self):
+        raise AssertionError("LocalGraphShard.global_to_local errors should stay off tensor.item")
+
+    monkeypatch.setattr(torch.Tensor, "item", fail_item)
+
+    with pytest.raises(KeyError, match="node 1 is not present in partition 1"):
+        shard.global_to_local(torch.tensor([1]))
+
+
+def test_local_graph_shard_global_to_local_rejects_nodes_without_tensor_int(monkeypatch, tmp_path):
+    graph = Graph.homo(
+        edge_index=torch.tensor([[0, 1, 2, 3], [1, 2, 3, 0]]),
+        x=torch.arange(8, dtype=torch.float32).view(4, 2),
+    )
+    write_partitioned_graph(graph, tmp_path, num_partitions=2)
+
+    shard = LocalGraphShard.from_partition_dir(tmp_path, partition_id=1)
+
+    def fail_int(self):
+        raise AssertionError("LocalGraphShard.global_to_local errors should stay off tensor.__int__")
+
+    monkeypatch.setattr(torch.Tensor, "__int__", fail_int)
+
+    with pytest.raises(KeyError, match="node 1 is not present in partition 1"):
+        shard.global_to_local(torch.tensor([1]))
+
+
 def test_local_graph_shard_loads_temporal_partition_graph(tmp_path):
     graph = Graph.temporal(
         nodes={"node": {"x": torch.arange(8, dtype=torch.float32).view(4, 2)}},

@@ -32,6 +32,103 @@ def test_temporal_event_batch_tracks_fields_and_history_views():
     assert torch.equal(history.edges[edge_type].timestamp, torch.tensor([1, 3]))
 
 
+def test_temporal_event_batch_history_graph_avoids_tensor_item(monkeypatch):
+    graph = Graph.temporal(
+        nodes={"node": {"x": torch.randn(3, 4)}},
+        edges={
+            ("node", "interacts", "node"): {
+                "edge_index": torch.tensor([[0, 1, 2], [1, 2, 0]]),
+                "timestamp": torch.tensor([1, 3, 5]),
+            }
+        },
+        time_attr="timestamp",
+    )
+    records = [
+        TemporalEventRecord(graph=graph, src_index=0, dst_index=1, timestamp=3, label=1),
+        TemporalEventRecord(graph=graph, src_index=2, dst_index=0, timestamp=5, label=0),
+    ]
+
+    def fail_item(self):
+        raise AssertionError("TemporalEventBatch.history_graph should stay off tensor.item")
+
+    monkeypatch.setattr(torch.Tensor, "item", fail_item)
+
+    batch = TemporalEventBatch.from_records(records)
+    history = batch.history_graph(0)
+    edge_type = ("node", "interacts", "node")
+
+    assert torch.equal(history.edges[edge_type].timestamp, torch.tensor([1, 3]))
+
+
+def test_temporal_event_batch_history_graph_avoids_tensor_int(monkeypatch):
+    graph = Graph.temporal(
+        nodes={"node": {"x": torch.randn(3, 4)}},
+        edges={
+            ("node", "interacts", "node"): {
+                "edge_index": torch.tensor([[0, 1, 2], [1, 2, 0]]),
+                "timestamp": torch.tensor([1, 3, 5]),
+            }
+        },
+        time_attr="timestamp",
+    )
+    records = [
+        TemporalEventRecord(graph=graph, src_index=0, dst_index=1, timestamp=3, label=1),
+        TemporalEventRecord(graph=graph, src_index=2, dst_index=0, timestamp=5, label=0),
+    ]
+
+    def fail_int(self):
+        raise AssertionError("TemporalEventBatch.history_graph should stay off tensor.__int__")
+
+    monkeypatch.setattr(torch.Tensor, "__int__", fail_int)
+
+    batch = TemporalEventBatch.from_records(records)
+    history = batch.history_graph(0)
+    edge_type = ("node", "interacts", "node")
+
+    assert torch.equal(history.edges[edge_type].timestamp, torch.tensor([1, 3]))
+
+
+def test_temporal_event_batch_avoids_tensor_int_conversion_for_indices(monkeypatch):
+    graph = Graph.temporal(
+        nodes={"node": {"x": torch.randn(3, 4)}},
+        edges={
+            ("node", "interacts", "node"): {
+                "edge_index": torch.tensor([[0, 1, 2], [1, 2, 0]]),
+                "timestamp": torch.tensor([1, 3, 5]),
+            }
+        },
+        time_attr="timestamp",
+    )
+    records = [
+        TemporalEventRecord(
+            graph=graph,
+            src_index=torch.tensor(0),
+            dst_index=torch.tensor(1),
+            timestamp=3,
+            label=1,
+        ),
+        TemporalEventRecord(
+            graph=graph,
+            src_index=torch.tensor(2),
+            dst_index=torch.tensor(0),
+            timestamp=5,
+            label=0,
+        ),
+    ]
+
+    def fail_int(self):
+        raise AssertionError("temporal event batching should stay off tensor.__int__")
+
+    monkeypatch.setattr(torch.Tensor, "__int__", fail_int)
+
+    batch = TemporalEventBatch.from_records(records)
+
+    assert torch.equal(batch.src_index, torch.tensor([0, 2]))
+    assert torch.equal(batch.dst_index, torch.tensor([1, 0]))
+    assert torch.equal(batch.timestamp, torch.tensor([3, 5]))
+    assert torch.equal(batch.labels, torch.tensor([1, 0]))
+
+
 def test_temporal_event_batch_stacks_event_features():
     graph = Graph.temporal(
         nodes={"node": {"x": torch.randn(3, 4)}},
@@ -189,4 +286,3 @@ def test_temporal_event_batch_supports_mixed_hetero_edge_types():
     assert torch.equal(batch.edge_type_index, torch.tensor([0, 1]))
     assert torch.equal(batch.src_index, torch.tensor([0, 1]))
     assert torch.equal(batch.dst_index, torch.tensor([1, 2]))
-

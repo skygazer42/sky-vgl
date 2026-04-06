@@ -6,6 +6,12 @@ from vgl.transforms.base import BaseTransform
 from vgl.transforms._utils import clone_graph
 
 
+def _as_python_int(value) -> int:
+    if isinstance(value, torch.Tensor):
+        return int(value.detach().cpu().numpy().reshape(()).item())
+    return int(value)
+
+
 class NormalizeFeatures(BaseTransform):
     def __init__(self, *, attr_name: str = "x", eps: float = 1e-12):
         self.attr_name = attr_name
@@ -67,7 +73,7 @@ class TrainOnlyFeatureNormalizer(FeatureStandardize):
             if not isinstance(train_mask, torch.Tensor):
                 raise ValueError(f"TrainOnlyFeatureNormalizer requires {self.train_mask_name!r}")
             train_mask = train_mask.to(dtype=torch.bool)
-            if int(train_mask.sum()) == 0:
+            if _as_python_int(train_mask.sum()) == 0:
                 raise ValueError("TrainOnlyFeatureNormalizer requires at least one training node")
             mean, std = self._stats(features[train_mask])
             nodes[node_type][self.attr_name] = (features - mean) / std

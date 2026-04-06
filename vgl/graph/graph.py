@@ -4,7 +4,7 @@ import torch
 
 from vgl.graph.schema import GraphSchema
 from vgl.graph.stores import EdgeStore, NodeStore
-from vgl.graph.view import GraphView
+from vgl.graph.view import GraphView, _as_python_int
 
 
 @dataclass(slots=True)
@@ -32,7 +32,7 @@ class Graph:
                 return int(value.size(0))
         graph_store = object.__getattribute__(self, "graph_store")
         if graph_store is not None:
-            return int(graph_store.num_nodes(node_type))
+            return _as_python_int(graph_store.num_nodes(node_type))
         raise ValueError(f"Cannot infer node count for node type {node_type!r}")
 
     def __getattr__(self, name: str):

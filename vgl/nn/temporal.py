@@ -42,6 +42,39 @@ def _feed_forward(channels, ff_multiplier, dropout):
     )
 
 
+def _dtype_min_value(dtype):
+    if torch.empty((), dtype=dtype).is_floating_point():
+        return torch.finfo(dtype).min
+    return torch.iinfo(dtype).min
+
+
+def _grouped_max(values, inverse, num_groups):
+    out = torch.full(
+        (num_groups,),
+        _dtype_min_value(values.dtype),
+        dtype=values.dtype,
+        device=values.device,
+    )
+    out.scatter_reduce_(0, inverse, values, reduce="amax", include_self=True)
+    return out
+
+
+def _sorted_unique_with_inverse(values: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
+    values = torch.as_tensor(values, dtype=torch.long).view(-1)
+    if values.numel() == 0:
+        return values, values
+    order = torch.argsort(values, stable=True)
+    sorted_values = values.index_select(0, order)
+    keep = torch.ones(sorted_values.numel(), dtype=torch.bool, device=sorted_values.device)
+    if sorted_values.numel() > 1:
+        keep[1:] = sorted_values[1:] != sorted_values[:-1]
+    unique_values = sorted_values[keep]
+    group_ids = torch.cumsum(keep.to(dtype=torch.long), dim=0) - 1
+    inverse = torch.empty_like(group_ids)
+    inverse[order] = group_ids
+    return unique_values, inverse
+
+
 class TimeEncoder(nn.Module):
     def __init__(self, out_channels):
         super().__init__()
@@ -93,16 +126,25 @@ class LastMessageAggregator(nn.Module):
                 timestamp.new_empty(0),
             )
 
-        node_ids = torch.unique(node_index, sorted=True)
-        aggregated_messages = []
-        aggregated_timestamps = []
-        for node_id in node_ids.tolist():
-            mask = node_index == node_id
-            node_timestamps = timestamp[mask]
-            latest_idx = torch.argmax(node_timestamps)
-            aggregated_messages.append(messages[mask][latest_idx])
-            aggregated_timestamps.append(node_timestamps[latest_idx])
-        return node_ids, torch.stack(aggregated_messages, dim=0), torch.stack(aggregated_timestamps, dim=0)
+        node_ids, inverse = _sorted_unique_with_inverse(node_index)
+        max_timestamps = _grouped_max(timestamp, inverse, node_ids.numel())
+        positions = torch.arange(node_index.numel(), dtype=torch.long, device=node_index.device)
+        candidate_positions = positions.masked_fill(
+            timestamp != max_timestamps.index_select(0, inverse),
+            positions.numel(),
+        )
+        latest_positions = torch.full(
+            (node_ids.numel(),),
+            positions.numel(),
+            dtype=torch.long,
+            device=node_index.device,
+        )
+        latest_positions.scatter_reduce_(0, inverse, candidate_positions, reduce="amin", include_self=True)
+        return (
+            node_ids,
+            messages.index_select(0, latest_positions),
+            timestamp.index_select(0, latest_positions),
+        )
 
 
 class MeanMessageAggregator(nn.Module):
@@ -115,14 +157,17 @@ class MeanMessageAggregator(nn.Module):
                 timestamp.new_empty(0),
             )
 
-        node_ids = torch.unique(node_index, sorted=True)
-        aggregated_messages = []
-        aggregated_timestamps = []
-        for node_id in node_ids.tolist():
-            mask = node_index == node_id
-            aggregated_messages.append(messages[mask].mean(dim=0))
-            aggregated_timestamps.append(timestamp[mask].max())
-        return node_ids, torch.stack(aggregated_messages, dim=0), torch.stack(aggregated_timestamps, dim=0)
+        node_ids, inverse = _sorted_unique_with_inverse(node_index)
+        aggregated_messages = messages.new_zeros((node_ids.numel(),) + tuple(messages.shape[1:]))
+        aggregated_messages.index_add_(0, inverse, messages)
+        counts = torch.bincount(inverse, minlength=node_ids.numel()).clamp_min(1)
+        count_shape = (node_ids.numel(),) + (1,) * (messages.dim() - 1)
+        aggregated_messages = aggregated_messages / counts.to(
+            dtype=messages.dtype,
+            device=messages.device,
+        ).view(count_shape)
+        aggregated_timestamps = _grouped_max(timestamp, inverse, node_ids.numel())
+        return node_ids, aggregated_messages, aggregated_timestamps
 
 
 class TGNMemory(nn.Module):

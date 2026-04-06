@@ -5,12 +5,18 @@ from vgl.graph.schema import GraphSchema
 from vgl.graph.stores import EdgeStore, NodeStore
 
 
+def _as_python_int(value) -> int:
+    if isinstance(value, torch.Tensor):
+        return int(value.detach().cpu().numpy().reshape(()).item())
+    return int(value)
+
+
 def _ordered_unique(ids: torch.Tensor | list[int] | tuple[int, ...]) -> torch.Tensor:
     ids = torch.as_tensor(ids, dtype=torch.long).view(-1)
     unique = []
     seen = set()
     for value_tensor in ids:
-        value = int(value_tensor.item())
+        value = _as_python_int(value_tensor)
         if value not in seen:
             seen.add(value)
             unique.append(value)
@@ -23,7 +29,11 @@ def _unique_sorted_tensor(values) -> torch.Tensor:
         return values
     if bool((values[1:] > values[:-1]).all()):
         return values
-    return torch.unique(values)
+    sorted_values = torch.sort(values, stable=True).values
+    keep = torch.ones(sorted_values.numel(), dtype=torch.bool, device=sorted_values.device)
+    if sorted_values.numel() > 1:
+        keep[1:] = sorted_values[1:] != sorted_values[:-1]
+    return sorted_values[keep]
 
 
 def _slice_node_data(graph: Graph, node_ids: torch.Tensor, *, node_type: str) -> dict[str, torch.Tensor]:
@@ -170,11 +180,11 @@ def _lookup_positions(index_ids: torch.Tensor, values: torch.Tensor, *, entity_n
     sorted_index_ids, sort_perm = torch.sort(index_ids, stable=True)
     positions = torch.searchsorted(sorted_index_ids, values)
     if bool((positions >= sorted_index_ids.numel()).any()):
-        missing_value = int(values[positions >= sorted_index_ids.numel()][0].item())
+        missing_value = _as_python_int(values[positions >= sorted_index_ids.numel()][0])
         raise KeyError(f"missing {entity_name} id {missing_value}")
     matched_values = sorted_index_ids[positions]
     if bool((matched_values != values).any()):
-        missing_value = int(values[matched_values != values][0].item())
+        missing_value = _as_python_int(values[matched_values != values][0])
         raise KeyError(f"missing {entity_name} id {missing_value}")
     return sort_perm[positions]
 

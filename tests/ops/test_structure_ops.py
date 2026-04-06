@@ -129,6 +129,28 @@ def test_to_simple_avoids_tensor_tolist(monkeypatch):
     assert torch.equal(simplified.edata["count"], torch.tensor([3, 1]))
 
 
+def test_to_simple_avoids_torch_unique(monkeypatch):
+    graph = Graph.homo(
+        edge_index=torch.tensor([[0, 0, 1, 0], [1, 1, 2, 1]]),
+        x=torch.randn(3, 2),
+        edge_data={
+            "weight": torch.tensor([1.0, 2.0, 3.0, 4.0]),
+            "e_id": torch.tensor([10, 11, 12, 13]),
+        },
+    )
+
+    def fail_unique(*args, **kwargs):
+        raise AssertionError("to_simple should avoid torch.unique")
+
+    monkeypatch.setattr(torch, "unique", fail_unique)
+
+    simplified = to_simple(graph, count_attr="count")
+
+    assert torch.equal(simplified.edge_index, torch.tensor([[0, 1], [1, 2]]))
+    assert torch.equal(simplified.edata["weight"], torch.tensor([1.0, 3.0]))
+    assert torch.equal(simplified.edata["count"], torch.tensor([3, 1]))
+
+
 def test_to_simple_updates_only_selected_heterogeneous_relation():
     writes = ("author", "writes", "paper")
     cites = ("paper", "cites", "paper")

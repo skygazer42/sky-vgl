@@ -42,6 +42,29 @@ def test_csr_sparse_tensor_rejects_invalid_pointer_shape():
         )
 
 
+def test_csr_and_csc_sparse_tensor_validation_avoid_tensor_item(monkeypatch):
+    def fail_item(self):
+        raise AssertionError("SparseTensor validation should stay off tensor.item")
+
+    monkeypatch.setattr(torch.Tensor, "item", fail_item)
+
+    csr = SparseTensor(
+        layout=SparseLayout.CSR,
+        shape=(2, 3),
+        crow_indices=torch.tensor([0, 1, 2]),
+        col_indices=torch.tensor([0, 2]),
+    )
+    csc = SparseTensor(
+        layout=SparseLayout.CSC,
+        shape=(3, 2),
+        ccol_indices=torch.tensor([0, 1, 2]),
+        row_indices=torch.tensor([0, 2]),
+    )
+
+    assert csr.nnz == 2
+    assert csc.nnz == 2
+
+
 def test_sparse_tensor_accepts_multi_dimensional_values():
     sparse = SparseTensor(
         layout=SparseLayout.COO,

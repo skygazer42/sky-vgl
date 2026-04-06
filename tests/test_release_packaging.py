@@ -159,6 +159,15 @@ def test_release_dev_dependencies_include_docs_build_stack():
     assert 'mkdocstrings[python]>=' in pyproject
 
 
+def test_mkdocs_config_marks_internal_docs_as_not_in_nav():
+    mkdocs = (REPO_ROOT / "mkdocs.yml").read_text(encoding="utf-8")
+
+    assert "not_in_nav:" in mkdocs
+    assert "plans/*" in mkdocs
+    assert "quickstart.md" in mkdocs
+    assert "releasing.md" in mkdocs
+
+
 def test_release_smoke_script_can_install_built_wheel(built_release_artifacts):
     wheel_path, _ = built_release_artifacts
     smoke_script = REPO_ROOT / "scripts" / "release_smoke.py"

@@ -6,6 +6,76 @@ from vgl.graph.view import GraphView
 from vgl.transforms.base import BaseTransform
 
 
+def _as_python_int(value) -> int:
+    if isinstance(value, torch.Tensor):
+        return int(value.detach().cpu().numpy().reshape(()).item())
+    return int(value)
+
+
+def _sorted_unique_tensor(values) -> torch.Tensor:
+    values = torch.as_tensor(values, dtype=torch.long).view(-1)
+    if values.numel() == 0:
+        return values
+    sorted_values = torch.sort(values, stable=True).values
+    keep = torch.ones(sorted_values.numel(), dtype=torch.bool, device=sorted_values.device)
+    if sorted_values.numel() > 1:
+        keep[1:] = sorted_values[1:] != sorted_values[:-1]
+    return sorted_values[keep]
+
+
+def _membership_mask(values, allowed_values) -> torch.Tensor:
+    values = torch.as_tensor(values, dtype=torch.long).view(-1)
+    allowed_values = _sorted_unique_tensor(
+        torch.as_tensor(allowed_values, dtype=torch.long, device=values.device).view(-1)
+    )
+    if values.numel() == 0 or allowed_values.numel() == 0:
+        return torch.zeros(values.numel(), dtype=torch.bool, device=values.device)
+    positions = torch.searchsorted(allowed_values, values, right=False)
+    capped_positions = positions.clamp_max(allowed_values.numel() - 1)
+    return (positions < allowed_values.numel()) & (allowed_values[capped_positions] == values)
+
+
+def _edge_pair_keys(src_index, dst_index, *, dst_count: int) -> torch.Tensor:
+    src_index = torch.as_tensor(src_index, dtype=torch.long).view(-1)
+    dst_index = torch.as_tensor(dst_index, dtype=torch.long, device=src_index.device).view(-1)
+    stride = torch.as_tensor(dst_count, dtype=torch.long, device=src_index.device).reshape(())
+    return src_index * stride + dst_index
+
+
+def _expand_interval_positions(starts: torch.Tensor, counts: torch.Tensor) -> torch.Tensor:
+    starts = torch.as_tensor(starts, dtype=torch.long).view(-1)
+    counts = torch.as_tensor(counts, dtype=torch.long, device=starts.device).view(-1)
+    if starts.numel() == 0 or counts.numel() == 0:
+        return torch.empty(0, dtype=torch.long, device=starts.device)
+
+    positive = counts > 0
+    starts = starts[positive]
+    counts = counts[positive]
+    if starts.numel() == 0:
+        return torch.empty(0, dtype=torch.long, device=starts.device)
+
+    offsets = torch.cumsum(counts, dim=0) - counts
+    bases = starts - offsets
+    deltas = torch.empty_like(bases)
+    deltas[0] = bases[0]
+    if bases.numel() > 1:
+        deltas[1:] = bases[1:] - bases[:-1]
+    expanded = torch.zeros(counts.sum(), dtype=torch.long, device=starts.device)
+    expanded[offsets] = deltas
+    expanded = torch.cumsum(expanded, dim=0)
+    expanded += torch.arange(counts.sum(), dtype=torch.long, device=starts.device)
+    return expanded
+
+
+def _merge_group_indices(groups, *, device: torch.device) -> torch.Tensor:
+    if not groups:
+        return torch.empty(0, dtype=torch.long, device=device)
+    merged = torch.cat(
+        [torch.as_tensor(group, dtype=torch.long, device=device).view(-1) for group in groups]
+    )
+    return torch.sort(merged, stable=True).values
+
+
 def _slice_edge_store(store, indices):
     edge_count = int(store.edge_index.size(1))
     index = torch.as_tensor(indices, dtype=torch.long)
@@ -59,7 +129,7 @@ class RandomLinkSplit(BaseTransform):
             if not 0.0 <= value < 1.0:
                 raise ValueError(f"{name} must be in [0.0, 1.0)")
             return int(total * value)
-        count = int(value)
+        count = _as_python_int(value)
         if count < 0:
             raise ValueError(f"{name} must be >= 0")
         if count >= total:
@@ -72,20 +142,33 @@ class RandomLinkSplit(BaseTransform):
             if value < 0.0:
                 raise ValueError("neg_sampling_ratio must be >= 0")
             return int(num_positive * value)
-        ratio = int(value)
+        ratio = _as_python_int(value)
         if ratio < 0:
             raise ValueError("neg_sampling_ratio must be >= 0")
-        return int(num_positive) * ratio
+        return _as_python_int(num_positive) * ratio
 
     def _edge_groups(self, edge_index):
         num_edges = int(edge_index.size(1))
         if not self.is_undirected:
-            return [[index] for index in range(num_edges)]
-        groups = {}
-        for index, (src_index, dst_index) in enumerate(edge_index.t().tolist()):
-            key = tuple(sorted((int(src_index), int(dst_index))))
-            groups.setdefault(key, []).append(index)
-        return list(groups.values())
+            return [torch.tensor([index], dtype=torch.long, device=edge_index.device) for index in range(num_edges)]
+        if num_edges == 0:
+            return []
+        src_index = edge_index[0].to(dtype=torch.long)
+        dst_index = edge_index[1].to(dtype=torch.long)
+        normalized_src = torch.minimum(src_index, dst_index)
+        normalized_dst = torch.maximum(src_index, dst_index)
+        key_base = torch.maximum(normalized_src.max(), normalized_dst.max()) + 1
+        edge_keys = _edge_pair_keys(normalized_src, normalized_dst, dst_count=key_base)
+        order = torch.argsort(edge_keys, stable=True)
+        sorted_keys = edge_keys.index_select(0, order)
+        group_starts = torch.ones(sorted_keys.numel(), dtype=torch.bool, device=sorted_keys.device)
+        if sorted_keys.numel() > 1:
+            group_starts[1:] = sorted_keys[1:] != sorted_keys[:-1]
+        starts = torch.nonzero(group_starts, as_tuple=False).view(-1)
+        ends = torch.cat((starts[1:], starts.new_tensor([order.numel()])))
+        start_values = starts.detach().cpu().numpy().reshape(-1)
+        end_values = ends.detach().cpu().numpy().reshape(-1)
+        return [order[start:end] for start, end in zip(start_values, end_values)]
 
     def _resolve_edge_type(self, graph):
         if self.edge_type is not None:
@@ -104,32 +187,50 @@ class RandomLinkSplit(BaseTransform):
         return edge_type
 
     def _reverse_edge_indices(self, edge_index, reverse_edge_index, indices):
-        reverse_lookup = {}
-        for reverse_edge_id, (src_index, dst_index) in enumerate(reverse_edge_index.t().tolist()):
-            key = (int(src_index), int(dst_index))
-            reverse_lookup.setdefault(key, []).append(int(reverse_edge_id))
-        selected_reverse_indices = []
-        for edge_id in indices:
-            src_index = int(edge_index[0, edge_id].item())
-            dst_index = int(edge_index[1, edge_id].item())
-            selected_reverse_indices.extend(reverse_lookup.get((dst_index, src_index), []))
-        return sorted(set(selected_reverse_indices))
+        query_indices = torch.as_tensor(indices, dtype=torch.long, device=edge_index.device).view(-1)
+        if query_indices.numel() == 0 or reverse_edge_index.numel() == 0:
+            return torch.empty(0, dtype=torch.long, device=edge_index.device)
+
+        reverse_src = reverse_edge_index[0].to(dtype=torch.long)
+        reverse_dst = reverse_edge_index[1].to(dtype=torch.long)
+        query_src = edge_index[1].index_select(0, query_indices).to(dtype=torch.long)
+        query_dst = edge_index[0].index_select(0, query_indices).to(dtype=torch.long)
+        key_base = torch.maximum(query_dst.max(), reverse_dst.max()) + 1
+
+        reverse_keys = _edge_pair_keys(reverse_src, reverse_dst, dst_count=key_base)
+        query_keys = _edge_pair_keys(query_src, query_dst, dst_count=key_base)
+        order = torch.argsort(reverse_keys, stable=True)
+        sorted_reverse_keys = reverse_keys.index_select(0, order)
+        starts = torch.searchsorted(sorted_reverse_keys, query_keys, right=False)
+        ends = torch.searchsorted(sorted_reverse_keys, query_keys, right=True)
+        positions = _expand_interval_positions(starts, ends - starts)
+        if positions.numel() == 0:
+            return positions
+        return _sorted_unique_tensor(order.index_select(0, positions))
 
     def _records_from_indices(self, graph, edge_index, indices, *, split, edge_type, reverse_edge_type):
+        index = torch.as_tensor(indices, dtype=torch.long, device=edge_index.device).view(-1)
+        if index.numel() == 0:
+            return []
+        selected_edge_index = edge_index.index_select(1, index)
+        edge_ids = index.detach().cpu().numpy().reshape(-1)
+        src_indices = selected_edge_index[0].detach().cpu().numpy().reshape(-1)
+        dst_indices = selected_edge_index[1].detach().cpu().numpy().reshape(-1)
         records = []
-        for edge_id in indices:
-            src_index = int(edge_index[0, edge_id].item())
-            dst_index = int(edge_index[1, edge_id].item())
-            sample_id = f"{split}:{edge_id}"
+        for edge_id, src_index, dst_index in zip(edge_ids, src_indices, dst_indices):
+            edge_id_value = int(edge_id)
+            src_index_value = int(src_index)
+            dst_index_value = int(dst_index)
+            sample_id = f"{split}:{edge_id_value}"
             records.append(
                 LinkPredictionRecord(
                     graph=graph,
-                    src_index=src_index,
-                    dst_index=dst_index,
+                    src_index=src_index_value,
+                    dst_index=dst_index_value,
                     label=1,
                     metadata={
                         "split": split,
-                        "edge_id": int(edge_id),
+                        "edge_id": edge_id_value,
                         "edge_type": edge_type,
                         "reverse_edge_type": reverse_edge_type,
                         "sample_id": sample_id,
@@ -145,37 +246,50 @@ class RandomLinkSplit(BaseTransform):
             )
         return records
 
-    def _positive_edge_set(self, edge_index, *, src_node_type, dst_node_type):
-        edges = {
-            (int(src_index), int(dst_index))
-            for src_index, dst_index in edge_index.t().tolist()
-        }
+    def _positive_edge_keys(self, edge_index, *, src_node_type, dst_node_type, num_dst_nodes):
+        edge_keys = _edge_pair_keys(
+            edge_index[0],
+            edge_index[1],
+            dst_count=num_dst_nodes,
+        )
         if self.is_undirected and src_node_type == dst_node_type:
-            edges = edges | {(dst_index, src_index) for src_index, dst_index in edges}
-        return edges
+            edge_keys = torch.cat(
+                (
+                    edge_keys,
+                    _edge_pair_keys(edge_index[1], edge_index[0], dst_count=num_dst_nodes),
+                )
+            )
+        return _sorted_unique_tensor(edge_keys)
 
     def _sample_negative_edges(self, *, count, num_src_nodes, num_dst_nodes, excluded_edges, generator):
         if count <= 0:
             return []
         all_possible = num_src_nodes * num_dst_nodes
-        if all_possible <= len(excluded_edges):
+        excluded_edge_keys = _sorted_unique_tensor(excluded_edges)
+        if all_possible <= int(excluded_edge_keys.numel()):
             raise ValueError("RandomLinkSplit could not sample negatives: no valid negative edges remain")
 
-        sampled = set()
-        while len(sampled) < count:
-            remaining = count - len(sampled)
+        sampled_edge_keys = torch.empty((0,), dtype=torch.long)
+        while int(sampled_edge_keys.numel()) < count:
+            remaining = count - int(sampled_edge_keys.numel())
             # Sample more than needed to reduce rejection loops on dense graphs.
             draw_count = max(remaining * 2, 32)
             src_index = torch.randint(num_src_nodes, (draw_count,), generator=generator)
             dst_index = torch.randint(num_dst_nodes, (draw_count,), generator=generator)
-            for src_value, dst_value in zip(src_index.tolist(), dst_index.tolist()):
-                pair = (int(src_value), int(dst_value))
-                if pair in excluded_edges or pair in sampled:
-                    continue
-                sampled.add(pair)
-                if len(sampled) == count:
-                    break
-        return sorted(sampled)
+            sampled_keys = _edge_pair_keys(src_index, dst_index, dst_count=num_dst_nodes)
+            invalid_mask = _membership_mask(sampled_keys, excluded_edge_keys)
+            if sampled_edge_keys.numel() > 0:
+                invalid_mask |= _membership_mask(sampled_keys, sampled_edge_keys)
+            accepted = _sorted_unique_tensor(sampled_keys[~invalid_mask])[:remaining]
+            if accepted.numel() == 0:
+                continue
+            sampled_edge_keys = torch.cat((sampled_edge_keys, accepted))
+
+        sampled = []
+        for edge_key in torch.sort(sampled_edge_keys[:count], stable=True).values:
+            edge_key_value = _as_python_int(edge_key)
+            sampled.append((edge_key_value // int(num_dst_nodes), edge_key_value % int(num_dst_nodes)))
+        return sampled
 
     def _sample_negative_destinations_for_source(
         self,
@@ -188,17 +302,26 @@ class RandomLinkSplit(BaseTransform):
     ):
         if count <= 0:
             return []
-        candidates = [dst_index for dst_index in range(num_dst_nodes) if (int(src_index), int(dst_index)) not in excluded_edges]
-        if not candidates:
+        excluded_edge_keys = _sorted_unique_tensor(excluded_edges)
+        destination_ids = torch.arange(num_dst_nodes, dtype=torch.long)
+        query_keys = destination_ids + _as_python_int(src_index) * int(num_dst_nodes)
+        candidates = destination_ids[~_membership_mask(query_keys, excluded_edge_keys)]
+        if candidates.numel() == 0:
             raise ValueError("RandomLinkSplit could not sample negatives for a validation/test query")
-        if count <= len(candidates):
-            permutation = torch.randperm(len(candidates), generator=generator)[:count].tolist()
-            return [int(candidates[index]) for index in permutation]
+        if count <= int(candidates.numel()):
+            permutation = torch.randperm(int(candidates.numel()), generator=generator)[:count]
+            return [
+                int(dst_index)
+                for dst_index in candidates.index_select(0, permutation).detach().cpu().numpy().reshape(-1)
+            ]
 
-        sampled = list(candidates)
-        remaining = count - len(candidates)
-        indices = torch.randint(len(candidates), (remaining,), generator=generator)
-        sampled.extend(int(candidates[index]) for index in indices.tolist())
+        sampled = [int(dst_index) for dst_index in candidates.detach().cpu().numpy().reshape(-1)]
+        remaining = count - int(candidates.numel())
+        indices = torch.randint(int(candidates.numel()), (remaining,), generator=generator)
+        sampled.extend(
+            int(dst_index)
+            for dst_index in candidates.index_select(0, indices).detach().cpu().numpy().reshape(-1)
+        )
         return sampled
 
     def _attach_negative_records(
@@ -230,8 +353,9 @@ class RandomLinkSplit(BaseTransform):
         sample_offset = 0
         for record, count in zip(records, counts_by_record):
             augmented.append(record)
+            src_index = _as_python_int(record.src_index)
             destinations = self._sample_negative_destinations_for_source(
-                src_index=int(record.src_index),
+                src_index=src_index,
                 count=count,
                 num_dst_nodes=num_dst_nodes,
                 excluded_edges=excluded_edges,
@@ -243,7 +367,7 @@ class RandomLinkSplit(BaseTransform):
                 augmented.append(
                     LinkPredictionRecord(
                         graph=graph,
-                        src_index=int(record.src_index),
+                        src_index=src_index,
                         dst_index=int(dst_index),
                         label=0,
                         metadata={
@@ -289,9 +413,9 @@ class RandomLinkSplit(BaseTransform):
         generator = None
         if self.seed is not None:
             generator = torch.Generator()
-            generator.manual_seed(int(self.seed))
-        permutation = torch.randperm(total_groups, generator=generator).tolist()
-        shuffled_groups = [groups[index] for index in permutation]
+            generator.manual_seed(_as_python_int(self.seed))
+        permutation = torch.randperm(total_groups, generator=generator)
+        shuffled_groups = [groups[index] for index in permutation.detach().cpu().numpy().reshape(-1)]
 
         train_group_indices = shuffled_groups[:num_train]
         val_group_indices = shuffled_groups[num_train:num_train + num_val]
@@ -309,15 +433,15 @@ class RandomLinkSplit(BaseTransform):
             train_supervision_groups = train_group_indices
             train_message_passing_groups = train_group_indices
 
-        train_indices = sorted(index for group in train_supervision_groups for index in group)
-        train_graph_indices = sorted(index for group in train_message_passing_groups for index in group)
-        val_indices = sorted(index for group in val_group_indices for index in group)
-        test_indices = sorted(index for group in test_group_indices for index in group)
+        train_indices = _merge_group_indices(train_supervision_groups, device=edge_index.device)
+        train_graph_indices = _merge_group_indices(train_message_passing_groups, device=edge_index.device)
+        val_indices = _merge_group_indices(val_group_indices, device=edge_index.device)
+        test_indices = _merge_group_indices(test_group_indices, device=edge_index.device)
 
         train_edge_indices = {edge_type: train_graph_indices}
         val_edge_indices = {edge_type: train_graph_indices}
         test_target_indices = (
-            train_graph_indices + val_indices
+            torch.cat((train_graph_indices, val_indices))
             if self.include_validation_edges_in_test
             else train_graph_indices
         )
@@ -326,13 +450,13 @@ class RandomLinkSplit(BaseTransform):
             train_reverse_indices = self._reverse_edge_indices(edge_index, reverse_edge_index, train_graph_indices)
             val_reverse_indices = self._reverse_edge_indices(edge_index, reverse_edge_index, val_indices)
             train_val_reverse_indices = (
-                train_reverse_indices + val_reverse_indices
+                torch.cat((train_reverse_indices, val_reverse_indices))
                 if self.include_validation_edges_in_test
                 else train_reverse_indices
             )
             train_edge_indices[self.rev_edge_type] = train_reverse_indices
             val_edge_indices[self.rev_edge_type] = train_reverse_indices
-            test_edge_indices[self.rev_edge_type] = sorted(set(train_val_reverse_indices))
+            test_edge_indices[self.rev_edge_type] = _sorted_unique_tensor(train_val_reverse_indices)
 
         train_graph = _edge_subgraph(graph, train_edge_indices)
         val_graph = _edge_subgraph(graph, val_edge_indices)
@@ -369,11 +493,12 @@ class RandomLinkSplit(BaseTransform):
         generator = None
         if self.seed is not None:
             generator = torch.Generator()
-            generator.manual_seed(int(self.seed) + 1)
-        excluded_edges = self._positive_edge_set(
+            generator.manual_seed(_as_python_int(self.seed) + 1)
+        excluded_edges = self._positive_edge_keys(
             edge_index,
             src_node_type=src_node_type,
             dst_node_type=dst_node_type,
+            num_dst_nodes=num_dst_nodes,
         )
         train_records = self._attach_negative_records(
             graph=train_graph,

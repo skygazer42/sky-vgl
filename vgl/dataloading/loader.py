@@ -9,6 +9,12 @@ from vgl.dataloading.materialize import materialize_batch, materialize_context
 from vgl.dataloading.plan import SamplingPlan
 
 
+def _as_python_int(value) -> int:
+    if isinstance(value, torch.Tensor):
+        return int(value.detach().cpu().numpy().reshape(()).item())
+    return int(value)
+
+
 def _resolve_feature_store(feature_store, graph):
     if feature_store is not None:
         return feature_store
@@ -84,7 +90,7 @@ class Loader:
         self.label_key = label_key
         self.executor = PlanExecutor() if executor is None else executor
         self.feature_store = feature_store
-        self.prefetch = int(prefetch)
+        self.prefetch = _as_python_int(prefetch)
         self.num_workers = num_workers
         self.pin_memory = pin_memory
         self.prefetch_factor = prefetch_factor

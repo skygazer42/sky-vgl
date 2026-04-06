@@ -71,6 +71,11 @@ plugins:
             merge_init_into_class: true
             docstring_style: google
 
+not_in_nav: |
+  plans/*
+  quickstart.md
+  releasing.md
+
 markdown_extensions:
   - abbr
   - admonition

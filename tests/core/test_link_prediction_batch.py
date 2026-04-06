@@ -92,6 +92,41 @@ def test_link_prediction_batch_can_exclude_seed_edges_from_message_passing_graph
     assert torch.equal(batch.dst_index, torch.tensor([1, 0]))
 
 
+def test_link_prediction_batch_excludes_seed_edges_without_tensor_int_conversion(monkeypatch):
+    graph = Graph.homo(
+        edge_index=torch.tensor([[0, 1, 1], [1, 2, 0]]),
+        x=torch.randn(3, 4),
+    )
+
+    def fail_int(self):
+        raise AssertionError("link prediction batching should stay off tensor.__int__")
+
+    monkeypatch.setattr(torch.Tensor, "__int__", fail_int)
+
+    batch = LinkPredictionBatch.from_records(
+        [
+            LinkPredictionRecord(
+                graph=graph,
+                src_index=torch.tensor(0),
+                dst_index=torch.tensor(1),
+                label=torch.tensor(1),
+                metadata={"exclude_seed_edges": True},
+            ),
+            LinkPredictionRecord(
+                graph=graph,
+                src_index=torch.tensor(2),
+                dst_index=torch.tensor(0),
+                label=torch.tensor(0),
+            ),
+        ]
+    )
+
+    assert batch.graph is not graph
+    assert torch.equal(batch.graph.edge_index, torch.tensor([[1, 1], [2, 0]]))
+    assert torch.equal(batch.src_index, torch.tensor([0, 2]))
+    assert torch.equal(batch.dst_index, torch.tensor([1, 0]))
+
+
 def test_link_prediction_batch_tracks_filter_mask():
     graph = _graph()
     batch = LinkPredictionBatch.from_records(

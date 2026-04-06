@@ -10,6 +10,12 @@ EdgeType = tuple[str, str, str]
 _GRAPH_SPARSE_FORMAT_PRIORITY = ("coo", "csr", "csc")
 
 
+def _as_python_int(value) -> int:
+    if isinstance(value, torch.Tensor):
+        return int(value.detach().cpu().numpy().reshape(()).item())
+    return int(value)
+
+
 def _resolve_edge_type(graph: Graph, edge_type=None) -> EdgeType:
     if edge_type is None:
         return graph._default_edge_type()
@@ -170,6 +176,17 @@ def _normalize_node_ids(nodes) -> torch.Tensor:
     return torch.as_tensor(nodes, dtype=torch.long).view(-1)
 
 
+def _sorted_unique_tensor(values) -> torch.Tensor:
+    values = torch.as_tensor(values, dtype=torch.long).view(-1)
+    if values.numel() == 0:
+        return values
+    sorted_values = torch.sort(values, stable=True).values
+    keep = torch.ones(sorted_values.numel(), dtype=torch.bool, device=sorted_values.device)
+    if sorted_values.numel() > 1:
+        keep[1:] = sorted_values[1:] != sorted_values[:-1]
+    return sorted_values[keep]
+
+
 def _normalize_optional_node_ids(nodes) -> tuple[torch.Tensor | None, bool]:
     if nodes is None:
         return None, False
@@ -181,7 +198,7 @@ def _normalize_single_node(node, *, name: str) -> int:
     node_tensor = torch.as_tensor(node, dtype=torch.long)
     if node_tensor.numel() != 1:
         raise ValueError(f"{name} requires a single node id")
-    return int(node_tensor.view(-1)[0])
+    return _as_python_int(node_tensor.view(-1)[0])
 
 
 def _validate_node_ids(graph: Graph, node_type: str, node_ids: torch.Tensor, *, role: str) -> None:
@@ -204,7 +221,7 @@ def _edge_positions_for_endpoint(graph: Graph, edge_type, nodes, *, endpoint: in
     _validate_node_ids(graph, node_type, node_ids, role=role)
     if node_ids.numel() == 0:
         return store, torch.empty(0, dtype=torch.long, device=store.edge_index.device)
-    query_nodes = torch.unique(node_ids.to(device=store.edge_index.device))
+    query_nodes = _sorted_unique_tensor(node_ids.to(device=store.edge_index.device))
     sorted_endpoint_ids, sorted_positions = _endpoint_lookup(store, endpoint=endpoint)
     starts, found = _left_searchsorted_matches(sorted_endpoint_ids, query_nodes)
     if not bool(found.any()):
@@ -422,9 +439,15 @@ def _coalesced_sparse_tensor(
         )
     else:
         keys = row * max(shape[1], 1) + col
-        unique_keys, inverse = torch.unique(keys, sorted=True, return_inverse=True)
+        order = torch.argsort(keys, stable=True)
+        sorted_keys = keys[order]
+        sorted_values = values[order]
+        group_starts = torch.ones(sorted_keys.numel(), dtype=torch.bool, device=row.device)
+        group_starts[1:] = sorted_keys[1:] != sorted_keys[:-1]
+        unique_keys = sorted_keys[group_starts]
+        group_ids = torch.cumsum(group_starts.to(dtype=torch.long), dim=0) - 1
         aggregated = values.new_zeros(unique_keys.numel())
-        aggregated.index_add_(0, inverse, values)
+        aggregated.index_add_(0, group_ids, sorted_values)
         nonzero = aggregated != 0
         unique_keys = unique_keys[nonzero]
         aggregated = aggregated[nonzero]
@@ -461,7 +484,7 @@ def _degrees_for_endpoint(graph: Graph, edge_type, nodes, *, endpoint: int):
         return torch.empty(0, dtype=degrees.dtype, device=degrees.device)
     selected = degrees.index_select(0, node_ids.to(device=degrees.device))
     if scalar_input:
-        return int(selected[0].item())
+        return _as_python_int(selected[0])
     return selected
 
 
@@ -478,7 +501,7 @@ def find_edges(graph: Graph, eids, *, edge_type=None) -> tuple[torch.Tensor, tor
     starts, found = _left_searchsorted_matches(sorted_ids, requested)
     missing = ~found
     if bool(missing.any()):
-        edge_id = int(requested[missing][0].item())
+        edge_id = _as_python_int(requested[missing][0])
         raise ValueError(f"unknown edge id {edge_id}")
 
     position_tensor = sorted_positions[starts]
@@ -501,8 +524,10 @@ def edge_ids(graph: Graph, u, v, *, return_uv: bool = False, edge_type=None):
     starts, found = _left_searchsorted_matches(sorted_pair_keys, query_keys)
     missing = ~found
     if bool(missing.any()):
-        missing_index = int(torch.nonzero(missing, as_tuple=False).view(-1)[0].item())
-        raise ValueError(f"no edge exists between {int(u_ids[missing_index])} and {int(v_ids[missing_index])}")
+        missing_index = _as_python_int(torch.nonzero(missing, as_tuple=False).view(-1)[0])
+        raise ValueError(
+            f"no edge exists between {_as_python_int(u_ids[missing_index])} and {_as_python_int(v_ids[missing_index])}"
+        )
 
     if return_uv:
         ends = torch.searchsorted(sorted_pair_keys, query_keys, right=True)
@@ -530,7 +555,7 @@ def has_edges_between(graph: Graph, u, v, *, edge_type=None):
     query_keys = u_ids.to(device=store.edge_index.device) * stride + v_ids.to(device=store.edge_index.device)
     _, exists = _left_searchsorted_matches(sorted_pair_keys, query_keys)
     if scalar_input:
-        return bool(exists[0].item())
+        return bool(exists[0])
     return exists.to(dtype=torch.bool, device=store.edge_index.device)
 
 
@@ -826,10 +851,11 @@ def inc(graph: Graph, typestr: str = "both", *, layout="coo", edge_type=None):
     keep = ordered[0] != ordered[1]
     rows = torch.cat((ordered[0, keep], ordered[1, keep]))
     cols = torch.cat((edge_columns[keep], edge_columns[keep]))
+    kept_count = _as_python_int(keep.sum())
     values = torch.cat(
         (
-            -torch.ones(int(keep.sum().item()), dtype=torch.float32, device=store.edge_index.device),
-            torch.ones(int(keep.sum().item()), dtype=torch.float32, device=store.edge_index.device),
+            -torch.ones(kept_count, dtype=torch.float32, device=store.edge_index.device),
+            torch.ones(kept_count, dtype=torch.float32, device=store.edge_index.device),
         )
     )
     return from_edge_index(

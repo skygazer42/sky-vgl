@@ -71,3 +71,30 @@ def test_loader_prefetch_is_bounded_before_first_yield():
 
     assert torch.equal(first_batch.labels, torch.tensor([1, 0]))
     assert sampler.calls == ["a", "b", "c"]
+
+
+def test_loader_prefetch_accepts_tensor_scalar_without_tensor_int(monkeypatch):
+    dataset = ListDataset([
+        _sample("a", 1),
+        _sample("b", 0),
+        _sample("c", 1),
+        _sample("d", 0),
+    ])
+
+    def fail_int(self):
+        raise AssertionError("Loader prefetch should stay off tensor.__int__")
+
+    monkeypatch.setattr(torch.Tensor, "__int__", fail_int)
+
+    loader = Loader(
+        dataset=dataset,
+        sampler=FullGraphSampler(),
+        batch_size=2,
+        label_source="metadata",
+        label_key="label",
+        prefetch=torch.tensor(1),
+    )
+
+    labels = [batch.labels.tolist() for batch in loader]
+
+    assert labels == [[1, 0], [1, 0]]

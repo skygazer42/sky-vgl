@@ -91,9 +91,10 @@ def to_networkx(graph: Graph):
             if isinstance(value, torch.Tensor) and value.ndim > 0 and value.size(0) == num_nodes:
                 nx_graph.nodes[node_id][key] = value[node_id].detach().clone()
 
-    for edge_id in range(edge_count):
-        src = int(edge_index[0, edge_id])
-        dst = int(edge_index[1, edge_id])
+    edge_rows = edge_index.t().detach().cpu().numpy()
+    for edge_id, (src_index, dst_index) in enumerate(edge_rows):
+        src = int(src_index)
+        dst = int(dst_index)
         edge_attrs = {}
         for key, value in edge_store.items():
             if key == "edge_index":

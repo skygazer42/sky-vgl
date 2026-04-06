@@ -5,6 +5,7 @@ import pytest
 import torch
 
 from vgl import Graph
+from vgl.compat.dgl import _node_count
 from vgl.graph import Block, GraphSchema, HeteroBlock
 from vgl.storage import FeatureStore, InMemoryGraphStore, InMemoryTensorStore
 
@@ -49,6 +50,52 @@ class FakeDGLGraph:
 
     def num_nodes(self):
         return self._num_nodes
+
+
+def test_dgl_node_count_fallback_avoids_tensor_item(monkeypatch):
+    class MissingNodeCountGraph:
+        def __init__(self):
+            self.edges = {
+                ("author", "writes", "paper"): types.SimpleNamespace(
+                    edge_index=torch.tensor([[0, 1], [1, 2]])
+                ),
+                ("paper", "cites", "paper"): types.SimpleNamespace(
+                    edge_index=torch.tensor([[0, 2], [2, 3]])
+                ),
+            }
+
+        def _node_count(self, node_type):
+            raise ValueError("missing explicit node count")
+
+    def fail_item(self):
+        raise AssertionError("DGL node count fallback should stay off tensor.item")
+
+    monkeypatch.setattr(torch.Tensor, "item", fail_item)
+
+    assert _node_count(MissingNodeCountGraph(), "paper") == 4
+
+
+def test_dgl_node_count_fallback_avoids_tensor_int(monkeypatch):
+    class MissingNodeCountGraph:
+        def __init__(self):
+            self.edges = {
+                ("author", "writes", "paper"): types.SimpleNamespace(
+                    edge_index=torch.tensor([[0, 1], [1, 2]])
+                ),
+                ("paper", "cites", "paper"): types.SimpleNamespace(
+                    edge_index=torch.tensor([[0, 2], [2, 3]])
+                ),
+            }
+
+        def _node_count(self, node_type):
+            raise ValueError("missing explicit node count")
+
+    def fail_int(self):
+        raise AssertionError("DGL node count fallback should stay off tensor.__int__")
+
+    monkeypatch.setattr(torch.Tensor, "__int__", fail_int)
+
+    assert _node_count(MissingNodeCountGraph(), "paper") == 4
 
 
 class FakeDGLBlockNodeAccessor:
@@ -363,6 +410,25 @@ def test_from_dgl_preserves_homo_num_nodes_without_node_features(monkeypatch):
     assert restored.num_nodes() == 4
 
 
+def test_from_dgl_avoids_tensor_int_when_num_nodes_returns_tensor(monkeypatch):
+    dgl_module = _install_fake_dgl(monkeypatch)
+
+    dgl_graph = dgl_module.graph(
+        (torch.tensor([0, 1]), torch.tensor([1, 0])),
+        num_nodes=4,
+    )
+    dgl_graph.num_nodes = lambda node_type=None: torch.tensor(4)
+
+    def fail_int(self):
+        raise AssertionError("Graph.from_dgl should stay off tensor.__int__ for node counts")
+
+    monkeypatch.setattr(torch.Tensor, "__int__", fail_int)
+
+    graph = Graph.from_dgl(dgl_graph)
+
+    assert torch.equal(graph.ndata['n_id'], torch.tensor([0, 1, 2, 3]))
+
+
 
 def test_from_dgl_preserves_hetero_num_nodes_without_node_features(monkeypatch):
     dgl_module = _install_fake_dgl(monkeypatch)
@@ -558,6 +624,29 @@ def test_from_dgl_imports_external_single_relation_block(monkeypatch):
     assert torch.equal(block.edata['e_id'], torch.tensor([40, 41, 42]))
     assert torch.equal(block.edata['weight'], torch.tensor([0.5, 0.6, 0.7]))
     assert torch.equal(block.edge_index, torch.tensor([[2, 0, 1], [0, 1, 0]]))
+
+
+def test_block_from_dgl_avoids_tensor_int_when_num_nodes_returns_tensor(monkeypatch):
+    dgl_module = _install_fake_dgl(monkeypatch)
+
+    follows = ('user', 'follows', 'user')
+    dgl_block = dgl_module.create_block(
+        {follows: (torch.tensor([2, 0, 1]), torch.tensor([0, 1, 0]))},
+        num_src_nodes={'user': 3},
+        num_dst_nodes={'user': 2},
+    )
+    dgl_block.num_src_nodes = lambda node_type=None: torch.tensor(3)
+    dgl_block.num_dst_nodes = lambda node_type=None: torch.tensor(2)
+
+    def fail_int(self):
+        raise AssertionError("Block.from_dgl should stay off tensor.__int__ for node counts")
+
+    monkeypatch.setattr(torch.Tensor, "__int__", fail_int)
+
+    block = Block.from_dgl(dgl_block)
+
+    assert torch.equal(block.src_n_id, torch.tensor([0, 1, 2]))
+    assert torch.equal(block.dst_n_id, torch.tensor([0, 1]))
 
 
 

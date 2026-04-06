@@ -932,7 +932,7 @@ class Trainer:
             metric.update(metric_predictions.detach(), targets.detach(), batch=batch)
         for metric in extra_metrics or []:
             metric.update(metric_predictions.detach(), targets.detach(), batch=batch)
-        return loss.detach().item() * count, count
+        return float(loss.detach()) * count, count
 
     def _backward_loss(self, loss):
         backward_start_time = perf_counter()
