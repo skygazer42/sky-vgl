@@ -32,6 +32,14 @@ def test_full_scan_catalog_contains_unique_tasks():
     assert "Makefile includes release artifact interop smoke target" in descriptions
     assert "interop workflow builds artifacts" in descriptions
     assert "interop workflow runs all-backend release artifact smoke" in descriptions
+    assert "releasing doc mentions package-check release gate" in descriptions
+    assert "releasing doc mentions publish build release gate" in descriptions
+    assert "releasing doc mentions release gate interop extras install" in descriptions
+    assert "releasing doc mentions all-backend release artifact smoke gate" in descriptions
+    assert "CI installs release interop extras for artifact smoke" in descriptions
+    assert "CI runs all-backend release artifact smoke" in descriptions
+    assert "publish build installs release interop extras for artifact smoke" in descriptions
+    assert "publish build runs all-backend release artifact smoke" in descriptions
 
 
 def test_full_scan_lists_every_task():

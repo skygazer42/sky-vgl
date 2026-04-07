@@ -76,6 +76,16 @@ def test_manual_interop_workflow_covers_pyg_and_dgl():
     assert "python scripts/release_smoke.py --artifact-dir dist --kind wheel --interop-backend all" in workflow_text
 
 
+def test_ci_and_publish_build_jobs_gate_all_backend_artifact_interop():
+    ci_text = (REPO_ROOT / ".github" / "workflows" / "ci.yml").read_text(encoding="utf-8")
+    publish_text = (REPO_ROOT / ".github" / "workflows" / "publish.yml").read_text(encoding="utf-8")
+
+    assert 'python -m pip install -e ".[pyg,dgl]"' in ci_text
+    assert "python scripts/release_smoke.py --artifact-dir dist --kind all --interop-backend all" in ci_text
+    assert 'python -m pip install -e ".[pyg,dgl]"' in publish_text
+    assert "python scripts/release_smoke.py --artifact-dir dist --kind all --interop-backend all" in publish_text
+
+
 def test_makefile_exposes_interop_smoke_target():
     makefile_text = (REPO_ROOT / "Makefile").read_text(encoding="utf-8")
 

@@ -509,6 +509,38 @@ def build_tasks(repo_root: Path) -> list[ScanTask]:
                 "docs/releasing.md",
                 "PYPI_API_TOKEN",
             ),
+            _text_contains_task(
+                ctx,
+                "055a",
+                "docs",
+                "releasing doc mentions package-check release gate",
+                "docs/releasing.md",
+                "package-check",
+            ),
+            _text_contains_task(
+                ctx,
+                "055b",
+                "docs",
+                "releasing doc mentions publish build release gate",
+                "docs/releasing.md",
+                "publish `build` job",
+            ),
+            _text_contains_task(
+                ctx,
+                "055c",
+                "docs",
+                "releasing doc mentions release gate interop extras install",
+                "docs/releasing.md",
+                'python -m pip install -e ".[pyg,dgl]"',
+            ),
+            _text_contains_task(
+                ctx,
+                "055d",
+                "docs",
+                "releasing doc mentions all-backend release artifact smoke gate",
+                "docs/releasing.md",
+                "python scripts/release_smoke.py --artifact-dir dist --kind all --interop-backend all",
+            ),
         ]
     )
 
@@ -524,6 +556,22 @@ def build_tasks(repo_root: Path) -> list[ScanTask]:
             _text_contains_task(ctx, "063", "ci", "CI runs python -m build", ".github/workflows/ci.yml", "python -m build"),
             _text_contains_task(ctx, "064", "ci", "CI runs python -m twine check", ".github/workflows/ci.yml", "python -m twine check"),
             _text_contains_task(ctx, "065", "ci", "CI runs full_scan.py", ".github/workflows/ci.yml", "python scripts/full_scan.py"),
+            _text_contains_task(
+                ctx,
+                "065a",
+                "ci",
+                "CI installs release interop extras for artifact smoke",
+                ".github/workflows/ci.yml",
+                'python -m pip install -e ".[pyg,dgl]"',
+            ),
+            _text_contains_task(
+                ctx,
+                "065b",
+                "ci",
+                "CI runs all-backend release artifact smoke",
+                ".github/workflows/ci.yml",
+                "python scripts/release_smoke.py --artifact-dir dist --kind all --interop-backend all",
+            ),
         ]
     )
 
@@ -594,6 +642,22 @@ def build_tasks(repo_root: Path) -> list[ScanTask]:
                 "publish uploads built distributions as artifacts",
                 ".github/workflows/publish.yml",
                 "actions/upload-artifact@v4",
+            ),
+            _text_contains_task(
+                ctx,
+                "075a",
+                "publish",
+                "publish build installs release interop extras for artifact smoke",
+                ".github/workflows/publish.yml",
+                'python -m pip install -e ".[pyg,dgl]"',
+            ),
+            _text_contains_task(
+                ctx,
+                "075b",
+                "publish",
+                "publish build runs all-backend release artifact smoke",
+                ".github/workflows/publish.yml",
+                "python scripts/release_smoke.py --artifact-dir dist --kind all --interop-backend all",
             ),
         ]
     )

@@ -177,3 +177,7 @@ jobs:
         run: python -m twine check dist/*.whl dist/*.tar.gz
       - name: Smoke-test built distributions
         run: python scripts/release_smoke.py --artifact-dir dist --kind all
+      - name: Install release interop extras
+        run: python -m pip install -e ".[pyg,dgl]"
+      - name: Smoke-test built distributions with all interop backends
+        run: python scripts/release_smoke.py --artifact-dir dist --kind all --interop-backend all

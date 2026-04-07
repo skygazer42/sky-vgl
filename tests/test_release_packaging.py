@@ -184,6 +184,8 @@ def test_release_workflows_exist_for_ci_and_pypi_publish():
     assert "python scripts/docs_link_scan.py" in ci_text
     assert "python scripts/release_contract_scan.py --artifact-dir dist" in ci_text
     assert "python scripts/release_smoke.py --artifact-dir dist --kind all" in ci_text
+    assert 'python -m pip install -e ".[pyg,dgl]"' in ci_text
+    assert "python scripts/release_smoke.py --artifact-dir dist --kind all --interop-backend all" in ci_text
     assert "python scripts/metadata_consistency.py" in (REPO_ROOT / "docs" / "releasing.md").read_text(encoding="utf-8")
     assert "tags:" in publish_text
     assert "v*" in publish_text
@@ -197,6 +199,8 @@ def test_release_workflows_exist_for_ci_and_pypi_publish():
     assert "needs.probe-publish-auth.outputs.has_test_pypi_api_token" in publish_text
     assert "GITHUB_OUTPUT" in publish_text
     assert "python scripts/release_smoke.py --artifact-dir dist --kind all" in publish_text
+    assert 'python -m pip install -e ".[pyg,dgl]"' in publish_text
+    assert "python scripts/release_smoke.py --artifact-dir dist --kind all --interop-backend all" in publish_text
     assert "Publish to PyPI with API token" in publish_text
     assert "Publish to PyPI with Trusted Publishing" in publish_text
     assert "Publish to TestPyPI with API token" in publish_text
@@ -490,6 +494,10 @@ def test_release_readme_documents_public_install_paths():
     assert "both host backends" in releasing
     assert "fail early" in releasing
     assert "hermetic fake-backend success paths" in releasing
+    assert "package-check" in releasing
+    assert "publish `build` job" in releasing
+    assert 'python -m pip install -e ".[pyg,dgl]"' in releasing
+    assert "python scripts/release_smoke.py --artifact-dir dist --kind all --interop-backend all" in releasing
     assert "python scripts/release_smoke.py --artifact-dir dist --kind all" in releasing
     assert "python scripts/release_smoke.py --artifact-dir dist --kind wheel --interop-backend dgl" in releasing
     assert "python scripts/release_smoke.py --artifact-dir dist --kind wheel --interop-backend all" in releasing
