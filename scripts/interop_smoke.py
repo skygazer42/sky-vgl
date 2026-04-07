@@ -3,31 +3,20 @@
 from __future__ import annotations
 
 import argparse
-from pathlib import Path
-import sys
+import importlib
 from typing import Sequence
 
 
-if not __package__:
-    repo_root = Path(__file__).resolve().parent.parent
-    repo_root_str = str(repo_root)
-    if repo_root_str in sys.path:
-        sys.path.remove(repo_root_str)
-    sys.path.insert(0, repo_root_str)
+try:
+    repo_script_imports = importlib.import_module("scripts.repo_script_imports")
+except ModuleNotFoundError:
+    repo_script_imports = importlib.import_module("repo_script_imports")
 
-from scripts.repo_script_imports import load_repo_module
+ensure_repo_root_on_path = repo_script_imports.ensure_repo_root_on_path
+load_repo_module = repo_script_imports.load_repo_module
 
 
 REAL_INTEROP_BACKENDS = load_repo_module("scripts.contracts").REAL_INTEROP_BACKENDS
-
-
-def _ensure_repo_root_on_path() -> Path:
-    repo_root = Path(__file__).resolve().parents[1]
-    repo_root_str = str(repo_root)
-    if repo_root_str not in sys.path:
-        sys.path.insert(0, repo_root_str)
-    return repo_root
-
 
 def _parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(
@@ -52,7 +41,7 @@ def list_backends() -> tuple[str, ...]:
 
 
 def build_smoke_graph():
-    _ensure_repo_root_on_path()
+    ensure_repo_root_on_path()
     import torch
     from vgl import Graph
 
@@ -74,7 +63,7 @@ def _assert_round_trip(original, restored) -> None:
 
 
 def _smoke_pyg(graph=None) -> None:
-    _ensure_repo_root_on_path()
+    ensure_repo_root_on_path()
     import torch
     from vgl import Graph
     from vgl.compat import from_pyg, to_pyg
@@ -92,7 +81,7 @@ def _smoke_pyg(graph=None) -> None:
 
 
 def _smoke_dgl(graph=None) -> None:
-    _ensure_repo_root_on_path()
+    ensure_repo_root_on_path()
     import torch
     from vgl import Graph
     from vgl.compat import from_dgl, to_dgl

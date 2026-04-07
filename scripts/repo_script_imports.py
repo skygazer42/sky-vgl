@@ -6,6 +6,14 @@ import sys
 
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
+TOP_LEVEL_MODULE_NAME = "repo_script_imports"
+PACKAGE_MODULE_NAME = "scripts.repo_script_imports"
+
+
+if __name__ == TOP_LEVEL_MODULE_NAME:
+    sys.modules.setdefault(PACKAGE_MODULE_NAME, sys.modules[__name__])
+elif __name__ == PACKAGE_MODULE_NAME:
+    sys.modules.setdefault(TOP_LEVEL_MODULE_NAME, sys.modules[__name__])
 
 
 def ensure_repo_root_on_path() -> Path:
