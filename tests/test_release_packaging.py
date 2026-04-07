@@ -1,5 +1,4 @@
 import email
-import importlib.machinery
 import importlib.util
 import subprocess
 import sys
@@ -34,8 +33,18 @@ def _load_release_smoke_module():
 
 def _artifact_smoke_backend_available(name: str) -> bool:
     release_smoke = _load_release_smoke_module()
-    search_paths = [str(path) for path in release_smoke._outer_site_packages()]
-    return importlib.machinery.PathFinder.find_spec(name, search_paths) is not None
+    bootstrap = "".join(
+        f"site.addsitedir({str(path)!r})\n" for path in release_smoke._outer_site_packages()
+    )
+    script = "import site\n" + bootstrap + f"import {name}\n"
+    completed = subprocess.run(
+        [sys.executable, "-c", script],
+        cwd=REPO_ROOT,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    return completed.returncode == 0
 
 
 def _build_release_artifacts(tmp_path_factory):
