@@ -4,6 +4,8 @@ import sys
 import textwrap
 from pathlib import Path
 
+from scripts.workflow_contracts import workflow_job_contains_text
+
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 SCAN_SCRIPT = REPO_ROOT / "scripts" / "full_scan.py"
@@ -103,6 +105,12 @@ def test_scan_context_workflow_job_contains_anchors_to_jobs_section(tmp_path):
     )
     assert ctx.workflow_job_contains("workflow.yml", "build", "SHOULD_NOT_BE_CAPTURED")[0] is False
     assert ctx.workflow_job_contains("workflow.yml", "build", "concurrency:")[0] is False
+
+
+def test_full_scan_reuses_shared_workflow_job_helper():
+    scan = _load_scan_module()
+
+    assert scan.workflow_job_contains_text is workflow_job_contains_text
 
 
 def test_ci_workflow_runs_the_full_scan_script():

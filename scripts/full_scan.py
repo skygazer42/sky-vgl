@@ -8,6 +8,11 @@ from pathlib import Path
 from typing import Callable
 
 try:
+    from workflow_contracts import workflow_job_contains_text
+except ModuleNotFoundError:
+    from scripts.workflow_contracts import workflow_job_contains_text
+
+try:
     import tomllib  # type: ignore[attr-defined]
 except ModuleNotFoundError:  # pragma: no cover - Python 3.10 fallback
     import tomli as tomllib  # type: ignore[no-redef]
@@ -35,7 +40,6 @@ class ScanContext:
     def __init__(self, repo_root: Path):
         self.repo_root = Path(repo_root).resolve()
         self._text_cache: dict[Path, str] = {}
-        self._workflow_job_cache: dict[tuple[Path, str], str] = {}
         self._pyproject_cache: dict | None = None
 
     def resolve(self, relative_path: str) -> Path:
@@ -54,11 +58,12 @@ class ScanContext:
         return snippet in text, f"{relative_path} contains {snippet!r}"
 
     def workflow_job_contains(self, relative_path: str, job_name: str, snippet: str) -> tuple[bool, str]:
-        try:
-            text = self.workflow_job_text(relative_path, job_name)
-        except KeyError as exc:
-            return False, str(exc)
-        return snippet in text, f"{relative_path} job {job_name!r} contains {snippet!r}"
+        return workflow_job_contains_text(
+            self._read_text(relative_path),
+            job_name,
+            snippet,
+            source=relative_path,
+        )
 
     def pyproject_value(self, *keys: str) -> object:
         payload: object = self._load_pyproject()
@@ -74,54 +79,6 @@ class ScanContext:
         if cached is None:
             cached = path.read_text(encoding="utf-8")
             self._text_cache[path] = cached
-        return cached
-
-    def workflow_job_text(self, relative_path: str, job_name: str) -> str:
-        path = self.resolve(relative_path)
-        cache_key = (path, job_name)
-        cached = self._workflow_job_cache.get(cache_key)
-        if cached is not None:
-            return cached
-
-        lines = self._read_text(relative_path).splitlines()
-        jobs_start = None
-        jobs_end = len(lines)
-
-        for index, line in enumerate(lines):
-            if line == "jobs:":
-                jobs_start = index + 1
-                break
-
-        if jobs_start is None:
-            raise KeyError(f"{relative_path} missing 'jobs:' section")
-
-        for index in range(jobs_start, len(lines)):
-            line = lines[index]
-            if line and not line.startswith((" ", "#")):
-                jobs_end = index
-                break
-
-        header = f"  {job_name}:"
-
-        start = None
-        for index in range(jobs_start, jobs_end):
-            line = lines[index]
-            if line == header:
-                start = index
-                break
-
-        if start is None:
-            raise KeyError(f"{relative_path} missing workflow job {job_name!r}")
-
-        end = jobs_end
-        for index in range(start + 1, jobs_end):
-            line = lines[index]
-            if line.startswith("  ") and not line.startswith("    ") and line.rstrip().endswith(":"):
-                end = index
-                break
-
-        cached = "\n".join(lines[start:end]) + "\n"
-        self._workflow_job_cache[cache_key] = cached
         return cached
 
     def _load_pyproject(self) -> dict:

@@ -5,7 +5,7 @@ import sys
 import textwrap
 from pathlib import Path
 
-from tests.workflow_helpers import workflow_job_text
+from scripts.workflow_contracts import workflow_job_text
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 
@@ -86,6 +86,10 @@ def test_ci_and_publish_build_jobs_gate_all_backend_artifact_interop():
     assert "python scripts/release_smoke.py --artifact-dir dist --kind all --interop-backend all" in ci_job
     assert 'python -m pip install -e ".[pyg,dgl]"' in publish_job
     assert "python scripts/release_smoke.py --artifact-dir dist --kind all --interop-backend all" in publish_job
+
+
+def test_workflow_job_helper_comes_from_shared_scripts_module():
+    assert workflow_job_text.__module__ == "scripts.workflow_contracts"
 
 
 def test_workflow_job_text_anchors_to_jobs_section(tmp_path):

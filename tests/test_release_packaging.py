@@ -10,6 +10,7 @@ from pathlib import Path
 
 import pytest
 
+from scripts.workflow_contracts import workflow_job_text
 from scripts.contracts import (
     DOCS_INDEX_VERSION_BADGE,
     PROJECT_NAME,
@@ -18,7 +19,6 @@ from scripts.contracts import (
     RELEASE_VERSION,
     WHEEL_IMPORT_SYMBOLS,
 )
-from tests.workflow_helpers import workflow_job_text
 
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
