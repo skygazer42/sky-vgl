@@ -17,6 +17,11 @@ def _job_header_pattern(job_name: str) -> re.Pattern[str]:
     return re.compile(rf"^  (?! )(?:\"{escaped}\"|'{escaped}'|{escaped}):\s*(?:#.*)?$")
 
 
+def _step_header_pattern(step_name: str) -> re.Pattern[str]:
+    escaped = re.escape(step_name)
+    return re.compile(rf"^      - name:\s*(?:\"{escaped}\"|'{escaped}'|{escaped})\s*(?:#.*)?$")
+
+
 def workflow_job_text_from_text(text: str, job_name: str, *, source: str = "workflow") -> str:
     lines = text.splitlines()
     jobs_start = None
@@ -84,11 +89,11 @@ def workflow_step_text_from_text(
     source: str = "workflow",
 ) -> str:
     lines = workflow_job_text_from_text(text, job_name, source=source).splitlines()
-    header = f"      - name: {step_name}"
+    header = _step_header_pattern(step_name)
 
     start = None
     for index, line in enumerate(lines):
-        if line == header:
+        if header.match(line):
             start = index
             break
 
@@ -127,3 +132,18 @@ def workflow_step_contains_text(
     except KeyError as exc:
         return False, str(exc)
     return snippet in step_text, f"{source} job {job_name!r} step {step_name!r} contains {snippet!r}"
+
+
+def workflow_step_lacks_text(
+    text: str,
+    job_name: str,
+    step_name: str,
+    snippet: str,
+    *,
+    source: str = "workflow",
+) -> tuple[bool, str]:
+    try:
+        step_text = workflow_step_text_from_text(text, job_name, step_name, source=source)
+    except KeyError as exc:
+        return False, str(exc)
+    return snippet not in step_text, f"{source} job {job_name!r} step {step_name!r} does not contain {snippet!r}"

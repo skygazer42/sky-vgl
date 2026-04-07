@@ -199,6 +199,60 @@ def test_workflow_step_text_isolates_single_named_step(tmp_path):
     assert "interop-backend all" not in step_text
 
 
+def test_workflow_step_text_tolerates_quoted_names_and_inline_comments(tmp_path):
+    workflow_path = tmp_path / "workflow.yml"
+    workflow_path.write_text(
+        textwrap.dedent(
+            """
+            name: demo
+
+            jobs:  # step parsing should tolerate comments
+              "build":  # quoted job key
+                runs-on: ubuntu-latest
+                steps:
+                  - name: "Install release interop extras"   # quoted step name
+                    run: python scripts/install_release_extras.py --artifact-dir dist --extras pyg dgl
+                  - name: "Smoke-test built distributions with all interop backends"
+                    run: python scripts/release_smoke.py --artifact-dir dist --kind all --interop-backend all
+            """
+        ).strip()
+        + "\n",
+        encoding="utf-8",
+    )
+
+    step_text = workflow_step_text(workflow_path, "build", "Install release interop extras")
+
+    assert "install_release_extras.py" in step_text
+    assert "interop-backend all" not in step_text
+
+
+def test_workflow_step_text_tolerates_quoted_names_comments_and_trailing_spaces(tmp_path):
+    workflow_path = tmp_path / "workflow.yml"
+    workflow_path.write_text(
+        textwrap.dedent(
+            """
+            name: demo
+
+            jobs:
+              build:
+                runs-on: ubuntu-latest
+                steps:
+                  - name: "Install release interop extras"  # quoted with comment
+                    run: python scripts/install_release_extras.py --artifact-dir dist --extras pyg dgl
+                  - name: 'Smoke-test built distributions with all interop backends'   
+                    run: python scripts/release_smoke.py --artifact-dir dist --kind all --interop-backend all
+            """
+        ).strip()
+        + "\n",
+        encoding="utf-8",
+    )
+
+    step_text = workflow_step_text(workflow_path, "build", "Install release interop extras")
+
+    assert "install_release_extras.py" in step_text
+    assert "interop-backend all" not in step_text
+
+
 def test_makefile_exposes_interop_smoke_target():
     makefile_text = (REPO_ROOT / "Makefile").read_text(encoding="utf-8")
 

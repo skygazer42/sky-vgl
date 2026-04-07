@@ -167,6 +167,62 @@ def test_full_scan_release_gate_tasks_reject_editable_ci_install_step(tmp_path):
     assert tasks["065c"].check()[0] is False
 
 
+def test_full_scan_release_gate_negative_task_fails_when_named_install_step_is_missing(tmp_path):
+    scan = _load_scan_module()
+    workflow_path = tmp_path / ".github" / "workflows" / "ci.yml"
+    workflow_path.parent.mkdir(parents=True)
+    workflow_path.write_text(
+        textwrap.dedent(
+            """
+            name: ci
+
+            jobs:
+              package-check:
+                runs-on: ubuntu-latest
+                steps:
+                  - name: Prepare release interop extras
+                    run: python -m pip install -e ".[pyg,dgl]"
+                  - name: Smoke-test built distributions with all interop backends
+                    run: python scripts/release_smoke.py --artifact-dir dist --kind all --interop-backend all
+            """
+        ).strip()
+        + "\n",
+        encoding="utf-8",
+    )
+
+    tasks = {task.id: task for task in scan.build_tasks(tmp_path)}
+
+    assert tasks["065c"].check()[0] is False
+
+
+def test_full_scan_release_gate_negative_step_checks_fail_when_step_is_missing(tmp_path):
+    scan = _load_scan_module()
+    workflow_path = tmp_path / ".github" / "workflows" / "ci.yml"
+    workflow_path.parent.mkdir(parents=True)
+    workflow_path.write_text(
+        textwrap.dedent(
+            """
+            name: ci
+
+            jobs:
+              package-check:
+                runs-on: ubuntu-latest
+                steps:
+                  - name: Build distributions
+                    run: python -m build
+                  - name: Smoke-test built distributions with all interop backends
+                    run: python scripts/release_smoke.py --artifact-dir dist --kind all --interop-backend all
+            """
+        ).strip()
+        + "\n",
+        encoding="utf-8",
+    )
+
+    tasks = {task.id: task for task in scan.build_tasks(tmp_path)}
+
+    assert tasks["065c"].check()[0] is False
+
+
 def test_full_scan_reuses_shared_workflow_job_helper():
     scan = _load_scan_module()
 

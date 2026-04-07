@@ -30,6 +30,7 @@ def _load_workflow_contracts_module():
 workflow_contracts = _load_workflow_contracts_module()
 workflow_job_contains_text = workflow_contracts.workflow_job_contains_text
 workflow_step_contains_text = workflow_contracts.workflow_step_contains_text
+workflow_step_lacks_text = workflow_contracts.workflow_step_lacks_text
 
 
 @dataclass(frozen=True)
@@ -84,6 +85,21 @@ class ScanContext:
         snippet: str,
     ) -> tuple[bool, str]:
         return workflow_step_contains_text(
+            self._read_text(relative_path),
+            job_name,
+            step_name,
+            snippet,
+            source=relative_path,
+        )
+
+    def workflow_step_lacks(
+        self,
+        relative_path: str,
+        job_name: str,
+        step_name: str,
+        snippet: str,
+    ) -> tuple[bool, str]:
+        return workflow_step_lacks_text(
             self._read_text(relative_path),
             job_name,
             step_name,
@@ -187,8 +203,7 @@ def _workflow_step_lacks_task(
     snippet: str,
 ) -> ScanTask:
     def check() -> tuple[bool, str]:
-        contains, details = ctx.workflow_step_contains(relative_path, job_name, step_name, snippet)
-        return not contains, f"{details} is absent"
+        return ctx.workflow_step_lacks(relative_path, job_name, step_name, snippet)
 
     return ScanTask(task_id, category, description, check)
 
