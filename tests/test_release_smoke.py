@@ -1,4 +1,5 @@
 import importlib.util
+import os
 import sys
 from pathlib import Path
 
@@ -130,3 +131,38 @@ def test_preflight_succeeds_when_all_backends_present(monkeypatch):
         release_smoke._selected_interop_backends("all"),
         dependency_paths=[],
     )
+
+
+def test_extra_dependency_paths_from_env_parses(tmp_path, monkeypatch):
+    release_smoke = _load_release_smoke_module()
+
+    extra_dirs = [tmp_path / "extra_a", tmp_path / "extra_b"]
+    for path in extra_dirs:
+        path.mkdir()
+    monkeypatch.setenv("RELEASE_INTEROP_EXTRA_SITE_DIRS", os.pathsep.join(str(path) for path in extra_dirs))
+
+    assert release_smoke._extra_dependency_paths_from_env() == extra_dirs
+
+
+def test_resolved_dependency_paths_prefers_override(monkeypatch, tmp_path):
+    release_smoke = _load_release_smoke_module()
+    override_dir = tmp_path / "aggregated"
+    override_dir.mkdir()
+    monkeypatch.setenv("RELEASE_INTEROP_EXTRA_SITE_DIRS", str(override_dir))
+
+    outer_paths = [Path("/outer/one"), Path("/outer/two")]
+    monkeypatch.setattr(release_smoke, "_outer_site_packages", lambda: outer_paths)
+
+    resolved = release_smoke._resolved_dependency_paths()
+
+    assert resolved[0] == override_dir
+    assert resolved[1:] == outer_paths
+
+
+def test_resolved_dependency_paths_defaults_to_outer(monkeypatch):
+    release_smoke = _load_release_smoke_module()
+    outer_paths = [Path("/outer/three")]
+    monkeypatch.setattr(release_smoke, "_outer_site_packages", lambda: outer_paths)
+    monkeypatch.delenv("RELEASE_INTEROP_EXTRA_SITE_DIRS", raising=False)
+
+    assert release_smoke._resolved_dependency_paths() == outer_paths

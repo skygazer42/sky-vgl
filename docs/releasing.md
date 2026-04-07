@@ -91,9 +91,10 @@ when present and falls back to Trusted Publishing otherwise.
 
 1. Install from PyPI in a clean environment.
 2. Import `vgl` and the golden-path public imports.
-3. If the release touched interop adapters, rerun `python scripts/interop_smoke.py --backend dgl` and/or `python scripts/interop_smoke.py --backend pyg` for the extras you have installed. Use `--backend all` only when both extras are present; the host-assisted release smoke script will abort early when either backend is missing. For artifact-level validation, also run `python scripts/release_smoke.py --artifact-dir dist --kind wheel --interop-backend dgl` (or `pyg`). Ensure the extras are importable from the host environment before invoking `--interop-backend all`.
-4. Verify the PyPI project page links for Homepage, Repository, Documentation, and Issues.
-5. Check that the tagged source and published package versions match.
-6. Confirm `refs/tags/vX.Y.Z` matches `vgl.__version__ == "X.Y.Z"` and that README/docs no longer show stale hard-coded version badges.
+3. If the release touched interop adapters, rerun `python scripts/interop_smoke.py --backend dgl` and/or `python scripts/interop_smoke.py --backend pyg` for the extras you have installed. Use `--backend all` only when both extras are present; the host-assisted release smoke script will abort early when either backend is missing. Artifact interop smoke defaults to host-assisted dependency discovery, so `python scripts/release_smoke.py --artifact-dir dist --kind wheel --interop-backend dgl` (or `pyg`) expects those extras to remain importable from the host environment before invoking `--interop-backend all`.
+4. Packaging tests also cover hermetic fake-backend success paths so CI can validate `--interop-backend pyg` and `--interop-backend all` without requiring real host PyG or DGL installs.
+5. Verify the PyPI project page links for Homepage, Repository, Documentation, and Issues.
+6. Check that the tagged source and published package versions match.
+7. Confirm `refs/tags/vX.Y.Z` matches `vgl.__version__ == "X.Y.Z"` and that README/docs no longer show stale hard-coded version badges.
 
 The published distribution name is `sky-vgl`, but the Python import surface remains `vgl`.

@@ -1,8 +1,10 @@
 import email
 import importlib.util
+import os
 import subprocess
 import sys
 import tarfile
+import textwrap
 import zipfile
 from pathlib import Path
 
@@ -19,6 +21,7 @@ from scripts.contracts import (
 
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
+RELEASE_SMOKE_EXTRA_SITE_DIRS_ENV = "RELEASE_INTEROP_EXTRA_SITE_DIRS"
 
 
 def _load_release_smoke_module():
@@ -57,6 +60,50 @@ def _build_release_artifacts(tmp_path_factory):
     wheel_path = next(output_dir.glob("*.whl"))
     sdist_path = next(output_dir.glob("*.tar.gz"))
     return wheel_path, sdist_path
+
+
+def _fake_interop_packages_dir(tmp_path: Path) -> Path:
+    package_root = tmp_path / "fake_packages"
+    fake_packages = {
+        "torch_geometric/__init__.py": "from . import data\n",
+        "torch_geometric/data.py": """
+class Data:
+    def __init__(self, **kwargs):
+        for key, value in kwargs.items():
+            setattr(self, key, value)
+""",
+        "dgl.py": """
+import torch
+
+NID = "dgl.NID"
+EID = "dgl.EID"
+
+
+class FakeDGLGraph:
+    def __init__(self, edges, num_nodes=None):
+        self._src, self._dst = edges
+        if num_nodes is None:
+            num_nodes = int(torch.max(torch.cat((self._src, self._dst))).item()) + 1
+        self._num_nodes = num_nodes
+        self.ndata = {}
+        self.edata = {}
+
+    def edges(self):
+        return self._src, self._dst
+
+    def num_nodes(self, node_type=None):
+        return self._num_nodes
+
+
+def graph(edges, num_nodes=None):
+    return FakeDGLGraph(edges, num_nodes=num_nodes)
+""",
+    }
+    for relative_path, content in fake_packages.items():
+        path = package_root / relative_path
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(textwrap.dedent(content), encoding="utf-8")
+    return package_root
 
 
 def _wheel_metadata(wheel_path: Path):
@@ -249,6 +296,69 @@ def test_release_smoke_script_accepts_disabled_interop_backend_flag(built_releas
     assert f"wheel smoke check passed for {wheel_path.name}" in completed.stdout
 
 
+def test_release_smoke_script_supports_artifact_interop_backend_pyg_with_fake_backend(
+    built_release_artifacts,
+    tmp_path,
+):
+    wheel_path, _ = built_release_artifacts
+    smoke_script = REPO_ROOT / "scripts" / "release_smoke.py"
+    env = os.environ.copy()
+    env[RELEASE_SMOKE_EXTRA_SITE_DIRS_ENV] = str(_fake_interop_packages_dir(tmp_path))
+
+    completed = subprocess.run(
+        [
+            sys.executable,
+            str(smoke_script),
+            "--artifact-dir",
+            str(wheel_path.parent),
+            "--kind",
+            "wheel",
+            "--interop-backend",
+            "pyg",
+        ],
+        cwd=REPO_ROOT,
+        capture_output=True,
+        text=True,
+        env=env,
+    )
+
+    assert completed.returncode == 0, completed.stderr
+    assert "pyg interop smoke check passed" in completed.stdout
+    assert f"wheel smoke check passed for {wheel_path.name}" in completed.stdout
+
+
+def test_release_smoke_script_supports_artifact_interop_backend_all_with_fake_backends(
+    built_release_artifacts,
+    tmp_path,
+):
+    wheel_path, _ = built_release_artifacts
+    smoke_script = REPO_ROOT / "scripts" / "release_smoke.py"
+    env = os.environ.copy()
+    env[RELEASE_SMOKE_EXTRA_SITE_DIRS_ENV] = str(_fake_interop_packages_dir(tmp_path))
+
+    completed = subprocess.run(
+        [
+            sys.executable,
+            str(smoke_script),
+            "--artifact-dir",
+            str(wheel_path.parent),
+            "--kind",
+            "wheel",
+            "--interop-backend",
+            "all",
+        ],
+        cwd=REPO_ROOT,
+        capture_output=True,
+        text=True,
+        env=env,
+    )
+
+    assert completed.returncode == 0, completed.stderr
+    assert "pyg interop smoke check passed" in completed.stdout
+    assert "dgl interop smoke check passed" in completed.stdout
+    assert f"wheel smoke check passed for {wheel_path.name}" in completed.stdout
+
+
 @pytest.mark.skipif(
     not _artifact_smoke_backend_available("dgl"),
     reason="dgl is not available to release_smoke artifact checks",
@@ -375,9 +485,11 @@ def test_release_readme_documents_public_install_paths():
     assert "PYPI_API_TOKEN" in releasing
     assert "TEST_PYPI_API_TOKEN" in releasing
     assert "host-installed" in releasing
+    assert "host-assisted dependency discovery" in releasing
     assert "--interop-backend all" in releasing
     assert "both host backends" in releasing
     assert "fail early" in releasing
+    assert "hermetic fake-backend success paths" in releasing
     assert "python scripts/release_smoke.py --artifact-dir dist --kind all" in releasing
     assert "python scripts/release_smoke.py --artifact-dir dist --kind wheel --interop-backend dgl" in releasing
     assert "python scripts/release_smoke.py --artifact-dir dist --kind wheel --interop-backend all" in releasing

@@ -21,6 +21,7 @@ INTEROP_BACKEND_IMPORT_MODULES = {
     "pyg": "torch_geometric",
     "dgl": "dgl",
 }
+RELEASE_INTEROP_EXTRA_SITE_DIRS_ENV = "RELEASE_INTEROP_EXTRA_SITE_DIRS"
 
 
 def _parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
@@ -79,6 +80,34 @@ def _outer_site_packages() -> list[Path]:
         if path.exists():
             candidates.append(path)
     return candidates
+
+
+def _extra_dependency_paths_from_env() -> list[Path]:
+    raw = os.environ.get(RELEASE_INTEROP_EXTRA_SITE_DIRS_ENV, "")
+    if not raw:
+        return []
+    extra_paths = []
+    seen = set()
+    for entry in raw.split(os.pathsep):
+        if not entry:
+            continue
+        path = Path(entry)
+        if not path.exists() or path in seen:
+            continue
+        extra_paths.append(path)
+        seen.add(path)
+    return extra_paths
+
+
+def _resolved_dependency_paths() -> list[Path]:
+    resolved = []
+    seen = set()
+    for path in [*_extra_dependency_paths_from_env(), *_outer_site_packages()]:
+        if path in seen:
+            continue
+        resolved.append(path)
+        seen.add(path)
+    return resolved
 
 
 def _ensure_build_backend(python_bin: Path, pip_bin: Path) -> None:
@@ -233,6 +262,7 @@ def _smoke_install(kind: str, artifact: Path, *, repo_root: Path, interop_backen
         venv_dir = tmp_dir / "venv"
         _run([sys.executable, "-m", "venv", str(venv_dir)])
         python_bin, pip_bin = _venv_binaries(venv_dir)
+        dependency_paths = _resolved_dependency_paths()
         if kind == "sdist":
             _ensure_build_backend(python_bin, pip_bin)
             install_cmd = [
@@ -256,13 +286,13 @@ def _smoke_install(kind: str, artifact: Path, *, repo_root: Path, interop_backen
             python_bin,
             cwd=tmp_dir,
             repo_root=repo_root,
-            dependency_paths=_outer_site_packages(),
+            dependency_paths=dependency_paths,
         )
         _interop_check(
             python_bin,
             cwd=tmp_dir,
             repo_root=repo_root,
-            dependency_paths=_outer_site_packages(),
+            dependency_paths=dependency_paths,
             backend=interop_backend,
         )
         print(f"{kind} smoke check passed for {artifact.name}")
