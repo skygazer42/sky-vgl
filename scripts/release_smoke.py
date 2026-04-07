@@ -10,6 +10,8 @@ import sys
 import tempfile
 from pathlib import Path
 
+from contracts import WHEEL_IMPORT_SYMBOLS
+
 
 def _parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
@@ -82,18 +84,19 @@ def _import_check(
         f"site.addsitedir({str(path)!r})\n"
         for path in dependency_paths
     )
+    root_imports = ", ".join(WHEEL_IMPORT_SYMBOLS)
+    symbol_prints = "".join(f"print({symbol})\n" for symbol in WHEEL_IMPORT_SYMBOLS)
     script = (
         "import site\n"
         "from pathlib import Path\n"
         f"{bootstrap}"
         "import vgl\n"
-        "from vgl import Graph, Trainer\n"
+        f"from vgl import {root_imports}\n"
         f"repo_root = Path({str(repo_root)!r}).resolve()\n"
         "module_path = Path(vgl.__file__).resolve()\n"
         "assert repo_root not in module_path.parents, module_path\n"
         "print(vgl.__version__)\n"
-        "print(Graph)\n"
-        "print(Trainer)\n"
+        f"{symbol_prints}"
     )
     _run([str(python_bin), "-c", script], cwd=cwd)
 

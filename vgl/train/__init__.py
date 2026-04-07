@@ -1,3 +1,8 @@
+"""Legacy compatibility namespace for training APIs.
+
+New code should prefer ``vgl.engine``, ``vgl.tasks``, and ``vgl.metrics``.
+"""
+
 from vgl.engine import ASAM as ASAM
 from vgl.engine import AdaptiveGradientClipping as AdaptiveGradientClipping
 from vgl.engine import BootstrapBetaScheduler as BootstrapBetaScheduler

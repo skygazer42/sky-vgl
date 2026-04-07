@@ -7,7 +7,14 @@ from pathlib import Path
 
 import pytest
 
-from vgl.version import __version__
+from scripts.contracts import (
+    DOCS_INDEX_VERSION_BADGE,
+    PROJECT_NAME,
+    PROJECT_URLS,
+    README_VERSION_BADGE,
+    RELEASE_VERSION,
+    WHEEL_IMPORT_SYMBOLS,
+)
 
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
@@ -41,16 +48,13 @@ def test_release_metadata_exposes_public_package_information(built_release_artif
     metadata = _wheel_metadata(wheel_path)
     project_urls = metadata.get_all("Project-URL", [])
 
-    assert metadata["Name"] == "sky-vgl"
+    assert metadata["Name"] == PROJECT_NAME
     assert metadata["Requires-Python"] == ">=3.10"
     assert metadata["Author-email"]
     assert metadata["Keywords"]
     assert metadata.get_all("Classifier")
-    assert "Homepage, https://github.com/skygazer42/sky-vgl" in project_urls
-    assert "Repository, https://github.com/skygazer42/sky-vgl" in project_urls
-    assert "Documentation, https://github.com/skygazer42/sky-vgl#readme" in project_urls
-    assert "Issues, https://github.com/skygazer42/sky-vgl/issues" in project_urls
-    assert "Changelog, https://github.com/skygazer42/sky-vgl/releases" in project_urls
+    for label, url in PROJECT_URLS.items():
+        assert f"{label}, {url}" in project_urls
     assert set(metadata.get_all("Provides-Extra", [])) >= {
         "dev",
         "scipy",
@@ -103,6 +107,7 @@ def test_release_workflows_exist_for_ci_and_pypi_publish():
     assert "python scripts/docs_link_scan.py" in ci_text
     assert "python scripts/release_contract_scan.py --artifact-dir dist" in ci_text
     assert "python scripts/release_smoke.py --artifact-dir dist --kind all" in ci_text
+    assert "python scripts/metadata_consistency.py" in (REPO_ROOT / "docs" / "releasing.md").read_text(encoding="utf-8")
     assert "tags:" in publish_text
     assert "v*" in publish_text
     assert "testpypi" in publish_text.lower()
@@ -164,7 +169,7 @@ def test_mkdocs_config_marks_internal_docs_as_not_in_nav():
 
     assert "not_in_nav:" in mkdocs
     assert "plans/*" in mkdocs
-    assert "quickstart.md" in mkdocs
+    assert "public-surface-contract.md" in mkdocs
     assert "releasing.md" in mkdocs
 
 
@@ -192,13 +197,17 @@ def test_release_smoke_script_can_install_built_wheel(built_release_artifacts):
 
 def test_release_readme_documents_public_install_paths():
     readme = (REPO_ROOT / "README.md").read_text(encoding="utf-8")
-    quickstart = (REPO_ROOT / "docs" / "quickstart.md").read_text(encoding="utf-8")
+    docs_index = (REPO_ROOT / "docs" / "index.md").read_text(encoding="utf-8")
+    installation = (REPO_ROOT / "docs" / "getting-started" / "installation.md").read_text(encoding="utf-8")
+    quickstart = (REPO_ROOT / "docs" / "public-surface-contract.md").read_text(encoding="utf-8")
     releasing = (REPO_ROOT / "docs" / "releasing.md").read_text(encoding="utf-8")
 
     asset_base = "https://raw.githubusercontent.com/skygazer42/sky-vgl/main/assets/"
 
-    assert f"version-{__version__}" in readme
-    assert f"Version {__version__}" in readme
+    assert README_VERSION_BADGE in readme
+    assert DOCS_INDEX_VERSION_BADGE in docs_index
+    assert f"version-{RELEASE_VERSION}" not in readme
+    assert f"version-{RELEASE_VERSION}" not in docs_index
     assert 'pip install sky-vgl' in readme
     assert 'pip install "sky-vgl[full]"' in readme
     assert 'pip install "sky-vgl[networkx]"' in readme
@@ -214,6 +223,7 @@ def test_release_readme_documents_public_install_paths():
     assert f'{asset_base}conv-layers.svg' in readme
     assert "pip install sky-vgl" in quickstart
     assert 'pip install "sky-vgl[full]"' in quickstart
+    assert "installed release version" in installation
     assert "sky-vgl project name" in releasing
     assert "sky-vgl` works in a clean environment" in releasing
     assert "pending publisher" in releasing
@@ -221,3 +231,5 @@ def test_release_readme_documents_public_install_paths():
     assert "PYPI_API_TOKEN" in releasing
     assert "TEST_PYPI_API_TOKEN" in releasing
     assert "python scripts/release_smoke.py --artifact-dir dist --kind all" in releasing
+    for symbol in WHEEL_IMPORT_SYMBOLS:
+        assert symbol in releasing

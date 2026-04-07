@@ -185,6 +185,10 @@ trainer = Trainer(
 )
 ```
 
+### Runtime Reliability Tips
+
+Use the queued torch.compile-based smoke test (see `tests/test_runtime_compile_smoke.py`) when PyTorch 2.4+ is available to verify the same `Graph`/`Trainer` loop supports Dynamo-backed execution without extra hooks. The release profiler already records per-fit and per-epoch timing under the `"profile"` field, so nightly runs that enable `profiler="simple"` can assert these keys remain present across releases.
+
 ## TrainingHistory
 
 `trainer.fit()` 返回 `TrainingHistory` 对象：

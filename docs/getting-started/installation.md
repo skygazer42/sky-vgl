@@ -9,6 +9,10 @@
 
 VGL 以纯 Python 实现，无需编译。只要满足 PyTorch 依赖即可安装。
 
+## Environment Snapshot / English Summary
+
+The CI matrix currently exercises Python 3.10–3.12 with PyTorch 2.4+ (CPU + CUDA builds), plus nightly smoke coverage for extras such as NetworkX, SciPy, and TensorBoard. Follow the [support matrix](../support-matrix.md) to align your local setup with a verified combo.
+
 ## 安装
 
 ### 基础安装
@@ -97,7 +101,7 @@ VGL 需要 PyTorch 2.4 或更高版本。请先按照 [PyTorch 官方指南](htt
 
 ```python
 import vgl
-print(vgl.__version__)  # 0.1.5
+print(vgl.__version__)  # installed release version
 
 from vgl.graph import Graph
 import torch

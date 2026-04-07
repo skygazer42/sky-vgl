@@ -1,3 +1,8 @@
+"""Legacy compatibility namespace for graph core types.
+
+New code should import graph containers from ``vgl.graph``.
+"""
+
 from vgl.graph import Block as Block
 from vgl.graph import EdgeStore as EdgeStore
 from vgl.graph import GNNError as GNNError

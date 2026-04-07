@@ -3,7 +3,7 @@ from pathlib import Path
 
 ACTIVE_TARGETS = [
     Path("README.md"),
-    Path("docs/quickstart.md"),
+    Path("docs/public-surface-contract.md"),
     Path("docs/core-concepts.md"),
     Path("docs/plans/2026-03-14-gnn-framework-design.md"),
     Path("docs/plans/2026-03-14-gnn-framework.md"),

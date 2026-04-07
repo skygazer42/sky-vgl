@@ -1,6 +1,6 @@
-# Quickstart
+# Public Surface Contract
 
-`vgl` is a PyTorch-first graph learning package with one core `Graph` abstraction.
+This internal contract document records the public install, import, and runtime guarantees that packaging scans, docs scans, and smoke tests expect from a release.
 
 Install the published distribution with `pip install sky-vgl`. Add extras such as `pip install "sky-vgl[networkx]"`, `pip install "sky-vgl[scipy]"`, `pip install "sky-vgl[tensorboard]"`, `pip install "sky-vgl[dgl]"`, `pip install "sky-vgl[pyg]"`, or `pip install "sky-vgl[full]"` when you need those optional integrations. Public releases target Python 3.10+, while imports remain under `vgl`.
 

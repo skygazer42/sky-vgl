@@ -2,6 +2,8 @@ import subprocess
 import sys
 from pathlib import Path
 
+from scripts.contracts import PUBLIC_EXAMPLE_MODULES, public_surface_specs
+
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 SCAN_SCRIPT = REPO_ROOT / "scripts" / "public_surface_scan.py"
@@ -17,7 +19,7 @@ def test_public_surface_scan_lists_stable_catalog():
 
     assert completed.returncode == 0, completed.stderr
     listed = [line for line in completed.stdout.splitlines() if line.startswith("SCAN ")]
-    assert len(listed) == 84
+    assert len(listed) == len(public_surface_specs()) + len(PUBLIC_EXAMPLE_MODULES) + 2
     assert any("vgl.data reexports PlanStage from vgl.dataloading" in line for line in listed)
     assert any("vgl.data.plan reexports PlanStage from vgl.dataloading.plan" in line for line in listed)
     assert any("vgl.data.materialize reexports materialize_batch from vgl.dataloading.materialize" in line for line in listed)
@@ -45,4 +47,5 @@ def test_public_surface_scan_passes_on_repository():
     )
 
     assert completed.returncode == 0, completed.stderr
-    assert "SUMMARY 84/84 passed" in completed.stdout
+    expected = len(public_surface_specs()) + len(PUBLIC_EXAMPLE_MODULES) + 2
+    assert f"SUMMARY {expected}/{expected} passed" in completed.stdout

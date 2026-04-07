@@ -210,11 +210,14 @@ def test_simple_profiler_adds_profile_data_to_history_and_fit_records():
 
     fit_start = logger.records[0]
     fit_end = next(record for record in logger.records if record["event"] == "fit_end")
+    epoch_record = next(record for record in logger.records if record["event"] == "epoch_end")
 
     assert fit_start["profiler"] == "simple"
     assert history["profile"]["forward_seconds_total"] >= 0.0
     assert history["profile"]["optimizer_step_seconds_total"] >= 0.0
+    assert history["profile"]["train_stage_seconds_total"] >= 0.0
     assert fit_end["profile"]["train_stage_seconds_total"] >= 0.0
+    assert epoch_record["profile"]["train_stage_seconds_total"] >= 0.0
 
 
 def test_val_check_interval_runs_mid_epoch_validation():

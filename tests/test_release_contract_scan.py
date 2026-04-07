@@ -4,6 +4,15 @@ from pathlib import Path
 
 import pytest
 
+from scripts.contracts import (
+    OPTIONAL_EXTRAS,
+    PROJECT_URLS,
+    SDIST_EXCLUDED_SUBSTRINGS,
+    SDIST_REQUIRED_SUFFIXES,
+    WHEEL_EXCLUDED_SUBSTRINGS,
+    WHEEL_REQUIRED_FILES,
+)
+
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 SCAN_SCRIPT = REPO_ROOT / "scripts" / "release_contract_scan.py"
@@ -30,7 +39,9 @@ def test_release_contract_scan_lists_stable_catalog():
 
     assert completed.returncode == 0, completed.stderr
     listed = [line for line in completed.stdout.splitlines() if line.startswith("SCAN ")]
-    assert len(listed) == 24
+    expected = 5 + len(PROJECT_URLS) + len(OPTIONAL_EXTRAS) + len(WHEEL_REQUIRED_FILES)
+    expected += len(WHEEL_EXCLUDED_SUBSTRINGS) + len(SDIST_REQUIRED_SUFFIXES) + len(SDIST_EXCLUDED_SUBSTRINGS)
+    assert len(listed) == expected
 
 
 def test_release_contract_scan_passes_on_built_artifacts(built_artifact_dir: Path):
@@ -47,4 +58,6 @@ def test_release_contract_scan_passes_on_built_artifacts(built_artifact_dir: Pat
     )
 
     assert completed.returncode == 0, completed.stderr
-    assert "SUMMARY 24/24 passed" in completed.stdout
+    expected = 5 + len(PROJECT_URLS) + len(OPTIONAL_EXTRAS) + len(WHEEL_REQUIRED_FILES)
+    expected += len(WHEEL_EXCLUDED_SUBSTRINGS) + len(SDIST_REQUIRED_SUFFIXES) + len(SDIST_EXCLUDED_SUBSTRINGS)
+    assert f"SUMMARY {expected}/{expected} passed" in completed.stdout

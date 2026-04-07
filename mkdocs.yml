@@ -73,7 +73,7 @@ plugins:
 
 not_in_nav: |
   plans/*
-  quickstart.md
+  public-surface-contract.md
   releasing.md
 
 markdown_extensions:
@@ -133,6 +133,7 @@ nav:
     - getting-started/index.md
     - 安装指南: getting-started/installation.md
     - 5 分钟快速入门: getting-started/quickstart.md
+    - 支持矩阵: support-matrix.md
   - 用户指南:
     - guide/index.md
     - Graph 对象详解: guide/graph.md

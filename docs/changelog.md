@@ -1,6 +1,20 @@
 # 更新日志
 
-## v0.1.5（当前版本）
+## Unreleased
+
+### Changed
+
+- Release and public-surface policy now lives in a shared machine-readable contract used by scans, tests, and smoke tooling.
+- Documentation entry pages now include a verified support matrix and bilingual summary blocks for the highest-traffic entry points.
+
+### Fixed
+
+- Packaging metadata now points PyPI users to the published docs site instead of the repository README.
+- Example smoke coverage now tracks the full public example catalog rather than a hand-picked subset.
+
+## v0.1.5
+
+### Added
 
 - 60+ 种图卷积层
 - Graph Transformer 支持（Graphormer、GPS、NAGphormer、SGFormer）

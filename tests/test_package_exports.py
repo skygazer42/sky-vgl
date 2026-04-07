@@ -164,6 +164,7 @@ from vgl import (
     global_max_pool,
     __version__,
 )
+from scripts.contracts import RELEASE_VERSION
 
 
 def test_package_exposes_broad_vgl_root_surface():
@@ -331,4 +332,4 @@ def test_package_exposes_broad_vgl_root_surface():
     assert callable(global_mean_pool)
     assert callable(global_sum_pool)
     assert callable(global_max_pool)
-    assert __version__ == "0.1.5"
+    assert __version__ == RELEASE_VERSION

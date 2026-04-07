@@ -11,6 +11,17 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Callable
 
+from contracts import (
+    OPTIONAL_EXTRAS,
+    PROJECT_NAME,
+    PROJECT_URLS,
+    REQUIRES_PYTHON,
+    SDIST_EXCLUDED_SUBSTRINGS,
+    SDIST_REQUIRED_SUFFIXES,
+    WHEEL_EXCLUDED_SUBSTRINGS,
+    WHEEL_REQUIRED_FILES,
+)
+
 try:
     import tomllib  # type: ignore[attr-defined]
 except ModuleNotFoundError:  # pragma: no cover - Python 3.10 fallback
@@ -212,47 +223,56 @@ def _sdist_excludes_task(ctx: ArtifactContext, task_id: str, substring: str) -> 
 
 def build_tasks(repo_root: Path, artifact_dir: Path) -> list[ScanTask]:
     ctx = ArtifactContext(repo_root, artifact_dir)
-    project_name = str(ctx.pyproject_value("project", "name"))
-    requires_python = str(ctx.pyproject_value("project", "requires-python"))
     project_urls = ctx.pyproject_value("project", "urls")
-    if not isinstance(project_urls, dict):
-        raise RuntimeError("project.urls must be a mapping")
+    if project_urls != PROJECT_URLS:
+        raise RuntimeError("pyproject project.urls must match scripts/contracts.py")
+    if str(ctx.pyproject_value("project", "name")) != PROJECT_NAME:
+        raise RuntimeError("pyproject project.name must match scripts/contracts.py")
+    if str(ctx.pyproject_value("project", "requires-python")) != REQUIRES_PYTHON:
+        raise RuntimeError("pyproject project.requires-python must match scripts/contracts.py")
 
     tasks = [
         _artifact_exists_task(ctx, "001", "built wheel exists", ctx.wheel_path),
         _artifact_exists_task(ctx, "002", "built sdist exists", ctx.sdist_path),
-        _metadata_header_equals_task(ctx, "003", "wheel name matches project", "Name", project_name),
+        _metadata_header_equals_task(ctx, "003", "wheel name matches project", "Name", PROJECT_NAME),
         _metadata_header_equals_task(ctx, "004", "wheel version matches repo version", "Version", ctx.repo_version()),
         _metadata_header_equals_task(
             ctx,
             "005",
             "wheel Requires-Python matches pyproject",
             "Requires-Python",
-            requires_python,
+            REQUIRES_PYTHON,
         ),
-        _project_url_task(ctx, "006", "Homepage", str(project_urls["Homepage"])),
-        _project_url_task(ctx, "007", "Repository", str(project_urls["Repository"])),
-        _project_url_task(ctx, "008", "Documentation", str(project_urls["Documentation"])),
-        _project_url_task(ctx, "009", "Issues", str(project_urls["Issues"])),
-        _project_url_task(ctx, "010", "Changelog", str(project_urls["Changelog"])),
-        _provides_extra_task(ctx, "011", "dev"),
-        _provides_extra_task(ctx, "012", "scipy"),
-        _provides_extra_task(ctx, "013", "networkx"),
-        _provides_extra_task(ctx, "014", "tensorboard"),
-        _provides_extra_task(ctx, "015", "dgl"),
-        _provides_extra_task(ctx, "016", "pyg"),
-        _provides_extra_task(ctx, "017", "full"),
-        _wheel_contains_task(ctx, "018", "vgl/__init__.py"),
-        _wheel_contains_task(ctx, "019", "vgl/version.py"),
-        _wheel_excludes_task(ctx, "020", "/docs/plans/"),
-        _wheel_excludes_task(ctx, "021", "examples/"),
-        _sdist_contains_task(ctx, "022", "/README.md"),
-        _sdist_contains_task(ctx, "023", "/docs/releasing.md"),
-        _sdist_contains_task(ctx, "024", "/scripts/release_smoke.py"),
+        *[
+            _project_url_task(ctx, f"{index:03d}", label, PROJECT_URLS[label])
+            for index, label in enumerate(PROJECT_URLS, start=6)
+        ],
+        *[
+            _provides_extra_task(ctx, f"{index:03d}", extra)
+            for index, extra in enumerate(OPTIONAL_EXTRAS, start=11)
+        ],
+        *[
+            _wheel_contains_task(ctx, f"{index:03d}", relative_path)
+            for index, relative_path in enumerate(WHEEL_REQUIRED_FILES, start=18)
+        ],
+        *[
+            _wheel_excludes_task(ctx, f"{index:03d}", substring)
+            for index, substring in enumerate(WHEEL_EXCLUDED_SUBSTRINGS, start=20)
+        ],
+        *[
+            _sdist_contains_task(ctx, f"{index:03d}", suffix)
+            for index, suffix in enumerate(SDIST_REQUIRED_SUFFIXES, start=24)
+        ],
+        *[
+            _sdist_excludes_task(ctx, f"{index:03d}", substring)
+            for index, substring in enumerate(SDIST_EXCLUDED_SUBSTRINGS, start=28)
+        ],
     ]
 
-    if len(tasks) != 24:
-        raise RuntimeError(f"expected 24 scan tasks, found {len(tasks)}")
+    expected_task_count = 5 + len(PROJECT_URLS) + len(OPTIONAL_EXTRAS) + len(WHEEL_REQUIRED_FILES)
+    expected_task_count += len(WHEEL_EXCLUDED_SUBSTRINGS) + len(SDIST_REQUIRED_SUFFIXES) + len(SDIST_EXCLUDED_SUBSTRINGS)
+    if len(tasks) != expected_task_count:
+        raise RuntimeError(f"expected {expected_task_count} scan tasks, found {len(tasks)}")
     return tasks
 
 

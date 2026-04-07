@@ -1,3 +1,5 @@
+import json
+import os
 import subprocess
 import sys
 from pathlib import Path
@@ -43,3 +45,77 @@ def test_ci_workflow_runs_lint_extras_smoke_and_dependency_audit():
     assert "python -m ruff check ." in ci_text
     assert "python scripts/extras_smoke.py --extras networkx scipy tensorboard" in ci_text
     assert "python scripts/dependency_audit.py" in ci_text
+    assert "python scripts/metadata_consistency.py" in ci_text
+
+
+def test_ci_workflow_includes_extended_matrix_and_jobs():
+    ci_text = (REPO_ROOT / ".github" / "workflows" / "ci.yml").read_text(encoding="utf-8")
+
+    assert 'python-version: ["3.10", "3.11", "3.12"]' in ci_text
+    assert "runs-on: macos-latest" in ci_text
+    assert "workflow-lint:" in ci_text
+    assert "contract-tests:" in ci_text
+    assert "benchmark:" in ci_text
+    assert "python scripts/benchmark_hotpaths.py" in ci_text
+    assert "--cov=vgl" in ci_text
+    assert "--cov=scripts" in ci_text
+
+
+def test_manual_interop_workflow_covers_pyg_and_dgl():
+    workflow_text = (REPO_ROOT / ".github" / "workflows" / "interop-smoke.yml").read_text(encoding="utf-8")
+
+    assert "workflow_dispatch:" in workflow_text
+    assert "schedule:" in workflow_text
+    assert 'python -m pip install -e ".[dev,pyg]"' in workflow_text
+    assert 'python -m pip install -e ".[dev,dgl]"' in workflow_text
+    assert "from vgl.compat import from_pyg, to_pyg" in workflow_text
+    assert "from vgl.compat import from_dgl, to_dgl" in workflow_text
+
+
+def test_benchmark_hotpaths_writes_quiet_stable_json(tmp_path):
+    script = REPO_ROOT / "scripts" / "benchmark_hotpaths.py"
+    output_file = tmp_path / "benchmarks" / "benchmark.json"
+    env = os.environ.copy()
+    env["PYTHONPATH"] = str(REPO_ROOT)
+    completed = subprocess.run(
+        [
+            sys.executable,
+            str(script),
+            "--num-nodes",
+            "100",
+            "--num-edges",
+            "500",
+            "--num-queries",
+            "25",
+            "--num-partitions",
+            "2",
+            "--warmup",
+            "1",
+            "--repeats",
+            "1",
+            "--seed",
+            "0",
+            "--output",
+            str(output_file),
+        ],
+        cwd=REPO_ROOT,
+        capture_output=True,
+        text=True,
+        env=env,
+    )
+
+    assert completed.returncode == 0, completed.stderr
+    assert completed.stdout.strip() == ""
+    payload = json.loads(output_file.read_text(encoding="utf-8"))
+    assert payload["schema_version"] == 1
+    assert payload["benchmark"] == "vgl_hotpaths"
+    assert payload["preset"] == "default"
+    assert payload["config"]["num_nodes"] == 100
+    assert set(payload) >= {"config", "query_ops", "routing", "sampling"}
+
+
+def test_support_matrix_tracks_live_optional_interop_verification():
+    support_matrix = (REPO_ROOT / "docs" / "support-matrix.md").read_text(encoding="utf-8")
+
+    assert "interop-smoke" in support_matrix
+    assert "Planned real install smoke" not in support_matrix

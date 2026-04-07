@@ -59,3 +59,4 @@ def test_ci_workflow_runs_the_full_scan_script():
 
     assert "python scripts/full_scan.py" in ci_text
     assert "python scripts/public_surface_scan.py" in ci_text
+    assert "python scripts/metadata_consistency.py" in ci_text

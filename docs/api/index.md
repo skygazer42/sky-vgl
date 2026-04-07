@@ -7,6 +7,10 @@ hide:
 
 VGL 的完整 API 文档，按模块组织。
 
+## English Highlights
+
+The API index collects the same modules you already use from `vgl.graph`, `vgl.nn`, `vgl.engine`, etc., so documentation readers can discover the preferred `vgl.*` exports, compatibility adapters, and extension points that CI contract scans guard.
+
 <div class="grid" markdown>
 
 <div class="card" markdown>

@@ -1,3 +1,10 @@
+"""Public dataset namespace with legacy dataloading compatibility re-exports.
+
+Preferred imports:
+- dataset and catalog APIs stay under ``vgl.data``
+- loaders, samplers, plans, and materialization helpers should use ``vgl.dataloading``
+"""
+
 from vgl.dataloading import CandidateLinkSampler as CandidateLinkSampler
 from vgl.dataloading import ClusterData as ClusterData
 from vgl.dataloading import ClusterLoader as ClusterLoader

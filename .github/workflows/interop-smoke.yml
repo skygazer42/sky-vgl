@@ -1,0 +1,61 @@
+name: interop-smoke
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: "0 3 * * 1"
+
+jobs:
+  pyg-smoke:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -e ".[dev,pyg]"
+      - name: PyG round-trip smoke
+        run: |
+          python - <<'PY'
+          import torch
+          from vgl.compat import from_pyg, to_pyg
+          from vgl.graph import Graph
+
+          graph = Graph.homo(
+              edge_index=torch.tensor([[0, 1], [1, 0]]),
+              x=torch.randn(2, 4),
+          )
+          pyg_graph = to_pyg(graph)
+          round_trip = from_pyg(pyg_graph)
+          assert round_trip.edge_index.shape == graph.edge_index.shape
+          PY
+
+  dgl-smoke:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -e ".[dev,dgl]"
+      - name: DGL round-trip smoke
+        run: |
+          python - <<'PY'
+          import torch
+          from vgl.compat import from_dgl, to_dgl
+          from vgl.graph import Graph
+
+          graph = Graph.homo(
+              edge_index=torch.tensor([[0, 1], [1, 0]]),
+              x=torch.randn(2, 4),
+          )
+          dgl_graph = to_dgl(graph)
+          round_trip = from_dgl(dgl_graph)
+          assert round_trip.edge_index.shape == graph.edge_index.shape
+          PY

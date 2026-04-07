@@ -210,6 +210,23 @@ def test_store_backed_temporal_partition_metadata_drives_shard_aware_sampled_tra
     assert history["completed_epochs"] == 1
 
 
+def test_store_backed_feature_fetch_preserves_order(tmp_path):
+    graph = Graph.homo(
+        edge_index=torch.tensor([[0, 1], [1, 0]]),
+        x=torch.tensor([[1.0, 0.0], [0.0, 1.0]]),
+        y=torch.tensor([0, 1]),
+    )
+    write_partitioned_graph(graph, tmp_path, num_partitions=1)
+    coordinator = StoreBackedSamplingCoordinator.from_partition_dir(tmp_path)
+
+    ids = torch.tensor([1, 0])
+    fetched = coordinator.fetch_node_features(("node", "node", "x"), ids).values
+
+    assert fetched.shape == (2, 2)
+    assert torch.allclose(fetched[0], graph.x[1])
+    assert torch.allclose(fetched[1], graph.x[0])
+
+
 def test_local_multi_relation_partition_metadata_drives_shard_aware_sampled_training(tmp_path):
     follows = ("node", "follows", "node")
     likes = ("node", "likes", "node")

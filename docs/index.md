@@ -12,8 +12,32 @@ hide:
 
 [![Python](https://img.shields.io/badge/python-%E2%89%A53.10-blue?style=for-the-badge&logo=python&logoColor=white)](https://www.python.org/downloads/)
 [![PyTorch](https://img.shields.io/badge/PyTorch-%E2%89%A52.4-ee4c2c?style=for-the-badge&logo=pytorch&logoColor=white)](https://pytorch.org/)
-[![Version](https://img.shields.io/badge/version-0.1.5-8b5cf6?style=for-the-badge)]()
+[![Version](https://img.shields.io/pypi/v/sky-vgl?style=for-the-badge)](https://pypi.org/project/sky-vgl/)
 [![PyPI](https://img.shields.io/badge/PyPI-sky--vgl-3775A9?style=for-the-badge&logo=pypi&logoColor=white)](https://pypi.org/project/sky-vgl/)
+
+</div>
+
+<div class="grid" markdown>
+
+<div class="card" markdown>
+
+### 🇨🇳 站点介绍
+
+VGL 提供统一 Graph 抽象、60+ 图卷积、完整训练 pipeline 与多种采样策略，覆盖同构/异构/时序图。
+
+[:octicons-arrow-right-24: 用户指南](getting-started/index.md)
+
+</div>
+
+<div class="card" markdown>
+
+### 🇬🇧 English Summary
+
+VGL is a PyTorch-first graph framework that bundles Graph, Task, Trainer, sparse tooling, and dataset adapters so you can address homogeneous, heterogeneous, and temporal workloads from a single API.
+
+[:octicons-arrow-right-24: Quick Start](getting-started/index.md)
+
+</div>
 
 </div>
 
@@ -131,6 +155,14 @@ hide:
 | 同构图 | `Graph.homo(edge_index=..., x=..., y=...)` | 节点分类、链接预测 |
 | 异构图 | `Graph.hetero(nodes={...}, edges={...})` | 异构节点分类、异构链接预测 |
 | 时序图 | `Graph.temporal(nodes=..., edges=..., time_attr=...)` | 时序事件预测 |
+
+---
+
+## Support Matrix
+
+Track Python, PyTorch, and extras coverage so your environment matches the CI-tested surface.
+
+[Verified combinations →](support-matrix.md)
 
 ---
 

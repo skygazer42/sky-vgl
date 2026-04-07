@@ -6,6 +6,7 @@ __pycache__/
 build/
 dist/
 site/
+benchmarks/
 *.egg-info/
 .idea/
 .worktrees/

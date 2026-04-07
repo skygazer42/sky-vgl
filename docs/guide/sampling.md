@@ -141,6 +141,8 @@ for batch in loader:
     pass
 ```
 
+Storage-backed coordinators such as `StoreBackedSamplingCoordinator` can reuse the same loader contracts while materializing features lazily from partitioned files; the smoke scenario in `tests/integration/test_foundation_partition_local.py` validates this pathway before heavier distributed runs.
+
 ## 分布式采样
 
 配合 `LocalSamplingCoordinator`，采样器可以跨分区拼接远程前沿节点：

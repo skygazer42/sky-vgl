@@ -43,7 +43,7 @@ dependencies = [
 [project.urls]
 Homepage = "https://github.com/skygazer42/sky-vgl"
 Repository = "https://github.com/skygazer42/sky-vgl"
-Documentation = "https://github.com/skygazer42/sky-vgl#readme"
+Documentation = "https://skygazer42.github.io/sky-vgl"
 Issues = "https://github.com/skygazer42/sky-vgl/issues"
 Changelog = "https://github.com/skygazer42/sky-vgl/releases"
 
@@ -55,9 +55,11 @@ dev = [
   "mkdocstrings[python]>=0.29",
   "twine>=5.1",
   "pytest>=8.3",
+  "pytest-cov>=5.0",
   "ruff>=0.6",
   "mypy>=1.11",
   "pip-audit>=2.8",
+  "pre-commit>=3.8",
 ]
 scipy = [
   "scipy>=1.11",
@@ -97,7 +99,7 @@ include = [
   "/vgl",
   "/examples",
   "/docs/core-concepts.md",
-  "/docs/quickstart.md",
+  "/docs/public-surface-contract.md",
   "/docs/migration-guide.md",
   "/docs/releasing.md",
   "/.github/workflows/ci.yml",

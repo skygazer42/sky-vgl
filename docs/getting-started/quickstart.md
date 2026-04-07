@@ -2,6 +2,10 @@
 
 本教程将带你从零开始完成一个完整的节点分类任务。
 
+## Quick English overview
+
+VGL bundles Graph, Task, Trainer, and dataset tooling so you can build node-classification examples in 5 minutes with the same API surface across homo/hetero/temporal workloads. Follow the [support matrix](../support-matrix.md) for the Python/PyTorch/extras combo that matches your environment.
+
 ## 工作流概览
 
 VGL 的核心工作流只有四步：
@@ -17,16 +21,15 @@ VGL 的核心工作流只有四步：
 
 ```python
 import torch
+from vgl import PlanetoidDataset, Trainer
 from vgl.graph import Graph
 from vgl.nn import GCNConv
 from vgl.tasks import NodeClassificationTask
-from vgl.engine import Trainer
 ```
 
 使用内置的 Cora 数据集：
 
 ```python
-from vgl.data import PlanetoidDataset
 from vgl.transforms import Compose, NormalizeFeatures
 
 dataset = PlanetoidDataset(
@@ -153,7 +156,7 @@ trainer.fit(loader)
 VGL 提供多个常用数据集：
 
 ```python
-from vgl.data import PlanetoidDataset, TUDataset, KarateClubDataset
+from vgl import DatasetRegistry, KarateClubDataset, PlanetoidDataset, TUDataset
 
 # 引文网络
 cora = PlanetoidDataset(root="data", name="Cora")
@@ -171,7 +174,6 @@ karate = KarateClubDataset(root="data")
 也可以使用字符串驱动的注册表：
 
 ```python
-from vgl.data import DatasetRegistry
 registry = DatasetRegistry.default()
 cora = registry["cora"]
 mutag = registry["tu:mutag"]

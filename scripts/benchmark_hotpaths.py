@@ -3,18 +3,43 @@ from __future__ import annotations
 import argparse
 import json
 from pathlib import Path
+import sys
 from tempfile import TemporaryDirectory
 from time import perf_counter
 
 import torch
 
-from vgl import Graph
-from vgl.data.sample import LinkPredictionRecord, TemporalEventRecord
-from vgl.data.sampler import LinkNeighborSampler, TemporalNeighborSampler
-from vgl.distributed.coordinator import LocalSamplingCoordinator, StoreBackedSamplingCoordinator
-from vgl.distributed.shard import LocalGraphShard
-from vgl.distributed.writer import write_partitioned_graph
-from vgl.ops import edge_ids, find_edges, has_edges_between
+REPO_ROOT = Path(__file__).resolve().parents[1]
+if str(REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(REPO_ROOT))
+
+BENCHMARK_SCHEMA_VERSION = 1
+PRESETS = {
+    "smoke": {
+        "num_nodes": 100,
+        "num_edges": 500,
+        "num_queries": 25,
+        "num_partitions": 2,
+        "warmup": 1,
+        "repeats": 1,
+    },
+    "ci": {
+        "num_nodes": 5_000,
+        "num_edges": 20_000,
+        "num_queries": 1_000,
+        "num_partitions": 4,
+        "warmup": 2,
+        "repeats": 3,
+    },
+    "default": {
+        "num_nodes": 200_000,
+        "num_edges": 1_000_000,
+        "num_queries": 20_000,
+        "num_partitions": 8,
+        "warmup": 3,
+        "repeats": 10,
+    },
+}
 
 
 def _time_call(fn, *, warmup: int, repeats: int) -> float:
@@ -27,7 +52,9 @@ def _time_call(fn, *, warmup: int, repeats: int) -> float:
     return (end - start) / max(repeats, 1)
 
 
-def _build_graph(*, num_nodes: int, num_edges: int, seed: int) -> Graph:
+def _build_graph(*, num_nodes: int, num_edges: int, seed: int):
+    from vgl.graph import Graph
+
     generator = torch.Generator().manual_seed(seed)
     src = torch.randint(num_nodes, (num_edges,), generator=generator)
     dst = torch.randint(num_nodes, (num_edges,), generator=generator)
@@ -37,6 +64,8 @@ def _build_graph(*, num_nodes: int, num_edges: int, seed: int) -> Graph:
 
 
 def benchmark_query_ops(*, num_nodes: int, num_edges: int, num_queries: int, warmup: int, repeats: int, seed: int):
+    from vgl.ops import edge_ids, find_edges, has_edges_between
+
     graph = _build_graph(num_nodes=num_nodes, num_edges=num_edges, seed=seed)
     generator = torch.Generator().manual_seed(seed + 1)
     query_eids = torch.randint(num_edges, (num_queries,), generator=generator)
@@ -63,6 +92,10 @@ def benchmark_query_ops(*, num_nodes: int, num_edges: int, num_queries: int, war
 
 
 def benchmark_routing(*, num_nodes: int, num_edges: int, num_partitions: int, num_queries: int, warmup: int, repeats: int, seed: int):
+    from vgl.distributed.coordinator import LocalSamplingCoordinator, StoreBackedSamplingCoordinator
+    from vgl.distributed.shard import LocalGraphShard
+    from vgl.distributed.writer import write_partitioned_graph
+
     graph = _build_graph(num_nodes=num_nodes, num_edges=num_edges, seed=seed)
     generator = torch.Generator().manual_seed(seed + 2)
     query_nodes = torch.randint(num_nodes, (num_queries,), generator=generator)
@@ -92,6 +125,10 @@ def benchmark_routing(*, num_nodes: int, num_edges: int, num_partitions: int, nu
 
 
 def benchmark_sampling(*, num_nodes: int, num_edges: int, warmup: int, repeats: int, seed: int):
+    from vgl.dataloading import LinkNeighborSampler, TemporalNeighborSampler
+    from vgl.data.sample import LinkPredictionRecord, TemporalEventRecord
+    from vgl.graph import Graph
+
     graph = _build_graph(num_nodes=num_nodes, num_edges=num_edges, seed=seed)
     link_sampler = LinkNeighborSampler(num_neighbors=[-1, -1], seed=seed)
     link_record = LinkPredictionRecord(graph=graph, src_index=0, dst_index=1, label=1)
@@ -129,53 +166,79 @@ def benchmark_sampling(*, num_nodes: int, num_edges: int, warmup: int, repeats: 
     }
 
 
+def _dump_results(results: dict[str, object], *, output: Path | None, emit_stdout: bool) -> None:
+    document = json.dumps(results, indent=2, sort_keys=True)
+    if output is not None:
+        output.parent.mkdir(parents=True, exist_ok=True)
+        output.write_text(document, encoding="utf-8")
+    if emit_stdout or output is None:
+        print(document)
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description="Benchmark VGL single-machine query and routing hotpaths.")
-    parser.add_argument("--num-nodes", type=int, default=200_000)
-    parser.add_argument("--num-edges", type=int, default=1_000_000)
-    parser.add_argument("--num-queries", type=int, default=20_000)
-    parser.add_argument("--num-partitions", type=int, default=8)
-    parser.add_argument("--warmup", type=int, default=3)
-    parser.add_argument("--repeats", type=int, default=10)
+    parser.add_argument("--preset", choices=tuple(PRESETS), default="default")
+    parser.add_argument("--num-nodes", type=int)
+    parser.add_argument("--num-edges", type=int)
+    parser.add_argument("--num-queries", type=int)
+    parser.add_argument("--num-partitions", type=int)
+    parser.add_argument("--warmup", type=int)
+    parser.add_argument("--repeats", type=int)
     parser.add_argument("--seed", type=int, default=0)
+    parser.add_argument("--output", type=Path, help="Write JSON benchmark results to this file")
+    parser.add_argument("--print", action="store_true", dest="emit_stdout", help="Also print JSON to stdout")
     args = parser.parse_args()
+    config = dict(PRESETS[args.preset])
+    overrides = {
+        "num_nodes": args.num_nodes,
+        "num_edges": args.num_edges,
+        "num_queries": args.num_queries,
+        "num_partitions": args.num_partitions,
+        "warmup": args.warmup,
+        "repeats": args.repeats,
+        "seed": args.seed,
+    }
+    config.update({key: value for key, value in overrides.items() if value is not None})
 
     results = {
+        "schema_version": BENCHMARK_SCHEMA_VERSION,
+        "benchmark": "vgl_hotpaths",
+        "preset": args.preset,
         "config": {
-            "num_nodes": args.num_nodes,
-            "num_edges": args.num_edges,
-            "num_queries": args.num_queries,
-            "num_partitions": args.num_partitions,
-            "warmup": args.warmup,
-            "repeats": args.repeats,
-            "seed": args.seed,
+            "num_nodes": config["num_nodes"],
+            "num_edges": config["num_edges"],
+            "num_queries": config["num_queries"],
+            "num_partitions": config["num_partitions"],
+            "warmup": config["warmup"],
+            "repeats": config["repeats"],
+            "seed": config["seed"],
         },
         "query_ops": benchmark_query_ops(
-            num_nodes=args.num_nodes,
-            num_edges=args.num_edges,
-            num_queries=args.num_queries,
-            warmup=args.warmup,
-            repeats=args.repeats,
-            seed=args.seed,
+            num_nodes=config["num_nodes"],
+            num_edges=config["num_edges"],
+            num_queries=config["num_queries"],
+            warmup=config["warmup"],
+            repeats=config["repeats"],
+            seed=config["seed"],
         ),
         "routing": benchmark_routing(
-            num_nodes=args.num_nodes,
-            num_edges=args.num_edges,
-            num_partitions=args.num_partitions,
-            num_queries=args.num_queries,
-            warmup=args.warmup,
-            repeats=args.repeats,
-            seed=args.seed,
+            num_nodes=config["num_nodes"],
+            num_edges=config["num_edges"],
+            num_partitions=config["num_partitions"],
+            num_queries=config["num_queries"],
+            warmup=config["warmup"],
+            repeats=config["repeats"],
+            seed=config["seed"],
         ),
         "sampling": benchmark_sampling(
-            num_nodes=args.num_nodes,
-            num_edges=args.num_edges,
-            warmup=args.warmup,
-            repeats=args.repeats,
-            seed=args.seed,
+            num_nodes=config["num_nodes"],
+            num_edges=config["num_edges"],
+            warmup=config["warmup"],
+            repeats=config["repeats"],
+            seed=config["seed"],
         ),
     }
-    print(json.dumps(results, indent=2, sort_keys=True))
+    _dump_results(results, output=args.output, emit_stdout=args.emit_stdout)
 
 
 if __name__ == "__main__":
