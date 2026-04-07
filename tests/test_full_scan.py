@@ -27,6 +27,9 @@ def test_full_scan_catalog_contains_unique_tasks():
     assert len({task.id for task in tasks}) == len(tasks)
     assert all(task.category for task in tasks)
     assert all(task.description for task in tasks)
+    descriptions = {task.description for task in tasks}
+    assert "releasing doc includes release artifact interop smoke command" in descriptions
+    assert "Makefile includes release artifact interop smoke target" in descriptions
 
 
 def test_full_scan_lists_every_task():

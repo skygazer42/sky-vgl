@@ -2,8 +2,9 @@ PYTHON ?= python
 BENCH_OUTPUT ?= benchmarks/latest.json
 BENCH_PRESET ?= smoke
 INTEROP_BACKEND ?= all
+RELEASE_INTEROP_BACKEND ?= dgl
 
-.PHONY: verify coverage metadata test lint types docs package full-scan docs-link public-surface release-contract release-smoke extras-smoke interop-smoke bench-smoke
+.PHONY: verify coverage metadata test lint types docs package full-scan docs-link public-surface release-contract release-smoke release-artifact-interop-smoke extras-smoke interop-smoke bench-smoke
 
 verify: test coverage lint types docs package full-scan docs-link public-surface metadata release-contract release-smoke extras-smoke bench-smoke
 
@@ -42,6 +43,9 @@ release-contract:
 
 release-smoke:
 	$(PYTHON) scripts/release_smoke.py --artifact-dir dist --kind all
+
+release-artifact-interop-smoke:
+	$(PYTHON) scripts/release_smoke.py --artifact-dir dist --kind wheel --interop-backend=$(RELEASE_INTEROP_BACKEND)
 
 extras-smoke:
 	$(PYTHON) scripts/extras_smoke.py --extras networkx scipy tensorboard

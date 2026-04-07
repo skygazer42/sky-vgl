@@ -78,6 +78,9 @@ def test_makefile_exposes_interop_smoke_target():
     assert "INTEROP_BACKEND ?= all" in makefile_text
     assert "interop-smoke:" in makefile_text
     assert "scripts/interop_smoke.py --backend=$(INTEROP_BACKEND)" in makefile_text
+    assert "RELEASE_INTEROP_BACKEND ?= dgl" in makefile_text
+    assert "release-artifact-interop-smoke:" in makefile_text
+    assert "scripts/release_smoke.py --artifact-dir dist --kind wheel --interop-backend=$(RELEASE_INTEROP_BACKEND)" in makefile_text
 
 
 def test_benchmark_hotpaths_writes_quiet_stable_json(tmp_path):
@@ -128,4 +131,5 @@ def test_support_matrix_tracks_live_optional_interop_verification():
     assert "interop-smoke" in support_matrix
     assert "python scripts/interop_smoke.py --backend dgl" in support_matrix
     assert "python scripts/interop_smoke.py --backend pyg" in support_matrix
+    assert "python scripts/release_smoke.py --artifact-dir dist --kind wheel --interop-backend dgl" in support_matrix
     assert "Planned real install smoke" not in support_matrix

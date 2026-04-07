@@ -27,14 +27,18 @@ symbols from the release contract (`Graph`, `Trainer`, `PlanetoidDataset`,
 `NodeClassificationTask`) resolve from the installed distribution instead of the
 checkout.
 6. Run optional backend interop smoke checks in an environment where the extras
-are installed. The reusable script is the same one used by the manual/nightly
-workflow:
+are installed. The reusable checkout-level script is the same one used by the
+manual/nightly workflow. Artifact-level interop smoke reuses host-installed
+torch and optional backend packages from the outer `site-packages` while still
+verifying that `vgl` resolves from the installed wheel instead of the checkout:
 
 ```bash
 python scripts/interop_smoke.py --list-backends
 python scripts/interop_smoke.py --backend pyg
 python scripts/interop_smoke.py --backend dgl
 python scripts/interop_smoke.py --backend all  # only when both extras are installed
+# Optional: verify interop through installed wheel artifacts (not checkout imports)
+python scripts/release_smoke.py --artifact-dir dist --kind wheel --interop-backend dgl
 ```
 7. Draft release notes from the changelog and recent commits before tagging:
 
@@ -75,7 +79,7 @@ when present and falls back to Trusted Publishing otherwise.
 
 1. Install from PyPI in a clean environment.
 2. Import `vgl` and the golden-path public imports.
-3. If the release touched interop adapters, rerun `python scripts/interop_smoke.py --backend dgl` and/or `python scripts/interop_smoke.py --backend pyg` for the extras you have installed. Use `--backend all` only when both extras are present.
+3. If the release touched interop adapters, rerun `python scripts/interop_smoke.py --backend dgl` and/or `python scripts/interop_smoke.py --backend pyg` for the extras you have installed. Use `--backend all` only when both extras are present. For artifact-level validation, also run `python scripts/release_smoke.py --artifact-dir dist --kind wheel --interop-backend dgl` (or `pyg`).
 4. Verify the PyPI project page links for Homepage, Repository, Documentation, and Issues.
 5. Check that the tagged source and published package versions match.
 6. Confirm `refs/tags/vX.Y.Z` matches `vgl.__version__ == "X.Y.Z"` and that README/docs no longer show stale hard-coded version badges.

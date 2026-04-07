@@ -26,6 +26,7 @@ Track the combinations that CI and release verification currently exercise so yo
 | `tensorboard` | Logging | Verified via smoke script (Wave 1) and release packaging. |
 | `dgl` | DGL interop | Manual/nightly `interop-smoke` installs the real extra and runs `python scripts/interop_smoke.py --backend dgl`. |
 | `pyg` | PyG interop | Manual/nightly `interop-smoke` installs the real extra and runs `python scripts/interop_smoke.py --backend pyg`. |
+| `release artifact interop` | Wheel install + optional backend round-trip | Maintainer optional host-assisted check: `python scripts/release_smoke.py --artifact-dir dist --kind wheel --interop-backend dgl` (or `pyg`). This reuses the host torch/backend stack while ensuring imports come from the installed wheel. |
 
 ## Installation Notes
 
@@ -34,6 +35,7 @@ Track the combinations that CI and release verification currently exercise so yo
 3. Add extras via `pip install \"sky-vgl[networkx,scipy,...]\"` per the matrix row.
 4. Run `python -m pytest tests/compat/test_optional_dependency_messages.py` after each upgrade to ensure metadata still advertises the extras.
 5. For DGL/PyG environments, run `python scripts/interop_smoke.py --backend dgl` and/or `python scripts/interop_smoke.py --backend pyg` for the extras you installed. Use `--backend all` only when both are present.
+6. For release candidates, run artifact-level backend smoke with `python scripts/release_smoke.py --artifact-dir dist --kind wheel --interop-backend dgl` (or `pyg`) to validate installed artifacts, not checkout imports. This path is host-assisted: install the desired torch/backend stack first, then let `release_smoke.py` borrow it while checking the built wheel.
 
 ## Documented Source of Truth
 

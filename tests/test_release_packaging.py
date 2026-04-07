@@ -1,4 +1,6 @@
 import email
+import importlib.machinery
+import importlib.util
 import subprocess
 import sys
 import tarfile
@@ -18,6 +20,22 @@ from scripts.contracts import (
 
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
+
+
+def _load_release_smoke_module():
+    script_path = REPO_ROOT / "scripts" / "release_smoke.py"
+    spec = importlib.util.spec_from_file_location("release_smoke", script_path)
+    module = importlib.util.module_from_spec(spec)
+    assert spec is not None
+    assert spec.loader is not None
+    spec.loader.exec_module(module)
+    return module
+
+
+def _artifact_smoke_backend_available(name: str) -> bool:
+    release_smoke = _load_release_smoke_module()
+    search_paths = [str(path) for path in release_smoke._outer_site_packages()]
+    return importlib.machinery.PathFinder.find_spec(name, search_paths) is not None
 
 
 def _build_release_artifacts(tmp_path_factory):
@@ -198,6 +216,59 @@ def test_release_smoke_script_can_install_built_wheel(built_release_artifacts):
     assert f"wheel smoke check passed for {wheel_path.name}" in completed.stdout
 
 
+def test_release_smoke_script_accepts_disabled_interop_backend_flag(built_release_artifacts):
+    wheel_path, _ = built_release_artifacts
+    smoke_script = REPO_ROOT / "scripts" / "release_smoke.py"
+
+    completed = subprocess.run(
+        [
+            sys.executable,
+            str(smoke_script),
+            "--artifact-dir",
+            str(wheel_path.parent),
+            "--kind",
+            "wheel",
+            "--interop-backend",
+            "none",
+        ],
+        cwd=REPO_ROOT,
+        capture_output=True,
+        text=True,
+    )
+
+    assert completed.returncode == 0, completed.stderr
+    assert f"wheel smoke check passed for {wheel_path.name}" in completed.stdout
+
+
+@pytest.mark.skipif(
+    not _artifact_smoke_backend_available("dgl"),
+    reason="dgl is not available to release_smoke artifact checks",
+)
+def test_release_smoke_script_supports_artifact_interop_backend_dgl(built_release_artifacts):
+    wheel_path, _ = built_release_artifacts
+    smoke_script = REPO_ROOT / "scripts" / "release_smoke.py"
+
+    completed = subprocess.run(
+        [
+            sys.executable,
+            str(smoke_script),
+            "--artifact-dir",
+            str(wheel_path.parent),
+            "--kind",
+            "wheel",
+            "--interop-backend",
+            "dgl",
+        ],
+        cwd=REPO_ROOT,
+        capture_output=True,
+        text=True,
+    )
+
+    assert completed.returncode == 0, completed.stderr
+    assert "dgl interop smoke check passed" in completed.stdout
+    assert f"wheel smoke check passed for {wheel_path.name}" in completed.stdout
+
+
 def test_release_readme_documents_public_install_paths():
     readme = (REPO_ROOT / "README.md").read_text(encoding="utf-8")
     docs_index = (REPO_ROOT / "docs" / "index.md").read_text(encoding="utf-8")
@@ -233,7 +304,9 @@ def test_release_readme_documents_public_install_paths():
     assert "Manage Project -> Publishing" in releasing
     assert "PYPI_API_TOKEN" in releasing
     assert "TEST_PYPI_API_TOKEN" in releasing
+    assert "host-installed" in releasing
     assert "python scripts/release_smoke.py --artifact-dir dist --kind all" in releasing
+    assert "python scripts/release_smoke.py --artifact-dir dist --kind wheel --interop-backend dgl" in releasing
     assert "python scripts/interop_smoke.py --backend all" in releasing
     for symbol in WHEEL_IMPORT_SYMBOLS:
         assert symbol in releasing

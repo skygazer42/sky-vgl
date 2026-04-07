@@ -724,6 +724,22 @@ def build_tasks(repo_root: Path) -> list[ScanTask]:
                 "docs/releasing.md",
                 "python scripts/interop_smoke.py --backend all",
             ),
+            _text_contains_task(
+                ctx,
+                "104",
+                "docs",
+                "releasing doc includes release artifact interop smoke command",
+                "docs/releasing.md",
+                "python scripts/release_smoke.py --artifact-dir dist --kind wheel --interop-backend dgl",
+            ),
+            _text_contains_task(
+                ctx,
+                "105",
+                "tooling",
+                "Makefile includes release artifact interop smoke target",
+                "Makefile",
+                "scripts/release_smoke.py --artifact-dir dist --kind wheel --interop-backend=$(RELEASE_INTEROP_BACKEND)",
+            ),
         ]
     )
 

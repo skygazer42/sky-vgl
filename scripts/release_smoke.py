@@ -9,11 +9,17 @@ import subprocess
 import sys
 import tempfile
 from pathlib import Path
+from typing import Sequence
 
-from contracts import WHEEL_IMPORT_SYMBOLS
+try:
+    from contracts import REAL_INTEROP_BACKENDS, WHEEL_IMPORT_SYMBOLS
+except ModuleNotFoundError:
+    from scripts.contracts import REAL_INTEROP_BACKENDS, WHEEL_IMPORT_SYMBOLS
+
+INTEROP_BACKENDS = ("none", *REAL_INTEROP_BACKENDS, "all")
 
 
-def _parse_args() -> argparse.Namespace:
+def _parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description=(
             "Smoke-test built release artifacts by installing them into an isolated "
@@ -31,7 +37,16 @@ def _parse_args() -> argparse.Namespace:
         default="all",
         help="Which built artifact kind to validate.",
     )
-    return parser.parse_args()
+    parser.add_argument(
+        "--interop-backend",
+        choices=INTEROP_BACKENDS,
+        default="none",
+        help=(
+            "Optionally run backend interop smoke inside the artifact-installed "
+            "environment. Defaults to disabled."
+        ),
+    )
+    return parser.parse_args(argv)
 
 
 def _find_single(artifact_dir: Path, pattern: str) -> Path:
@@ -101,7 +116,80 @@ def _import_check(
     _run([str(python_bin), "-c", script], cwd=cwd)
 
 
-def _smoke_install(kind: str, artifact: Path, *, repo_root: Path) -> None:
+def _selected_interop_backends(backend: str | None) -> tuple[str, ...]:
+    if backend in {None, "none"}:
+        return ()
+    if backend == "all":
+        return REAL_INTEROP_BACKENDS
+    if backend in REAL_INTEROP_BACKENDS:
+        return (backend,)
+    raise ValueError(f"unsupported interop backend: {backend}")
+
+
+def _build_interop_check_script(
+    backend: str,
+    *,
+    repo_root: Path,
+    dependency_paths: list[Path],
+) -> str:
+    bootstrap = "".join(f"site.addsitedir({str(path)!r})\n" for path in dependency_paths)
+    script = (
+        "import site\n"
+        "from pathlib import Path\n"
+        f"{bootstrap}"
+        "import torch\n"
+        "import vgl\n"
+        "from vgl import Graph\n"
+        f"repo_root = Path({str(repo_root)!r}).resolve()\n"
+        "module_path = Path(vgl.__file__).resolve()\n"
+        "assert repo_root not in module_path.parents, module_path\n"
+        "graph = Graph.homo(\n"
+        "    edge_index=torch.tensor([[0, 1], [1, 0]], dtype=torch.long),\n"
+        "    x=torch.tensor([[1.0, 0.0], [0.0, 1.0]], dtype=torch.float32),\n"
+        "    y=torch.tensor([0, 1], dtype=torch.long),\n"
+        "    edge_data={'edge_attr': torch.tensor([[0.25], [0.75]], dtype=torch.float32)},\n"
+        ")\n"
+    )
+    if backend == "pyg":
+        script += (
+            "restored = Graph.from_pyg(graph.to_pyg())\n"
+            "assert torch.equal(restored.edge_index, graph.edge_index)\n"
+            "assert torch.equal(restored.x, graph.x)\n"
+            "assert torch.equal(restored.y, graph.y)\n"
+            "assert torch.equal(restored.edata['edge_attr'], graph.edata['edge_attr'])\n"
+        )
+    elif backend == "dgl":
+        script += (
+            "restored = Graph.from_dgl(graph.to_dgl())\n"
+            "assert torch.equal(restored.edge_index, graph.edge_index)\n"
+            "assert torch.equal(restored.x, graph.x)\n"
+            "assert torch.equal(restored.y, graph.y)\n"
+            "assert torch.equal(restored.edata['edge_attr'], graph.edata['edge_attr'])\n"
+        )
+    else:
+        raise ValueError(f"unsupported interop backend: {backend}")
+    return script
+
+
+def _interop_check(
+    python_bin: Path,
+    *,
+    cwd: Path,
+    repo_root: Path,
+    dependency_paths: list[Path],
+    backend: str,
+) -> None:
+    for selected_backend in _selected_interop_backends(backend):
+        script = _build_interop_check_script(
+            selected_backend,
+            repo_root=repo_root,
+            dependency_paths=dependency_paths,
+        )
+        _run([str(python_bin), "-c", script], cwd=cwd)
+        print(f"{selected_backend} interop smoke check passed")
+
+
+def _smoke_install(kind: str, artifact: Path, *, repo_root: Path, interop_backend: str) -> None:
     with tempfile.TemporaryDirectory(prefix=f"vgl-release-{kind}-") as tmp:
         tmp_dir = Path(tmp)
         venv_dir = tmp_dir / "venv"
@@ -132,6 +220,13 @@ def _smoke_install(kind: str, artifact: Path, *, repo_root: Path) -> None:
             repo_root=repo_root,
             dependency_paths=_outer_site_packages(),
         )
+        _interop_check(
+            python_bin,
+            cwd=tmp_dir,
+            repo_root=repo_root,
+            dependency_paths=_outer_site_packages(),
+            backend=interop_backend,
+        )
         print(f"{kind} smoke check passed for {artifact.name}")
 
 
@@ -144,9 +239,19 @@ def main() -> None:
         raise SystemExit(f"artifact directory does not exist: {artifact_dir}")
 
     if args.kind in {"wheel", "all"}:
-        _smoke_install("wheel", _find_single(artifact_dir, "*.whl"), repo_root=repo_root)
+        _smoke_install(
+            "wheel",
+            _find_single(artifact_dir, "*.whl"),
+            repo_root=repo_root,
+            interop_backend=args.interop_backend,
+        )
     if args.kind in {"sdist", "all"}:
-        _smoke_install("sdist", _find_single(artifact_dir, "*.tar.gz"), repo_root=repo_root)
+        _smoke_install(
+            "sdist",
+            _find_single(artifact_dir, "*.tar.gz"),
+            repo_root=repo_root,
+            interop_backend=args.interop_backend,
+        )
 
 
 if __name__ == "__main__":

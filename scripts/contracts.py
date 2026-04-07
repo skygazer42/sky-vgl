@@ -32,6 +32,9 @@ OPTIONAL_EXTRAS = ("dev", "scipy", "networkx", "tensorboard", "dgl", "pyg", "ful
 DEFAULT_LIGHTWEIGHT_EXTRAS = ("networkx", "scipy", "tensorboard")
 REAL_INTEROP_BACKENDS = ("pyg", "dgl")
 INTEROP_SMOKE_SCRIPT = "scripts/interop_smoke.py"
+RELEASE_ARTIFACT_INTEROP_COMMAND = (
+    "python scripts/release_smoke.py --artifact-dir dist --kind wheel --interop-backend dgl"
+)
 SUPPORTED_PYTHON_VERSIONS = ("3.10", "3.11", "3.12")
 PRIMARY_CI_PLATFORMS = ("ubuntu-latest", "macos-latest")
 PRIMARY_MACOS_SMOKE = "macos-latest"
