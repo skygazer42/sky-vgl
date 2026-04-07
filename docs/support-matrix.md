@@ -26,7 +26,7 @@ Track the combinations that CI and release verification currently exercise so yo
 | `tensorboard` | Logging | Verified via smoke script (Wave 1) and release packaging. |
 | `dgl` | DGL interop | Manual/nightly `interop-smoke` installs the real extra and runs `python scripts/interop_smoke.py --backend dgl`. |
 | `pyg` | PyG interop | Manual/nightly `interop-smoke` installs the real extra and runs `python scripts/interop_smoke.py --backend pyg`. |
-| `release artifact interop` | Wheel install + optional backend round-trip | Maintainer optional host-assisted check: `python scripts/release_smoke.py --artifact-dir dist --kind wheel --interop-backend dgl` (or `pyg`). This reuses the host torch/backend stack while ensuring imports come from the installed wheel. `--interop-backend all` additionally demands both host backends be importable, otherwise the smoke script fails early with a preflight error. |
+| `release artifact interop` | Wheel install + optional backend round-trip | Maintainer optional host-assisted check: `python scripts/release_smoke.py --artifact-dir dist --kind wheel --interop-backend dgl` (or `pyg`). This reuses the host torch/backend stack while ensuring imports come from the installed wheel. `--interop-backend all` additionally demands both host backends be importable, otherwise the smoke script fails early with a preflight error. The manual/nightly `interop-smoke` workflow now builds the artifacts, installs both extras, and runs the `--backend all` paths for both `interop_smoke.py` and `release_smoke.py`, providing automated artifact-level verification for the combined backend scenario. |
 
 ## Installation Notes
 

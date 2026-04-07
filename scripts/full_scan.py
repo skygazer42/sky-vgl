@@ -740,6 +740,30 @@ def build_tasks(repo_root: Path) -> list[ScanTask]:
                 "Makefile",
                 "scripts/release_smoke.py --artifact-dir dist --kind wheel --interop-backend=$(RELEASE_INTEROP_BACKEND)",
             ),
+            _text_contains_task(
+                ctx,
+                "106",
+                "workflow",
+                "interop workflow builds artifacts",
+                ".github/workflows/interop-smoke.yml",
+                "python -m build",
+            ),
+            _text_contains_task(
+                ctx,
+                "107",
+                "workflow",
+                "interop workflow runs all-backend checkout smoke",
+                ".github/workflows/interop-smoke.yml",
+                "python scripts/interop_smoke.py --backend all",
+            ),
+            _text_contains_task(
+                ctx,
+                "108",
+                "workflow",
+                "interop workflow runs all-backend release artifact smoke",
+                ".github/workflows/interop-smoke.yml",
+                "python scripts/release_smoke.py --artifact-dir dist --kind wheel --interop-backend all",
+            ),
         ]
     )
 

@@ -33,3 +33,21 @@ jobs:
           python -m pip install -e ".[dev,dgl]"
       - name: DGL round-trip smoke
         run: python scripts/interop_smoke.py --backend dgl
+
+  all-artifact-smoke:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -e ".[dev,pyg,dgl]"
+      - name: Build distribution artifacts
+        run: python -m build
+      - name: Combined checkout interop smoke
+        run: python scripts/interop_smoke.py --backend all
+      - name: Combined artifact interop smoke
+        run: python scripts/release_smoke.py --artifact-dir dist --kind wheel --interop-backend all

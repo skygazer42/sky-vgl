@@ -45,6 +45,13 @@ python scripts/interop_smoke.py --backend all  # only when both extras are insta
 # Optional: verify interop through installed wheel artifacts (not checkout imports)
 python scripts/release_smoke.py --artifact-dir dist --kind wheel --interop-backend dgl
 ```
+The manual/nightly `interop-smoke` workflow now also installs both optional
+backends, builds the artifacts, and runs
+`python scripts/interop_smoke.py --backend all` followed by
+`python scripts/release_smoke.py --artifact-dir dist --kind wheel --interop-backend all`
+so automation continuously exercises the artifact-level success path for both
+backends.
+
 7. Draft release notes from the changelog and recent commits before tagging:
 
 ```bash

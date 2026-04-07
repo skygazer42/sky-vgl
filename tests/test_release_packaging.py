@@ -344,6 +344,7 @@ def test_release_readme_documents_public_install_paths():
     installation = (REPO_ROOT / "docs" / "getting-started" / "installation.md").read_text(encoding="utf-8")
     quickstart = (REPO_ROOT / "docs" / "public-surface-contract.md").read_text(encoding="utf-8")
     releasing = (REPO_ROOT / "docs" / "releasing.md").read_text(encoding="utf-8")
+    support_matrix = (REPO_ROOT / "docs" / "support-matrix.md").read_text(encoding="utf-8")
 
     asset_base = "https://raw.githubusercontent.com/skygazer42/sky-vgl/main/assets/"
 
@@ -379,6 +380,10 @@ def test_release_readme_documents_public_install_paths():
     assert "fail early" in releasing
     assert "python scripts/release_smoke.py --artifact-dir dist --kind all" in releasing
     assert "python scripts/release_smoke.py --artifact-dir dist --kind wheel --interop-backend dgl" in releasing
+    assert "python scripts/release_smoke.py --artifact-dir dist --kind wheel --interop-backend all" in releasing
+    assert "interop-smoke" in releasing
+    assert "builds the artifacts" in releasing
     assert "python scripts/interop_smoke.py --backend all" in releasing
+    assert "providing automated artifact-level verification for the combined backend scenario" in support_matrix
     for symbol in WHEEL_IMPORT_SYMBOLS:
         assert symbol in releasing

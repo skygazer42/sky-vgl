@@ -30,6 +30,8 @@ def test_full_scan_catalog_contains_unique_tasks():
     descriptions = {task.description for task in tasks}
     assert "releasing doc includes release artifact interop smoke command" in descriptions
     assert "Makefile includes release artifact interop smoke target" in descriptions
+    assert "interop workflow builds artifacts" in descriptions
+    assert "interop workflow runs all-backend release artifact smoke" in descriptions
 
 
 def test_full_scan_lists_every_task():
