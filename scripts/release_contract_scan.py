@@ -265,7 +265,7 @@ def build_tasks(repo_root: Path, artifact_dir: Path) -> list[ScanTask]:
         ],
         *[
             _sdist_excludes_task(ctx, f"{index:03d}", substring)
-            for index, substring in enumerate(SDIST_EXCLUDED_SUBSTRINGS, start=28)
+            for index, substring in enumerate(SDIST_EXCLUDED_SUBSTRINGS, start=24 + len(SDIST_REQUIRED_SUFFIXES))
         ],
     ]
 

@@ -68,8 +68,16 @@ def test_manual_interop_workflow_covers_pyg_and_dgl():
     assert "schedule:" in workflow_text
     assert 'python -m pip install -e ".[dev,pyg]"' in workflow_text
     assert 'python -m pip install -e ".[dev,dgl]"' in workflow_text
-    assert "from vgl.compat import from_pyg, to_pyg" in workflow_text
-    assert "from vgl.compat import from_dgl, to_dgl" in workflow_text
+    assert "python scripts/interop_smoke.py --backend pyg" in workflow_text
+    assert "python scripts/interop_smoke.py --backend dgl" in workflow_text
+
+
+def test_makefile_exposes_interop_smoke_target():
+    makefile_text = (REPO_ROOT / "Makefile").read_text(encoding="utf-8")
+
+    assert "INTEROP_BACKEND ?= all" in makefile_text
+    assert "interop-smoke:" in makefile_text
+    assert "scripts/interop_smoke.py --backend=$(INTEROP_BACKEND)" in makefile_text
 
 
 def test_benchmark_hotpaths_writes_quiet_stable_json(tmp_path):
@@ -118,4 +126,6 @@ def test_support_matrix_tracks_live_optional_interop_verification():
     support_matrix = (REPO_ROOT / "docs" / "support-matrix.md").read_text(encoding="utf-8")
 
     assert "interop-smoke" in support_matrix
+    assert "python scripts/interop_smoke.py --backend dgl" in support_matrix
+    assert "python scripts/interop_smoke.py --backend pyg" in support_matrix
     assert "Planned real install smoke" not in support_matrix

@@ -30,6 +30,8 @@ PROJECT_URLS = {
 }
 OPTIONAL_EXTRAS = ("dev", "scipy", "networkx", "tensorboard", "dgl", "pyg", "full")
 DEFAULT_LIGHTWEIGHT_EXTRAS = ("networkx", "scipy", "tensorboard")
+REAL_INTEROP_BACKENDS = ("pyg", "dgl")
+INTEROP_SMOKE_SCRIPT = "scripts/interop_smoke.py"
 SUPPORTED_PYTHON_VERSIONS = ("3.10", "3.11", "3.12")
 PRIMARY_CI_PLATFORMS = ("ubuntu-latest", "macos-latest")
 PRIMARY_MACOS_SMOKE = "macos-latest"
@@ -40,6 +42,7 @@ SDIST_REQUIRED_SUFFIXES = (
     "/LICENSE",
     "/docs/releasing.md",
     "/scripts/release_smoke.py",
+    "/scripts/interop_smoke.py",
 )
 SDIST_EXCLUDED_SUBSTRINGS = ("/.factory/", "/docs/plans/", "__pycache__")
 WHEEL_IMPORT_SYMBOLS = ("Graph", "Trainer", "PlanetoidDataset", "NodeClassificationTask")
@@ -558,8 +561,8 @@ SUPPORT_MATRIX = (
     ("networkx extra", "CI lightweight smoke", "Interop adapter surface validated in CI."),
     ("scipy extra", "CI lightweight smoke", "Sparse export surface validated in CI."),
     ("tensorboard extra", "CI lightweight smoke", "Logger extra validated in CI."),
-    ("pyg extra", "manual/nightly smoke", "Real-install smoke intended outside the default PR matrix."),
-    ("dgl extra", "manual/nightly smoke", "Real-install smoke intended outside the default PR matrix."),
+    ("pyg extra", "manual/nightly smoke", "Real-install smoke is exercised via scripts/interop_smoke.py."),
+    ("dgl extra", "manual/nightly smoke", "Real-install smoke is exercised via scripts/interop_smoke.py."),
 )
 
 

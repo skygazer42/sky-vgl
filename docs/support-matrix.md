@@ -14,8 +14,8 @@ Track the combinations that CI and release verification currently exercise so yo
 |-----------|-------------------|-------|
 | Python | 3.10 / 3.11 / 3.12 | Ubuntu matrix plus a macOS smoke lane in CI. |
 | PyTorch | 2.4+ | Core runtime dependency declared in packaging metadata and verified by the default CI install. |
-| torch-geometric | 2.5+ (optional) | Manual/nightly `interop-smoke` workflow installs the real extra and runs a round-trip adapter check. |
-| DGL | 2.1+ (optional) | Manual/nightly `interop-smoke` workflow installs the real extra and runs a round-trip adapter check. |
+| torch-geometric | 2.5+ (optional) | Manual/nightly `interop-smoke` installs the real extra and runs the reusable backend smoke script. |
+| DGL | 2.1+ (optional) | Manual/nightly `interop-smoke` installs the real extra and runs the reusable backend smoke script. |
 
 ## Extras & Add-ons
 
@@ -24,8 +24,8 @@ Track the combinations that CI and release verification currently exercise so yo
 | `networkx` | Graph conversions ↔ NetworkX | Covered by CI `extras_smoke` and compatibility tests. |
 | `scipy` | Sparse exports, algs | `extras_smoke` plus compatibility-oriented tests. |
 | `tensorboard` | Logging | Verified via smoke script (Wave 1) and release packaging. |
-| `dgl` | DGL interop | Manual/nightly `interop-smoke` installs the real extra and runs a round-trip adapter smoke. |
-| `pyg` | PyG interop | Manual/nightly `interop-smoke` installs the real extra and runs a round-trip adapter smoke. |
+| `dgl` | DGL interop | Manual/nightly `interop-smoke` installs the real extra and runs `python scripts/interop_smoke.py --backend dgl`. |
+| `pyg` | PyG interop | Manual/nightly `interop-smoke` installs the real extra and runs `python scripts/interop_smoke.py --backend pyg`. |
 
 ## Installation Notes
 
@@ -33,6 +33,7 @@ Track the combinations that CI and release verification currently exercise so yo
 2. Install the matching PyTorch wheel for your CUDA target (or CPU) before `pip install sky-vgl`.
 3. Add extras via `pip install \"sky-vgl[networkx,scipy,...]\"` per the matrix row.
 4. Run `python -m pytest tests/compat/test_optional_dependency_messages.py` after each upgrade to ensure metadata still advertises the extras.
+5. For DGL/PyG environments, run `python scripts/interop_smoke.py --backend dgl` and/or `python scripts/interop_smoke.py --backend pyg` for the extras you installed. Use `--backend all` only when both are present.
 
 ## Documented Source of Truth
 

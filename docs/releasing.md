@@ -26,7 +26,17 @@ installs the built artifacts, and verifies `import vgl` plus the golden-path
 symbols from the release contract (`Graph`, `Trainer`, `PlanetoidDataset`,
 `NodeClassificationTask`) resolve from the installed distribution instead of the
 checkout.
-6. Draft release notes from the changelog and recent commits before tagging:
+6. Run optional backend interop smoke checks in an environment where the extras
+are installed. The reusable script is the same one used by the manual/nightly
+workflow:
+
+```bash
+python scripts/interop_smoke.py --list-backends
+python scripts/interop_smoke.py --backend pyg
+python scripts/interop_smoke.py --backend dgl
+python scripts/interop_smoke.py --backend all  # only when both extras are installed
+```
+7. Draft release notes from the changelog and recent commits before tagging:
 
 ```bash
 git log --oneline --decorate <previous-tag>..HEAD
@@ -65,8 +75,9 @@ when present and falls back to Trusted Publishing otherwise.
 
 1. Install from PyPI in a clean environment.
 2. Import `vgl` and the golden-path public imports.
-3. Verify the PyPI project page links for Homepage, Repository, Documentation, and Issues.
-4. Check that the tagged source and published package versions match.
-5. Confirm `refs/tags/vX.Y.Z` matches `vgl.__version__ == "X.Y.Z"` and that README/docs no longer show stale hard-coded version badges.
+3. If the release touched interop adapters, rerun `python scripts/interop_smoke.py --backend dgl` and/or `python scripts/interop_smoke.py --backend pyg` for the extras you have installed. Use `--backend all` only when both extras are present.
+4. Verify the PyPI project page links for Homepage, Repository, Documentation, and Issues.
+5. Check that the tagged source and published package versions match.
+6. Confirm `refs/tags/vX.Y.Z` matches `vgl.__version__ == "X.Y.Z"` and that README/docs no longer show stale hard-coded version badges.
 
 The published distribution name is `sky-vgl`, but the Python import surface remains `vgl`.

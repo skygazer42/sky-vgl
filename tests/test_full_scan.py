@@ -18,18 +18,19 @@ def _load_scan_module():
     return module
 
 
-def test_full_scan_catalog_contains_exactly_100_unique_tasks():
+def test_full_scan_catalog_contains_unique_tasks():
     scan = _load_scan_module()
 
     tasks = scan.build_tasks(REPO_ROOT)
 
-    assert len(tasks) == 100
-    assert len({task.id for task in tasks}) == 100
+    assert len(tasks) >= 100
+    assert len({task.id for task in tasks}) == len(tasks)
     assert all(task.category for task in tasks)
     assert all(task.description for task in tasks)
 
 
 def test_full_scan_lists_every_task():
+    expected = len(_load_scan_module().build_tasks(REPO_ROOT))
     completed = subprocess.run(
         [sys.executable, str(SCAN_SCRIPT), "--list"],
         cwd=REPO_ROOT,
@@ -39,10 +40,12 @@ def test_full_scan_lists_every_task():
 
     assert completed.returncode == 0, completed.stderr
     listed = [line for line in completed.stdout.splitlines() if line.startswith("SCAN ")]
-    assert len(listed) == 100
+    assert len(listed) == expected
+    assert f"SUMMARY listed {expected} tasks" in completed.stdout
 
 
 def test_full_scan_passes_on_the_repository():
+    expected = len(_load_scan_module().build_tasks(REPO_ROOT))
     completed = subprocess.run(
         [sys.executable, str(SCAN_SCRIPT)],
         cwd=REPO_ROOT,
@@ -51,7 +54,7 @@ def test_full_scan_passes_on_the_repository():
     )
 
     assert completed.returncode == 0, completed.stderr
-    assert "SUMMARY 100/100 passed" in completed.stdout
+    assert f"SUMMARY {expected}/{expected} passed" in completed.stdout
 
 
 def test_ci_workflow_runs_the_full_scan_script():

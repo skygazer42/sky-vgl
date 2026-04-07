@@ -702,11 +702,33 @@ def build_tasks(repo_root: Path) -> list[ScanTask]:
                 "tests/data/test_loader.py exists",
                 "tests/data/test_loader.py",
             ),
+            _path_exists_task(
+                ctx,
+                "101",
+                "repo",
+                "interop smoke script exists",
+                "scripts/interop_smoke.py",
+            ),
+            _path_exists_task(
+                ctx,
+                "102",
+                "repo",
+                "interop smoke workflow exists",
+                ".github/workflows/interop-smoke.yml",
+            ),
+            _text_contains_task(
+                ctx,
+                "103",
+                "docs",
+                "releasing doc includes interop smoke command",
+                "docs/releasing.md",
+                "python scripts/interop_smoke.py --backend all",
+            ),
         ]
     )
 
-    if len(tasks) != 100:
-        raise RuntimeError(f"expected 100 scan tasks, found {len(tasks)}")
+    if len(tasks) < 100:
+        raise RuntimeError(f"expected at least 100 scan tasks, found {len(tasks)}")
     return tasks
 
 
@@ -719,7 +741,7 @@ def _run_task(task: ScanTask) -> ScanResult:
 
 
 def _parse_args() -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description="Run the repository-wide 100-task full scan.")
+    parser = argparse.ArgumentParser(description="Run the repository-wide full scan.")
     parser.add_argument("--list", action="store_true", help="List scan tasks without executing them.")
     parser.add_argument(
         "--repo-root",

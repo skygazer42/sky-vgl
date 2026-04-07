@@ -96,6 +96,7 @@ include = [
   "/README.md",
   "/LICENSE",
   "/scripts/release_smoke.py",
+  "/scripts/interop_smoke.py",
   "/vgl",
   "/examples",
   "/docs/core-concepts.md",

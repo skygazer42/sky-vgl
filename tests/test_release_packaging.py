@@ -85,16 +85,19 @@ def test_release_artifacts_exclude_internal_repo_only_content(built_release_arti
     assert any(name.endswith("/README.md") for name in sdist_names)
     assert any(name.endswith("/LICENSE") for name in sdist_names)
     assert any(name.endswith("/scripts/release_smoke.py") for name in sdist_names)
+    assert any(name.endswith("/scripts/interop_smoke.py") for name in sdist_names)
 
 
 def test_release_workflows_exist_for_ci_and_pypi_publish():
     ci_path = REPO_ROOT / ".github" / "workflows" / "ci.yml"
     publish_path = REPO_ROOT / ".github" / "workflows" / "publish.yml"
     smoke_script = REPO_ROOT / "scripts" / "release_smoke.py"
+    interop_script = REPO_ROOT / "scripts" / "interop_smoke.py"
 
     assert ci_path.exists()
     assert publish_path.exists()
     assert smoke_script.exists()
+    assert interop_script.exists()
 
     ci_text = ci_path.read_text(encoding="utf-8")
     publish_text = publish_path.read_text(encoding="utf-8")
@@ -231,5 +234,6 @@ def test_release_readme_documents_public_install_paths():
     assert "PYPI_API_TOKEN" in releasing
     assert "TEST_PYPI_API_TOKEN" in releasing
     assert "python scripts/release_smoke.py --artifact-dir dist --kind all" in releasing
+    assert "python scripts/interop_smoke.py --backend all" in releasing
     for symbol in WHEEL_IMPORT_SYMBOLS:
         assert symbol in releasing

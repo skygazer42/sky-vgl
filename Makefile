@@ -1,8 +1,9 @@
 PYTHON ?= python
 BENCH_OUTPUT ?= benchmarks/latest.json
 BENCH_PRESET ?= smoke
+INTEROP_BACKEND ?= all
 
-.PHONY: verify coverage metadata test lint types docs package full-scan docs-link public-surface release-contract release-smoke extras-smoke bench-smoke
+.PHONY: verify coverage metadata test lint types docs package full-scan docs-link public-surface release-contract release-smoke extras-smoke interop-smoke bench-smoke
 
 verify: test coverage lint types docs package full-scan docs-link public-surface metadata release-contract release-smoke extras-smoke bench-smoke
 
@@ -44,6 +45,9 @@ release-smoke:
 
 extras-smoke:
 	$(PYTHON) scripts/extras_smoke.py --extras networkx scipy tensorboard
+
+interop-smoke:
+	$(PYTHON) scripts/interop_smoke.py --backend=$(INTEROP_BACKEND)
 
 bench-smoke:
 	$(PYTHON) scripts/benchmark_hotpaths.py --preset=$(BENCH_PRESET) --output=$(BENCH_OUTPUT)
