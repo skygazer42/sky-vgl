@@ -230,6 +230,13 @@ def test_full_scan_reuses_shared_workflow_job_helper():
     assert scan.workflow_job_contains_text is shared_module.workflow_job_contains_text
 
 
+def test_full_scan_reuses_shared_repo_script_loader():
+    scan = _load_scan_module()
+
+    shared_loader = importlib.import_module("scripts.repo_script_imports")
+    assert scan.load_repo_module is shared_loader.load_repo_module
+
+
 def test_full_scan_prefers_repo_workflow_contracts_module(monkeypatch, tmp_path):
     shadow_module = tmp_path / "workflow_contracts.py"
     shadow_module.write_text(
