@@ -18,6 +18,7 @@ from scripts.contracts import (
     RELEASE_VERSION,
     WHEEL_IMPORT_SYMBOLS,
 )
+from tests.workflow_helpers import workflow_job_text
 
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
@@ -175,6 +176,8 @@ def test_release_workflows_exist_for_ci_and_pypi_publish():
 
     ci_text = ci_path.read_text(encoding="utf-8")
     publish_text = publish_path.read_text(encoding="utf-8")
+    package_check_job = workflow_job_text(ci_path, "package-check")
+    publish_build_job = workflow_job_text(publish_path, "build")
 
     assert "python -m pytest -q" in ci_text
     assert "python -m mypy vgl" in ci_text
@@ -184,8 +187,8 @@ def test_release_workflows_exist_for_ci_and_pypi_publish():
     assert "python scripts/docs_link_scan.py" in ci_text
     assert "python scripts/release_contract_scan.py --artifact-dir dist" in ci_text
     assert "python scripts/release_smoke.py --artifact-dir dist --kind all" in ci_text
-    assert 'python -m pip install -e ".[pyg,dgl]"' in ci_text
-    assert "python scripts/release_smoke.py --artifact-dir dist --kind all --interop-backend all" in ci_text
+    assert 'python -m pip install -e ".[pyg,dgl]"' in package_check_job
+    assert "python scripts/release_smoke.py --artifact-dir dist --kind all --interop-backend all" in package_check_job
     assert "python scripts/metadata_consistency.py" in (REPO_ROOT / "docs" / "releasing.md").read_text(encoding="utf-8")
     assert "tags:" in publish_text
     assert "v*" in publish_text
@@ -199,8 +202,8 @@ def test_release_workflows_exist_for_ci_and_pypi_publish():
     assert "needs.probe-publish-auth.outputs.has_test_pypi_api_token" in publish_text
     assert "GITHUB_OUTPUT" in publish_text
     assert "python scripts/release_smoke.py --artifact-dir dist --kind all" in publish_text
-    assert 'python -m pip install -e ".[pyg,dgl]"' in publish_text
-    assert "python scripts/release_smoke.py --artifact-dir dist --kind all --interop-backend all" in publish_text
+    assert 'python -m pip install -e ".[pyg,dgl]"' in publish_build_job
+    assert "python scripts/release_smoke.py --artifact-dir dist --kind all --interop-backend all" in publish_build_job
     assert "Publish to PyPI with API token" in publish_text
     assert "Publish to PyPI with Trusted Publishing" in publish_text
     assert "Publish to TestPyPI with API token" in publish_text

@@ -1,6 +1,7 @@
 import importlib.util
 import subprocess
 import sys
+import textwrap
 from pathlib import Path
 
 
@@ -36,9 +37,9 @@ def test_full_scan_catalog_contains_unique_tasks():
     assert "releasing doc mentions publish build release gate" in descriptions
     assert "releasing doc mentions release gate interop extras install" in descriptions
     assert "releasing doc mentions all-backend release artifact smoke gate" in descriptions
-    assert "CI installs release interop extras for artifact smoke" in descriptions
-    assert "CI runs all-backend release artifact smoke" in descriptions
-    assert "publish build installs release interop extras for artifact smoke" in descriptions
+    assert "CI package-check job installs release interop extras" in descriptions
+    assert "CI package-check job runs all-backend release artifact smoke" in descriptions
+    assert "publish build job installs release interop extras" in descriptions
     assert "publish build runs all-backend release artifact smoke" in descriptions
 
 
@@ -68,6 +69,40 @@ def test_full_scan_passes_on_the_repository():
 
     assert completed.returncode == 0, completed.stderr
     assert f"SUMMARY {expected}/{expected} passed" in completed.stdout
+
+
+def test_scan_context_workflow_job_contains_anchors_to_jobs_section(tmp_path):
+    scan = _load_scan_module()
+    workflow_path = tmp_path / "workflow.yml"
+    workflow_path.write_text(
+        textwrap.dedent(
+            """
+            name: demo
+
+            jobs:
+              build:
+                runs-on: ubuntu-latest
+                steps:
+                  - run: echo build
+
+            concurrency: ci-${{ github.ref }}
+
+            env:
+              SHOULD_NOT_BE_CAPTURED: "1"
+            """
+        ).strip()
+        + "\n",
+        encoding="utf-8",
+    )
+
+    ctx = scan.ScanContext(tmp_path)
+
+    assert ctx.workflow_job_contains("workflow.yml", "build", "echo build") == (
+        True,
+        "workflow.yml job 'build' contains 'echo build'",
+    )
+    assert ctx.workflow_job_contains("workflow.yml", "build", "SHOULD_NOT_BE_CAPTURED")[0] is False
+    assert ctx.workflow_job_contains("workflow.yml", "build", "concurrency:")[0] is False
 
 
 def test_ci_workflow_runs_the_full_scan_script():

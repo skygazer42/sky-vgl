@@ -2,8 +2,10 @@ import json
 import os
 import subprocess
 import sys
+import textwrap
 from pathlib import Path
 
+from tests.workflow_helpers import workflow_job_text
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 
@@ -77,13 +79,47 @@ def test_manual_interop_workflow_covers_pyg_and_dgl():
 
 
 def test_ci_and_publish_build_jobs_gate_all_backend_artifact_interop():
-    ci_text = (REPO_ROOT / ".github" / "workflows" / "ci.yml").read_text(encoding="utf-8")
-    publish_text = (REPO_ROOT / ".github" / "workflows" / "publish.yml").read_text(encoding="utf-8")
+    ci_job = workflow_job_text(REPO_ROOT / ".github" / "workflows" / "ci.yml", "package-check")
+    publish_job = workflow_job_text(REPO_ROOT / ".github" / "workflows" / "publish.yml", "build")
 
-    assert 'python -m pip install -e ".[pyg,dgl]"' in ci_text
-    assert "python scripts/release_smoke.py --artifact-dir dist --kind all --interop-backend all" in ci_text
-    assert 'python -m pip install -e ".[pyg,dgl]"' in publish_text
-    assert "python scripts/release_smoke.py --artifact-dir dist --kind all --interop-backend all" in publish_text
+    assert 'python -m pip install -e ".[pyg,dgl]"' in ci_job
+    assert "python scripts/release_smoke.py --artifact-dir dist --kind all --interop-backend all" in ci_job
+    assert 'python -m pip install -e ".[pyg,dgl]"' in publish_job
+    assert "python scripts/release_smoke.py --artifact-dir dist --kind all --interop-backend all" in publish_job
+
+
+def test_workflow_job_text_anchors_to_jobs_section(tmp_path):
+    workflow_path = tmp_path / "workflow.yml"
+    workflow_path.write_text(
+        textwrap.dedent(
+            """
+            name: demo
+
+            on:
+              workflow_dispatch:
+
+            jobs:
+              build:
+                runs-on: ubuntu-latest
+                steps:
+                  - run: echo build
+
+            concurrency: ci-${{ github.ref }}
+
+            env:
+              SHOULD_NOT_BE_CAPTURED: "1"
+            """
+        ).strip()
+        + "\n",
+        encoding="utf-8",
+    )
+
+    job_text = workflow_job_text(workflow_path, "build")
+
+    assert "runs-on: ubuntu-latest" in job_text
+    assert "echo build" in job_text
+    assert "SHOULD_NOT_BE_CAPTURED" not in job_text
+    assert "concurrency:" not in job_text
 
 
 def test_makefile_exposes_interop_smoke_target():
