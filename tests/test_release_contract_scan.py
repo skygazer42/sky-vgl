@@ -30,6 +30,19 @@ def built_artifact_dir(tmp_path_factory) -> Path:
     return output_dir
 
 
+def test_release_artifact_helper_reads_built_contract_scan_wheel(built_artifact_dir: Path):
+    from scripts.release_artifact_metadata import read_wheel_metadata
+
+    wheel_path = next(built_artifact_dir.glob("*.whl"))
+    metadata, detail = read_wheel_metadata(wheel_path)
+
+    assert metadata is not None
+    assert detail.endswith("METADATA")
+    requires_dist = set(metadata.get_all("Requires-Dist", []))
+    for requirement in RELEASE_INTEROP_EXTRA_REQUIREMENTS.values():
+        assert requirement in requires_dist
+
+
 def test_release_contract_scan_lists_stable_catalog():
     completed = subprocess.run(
         [sys.executable, str(SCAN_SCRIPT), "--list"],
@@ -47,6 +60,7 @@ def test_release_contract_scan_lists_stable_catalog():
     for extra in RELEASE_INTEROP_EXTRA_REQUIREMENTS:
         assert any(f"wheel metadata exposes {extra} extra requirement line" in line for line in listed)
     assert any("sdist contains /scripts/install_release_extras.py" in line for line in listed)
+    assert any("sdist contains /scripts/release_artifact_metadata.py" in line for line in listed)
 
 
 def test_release_contract_scan_passes_on_built_artifacts(built_artifact_dir: Path):

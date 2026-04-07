@@ -3,14 +3,17 @@
 from __future__ import annotations
 
 import argparse
-import email
 import subprocess
 import sys
-import zipfile
 from pathlib import Path
 
 from packaging.markers import default_environment
 from packaging.requirements import Requirement
+
+if __package__:
+    from .release_artifact_metadata import read_wheel_metadata
+else:
+    from release_artifact_metadata import read_wheel_metadata
 
 
 def _parse_args() -> argparse.Namespace:
@@ -49,9 +52,10 @@ def _find_single_wheel(artifact_dir: Path) -> Path:
 
 
 def _wheel_metadata(wheel_path: Path):
-    with zipfile.ZipFile(wheel_path) as archive:
-        metadata_name = next(name for name in archive.namelist() if name.endswith("METADATA"))
-        return email.message_from_bytes(archive.read(metadata_name))
+    metadata, detail = read_wheel_metadata(wheel_path)
+    if metadata is None:
+        raise SystemExit(detail)
+    return metadata
 
 
 def _requirement_without_marker(requirement: Requirement) -> str:

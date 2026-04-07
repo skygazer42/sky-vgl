@@ -28,6 +28,11 @@ try:
 except ModuleNotFoundError:  # pragma: no cover - Python 3.10 fallback
     import tomli as tomllib  # type: ignore[no-redef]
 
+if __package__:
+    from .release_artifact_metadata import read_wheel_metadata
+else:
+    from release_artifact_metadata import read_wheel_metadata
+
 
 CheckFn = Callable[[], tuple[bool, str]]
 
@@ -85,13 +90,7 @@ class ArtifactContext:
             if wheel_path is None:
                 self._wheel_metadata = (None, detail)
             else:
-                with zipfile.ZipFile(wheel_path) as archive:
-                    metadata_name = next((name for name in archive.namelist() if name.endswith("METADATA")), None)
-                    if metadata_name is None:
-                        self._wheel_metadata = (None, "wheel METADATA missing")
-                    else:
-                        payload = email.message_from_bytes(archive.read(metadata_name))
-                        self._wheel_metadata = (payload, metadata_name)
+                self._wheel_metadata = read_wheel_metadata(wheel_path)
         return self._wheel_metadata
 
     def wheel_names(self) -> tuple[list[str] | None, str]:

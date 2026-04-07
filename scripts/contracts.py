@@ -55,6 +55,7 @@ SDIST_REQUIRED_SUFFIXES = (
     "/scripts/release_smoke.py",
     "/scripts/interop_smoke.py",
     "/scripts/install_release_extras.py",
+    "/scripts/release_artifact_metadata.py",
 )
 SDIST_EXCLUDED_SUBSTRINGS = ("/.factory/", "/docs/plans/", "__pycache__")
 WHEEL_IMPORT_SYMBOLS = ("Graph", "Trainer", "PlanetoidDataset", "NodeClassificationTask")

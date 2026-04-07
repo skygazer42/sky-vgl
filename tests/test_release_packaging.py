@@ -119,6 +119,33 @@ def built_release_artifacts(tmp_path_factory):
     return _build_release_artifacts(tmp_path_factory)
 
 
+def test_shared_release_artifact_helper_reads_wheel_metadata(built_release_artifacts):
+    from scripts.release_artifact_metadata import read_wheel_metadata
+
+    wheel_path, _ = built_release_artifacts
+    metadata, detail = read_wheel_metadata(wheel_path)
+
+    assert metadata is not None
+    assert detail.endswith("METADATA")
+    assert set(metadata.get_all("Provides-Extra", [])) >= {"dgl", "pyg", "full"}
+    requires_dist = set(metadata.get_all("Requires-Dist", []))
+    for requirement in RELEASE_INTEROP_EXTRA_REQUIREMENTS.values():
+        assert requirement in requires_dist
+
+
+def test_shared_release_artifact_helper_reports_missing_metadata(tmp_path):
+    from scripts.release_artifact_metadata import read_wheel_metadata
+
+    wheel_path = tmp_path / "broken.whl"
+    with zipfile.ZipFile(wheel_path, "w") as archive:
+        archive.writestr("demo/__init__.py", "")
+
+    metadata, detail = read_wheel_metadata(wheel_path)
+
+    assert metadata is None
+    assert detail == "wheel METADATA missing"
+
+
 def test_release_metadata_exposes_public_package_information(built_release_artifacts):
     wheel_path, _ = built_release_artifacts
     metadata = _wheel_metadata(wheel_path)
@@ -166,6 +193,7 @@ def test_release_artifacts_exclude_internal_repo_only_content(built_release_arti
     assert any(name.endswith("/scripts/release_smoke.py") for name in sdist_names)
     assert any(name.endswith("/scripts/interop_smoke.py") for name in sdist_names)
     assert any(name.endswith("/scripts/install_release_extras.py") for name in sdist_names)
+    assert any(name.endswith("/scripts/release_artifact_metadata.py") for name in sdist_names)
 
 
 def test_release_workflows_exist_for_ci_and_pypi_publish():
