@@ -15,6 +15,7 @@ from contracts import (
     OPTIONAL_EXTRAS,
     PROJECT_NAME,
     PROJECT_URLS,
+    RELEASE_INTEROP_EXTRA_REQUIREMENTS,
     REQUIRES_PYTHON,
     SDIST_EXCLUDED_SUBSTRINGS,
     SDIST_REQUIRED_SUFFIXES,
@@ -181,6 +182,22 @@ def _provides_extra_task(ctx: ArtifactContext, task_id: str, extra: str) -> Scan
     return ScanTask(task_id, "metadata", f"wheel provides extra {extra}", check)
 
 
+def _requires_dist_task(ctx: ArtifactContext, task_id: str, extra: str, requirement: str) -> ScanTask:
+    def check() -> tuple[bool, str]:
+        metadata, detail = ctx.wheel_metadata()
+        if metadata is None:
+            return False, detail
+        requires_dist = metadata.get_all("Requires-Dist", [])
+        return requirement in requires_dist, f"{requirement!r} in Requires-Dist"
+
+    return ScanTask(
+        task_id,
+        "metadata",
+        f"wheel metadata exposes {extra} extra requirement line {requirement}",
+        check,
+    )
+
+
 def _wheel_contains_task(ctx: ArtifactContext, task_id: str, relative_path: str) -> ScanTask:
     def check() -> tuple[bool, str]:
         names, detail = ctx.wheel_names()
@@ -252,24 +269,52 @@ def build_tasks(repo_root: Path, artifact_dir: Path) -> list[ScanTask]:
             for index, extra in enumerate(OPTIONAL_EXTRAS, start=11)
         ],
         *[
-            _wheel_contains_task(ctx, f"{index:03d}", relative_path)
-            for index, relative_path in enumerate(WHEEL_REQUIRED_FILES, start=18)
+            _requires_dist_task(ctx, f"{index:03d}", extra, requirement)
+            for index, (extra, requirement) in enumerate(RELEASE_INTEROP_EXTRA_REQUIREMENTS.items(), start=18)
+        ],
+        *[
+            _wheel_contains_task(
+                ctx,
+                f"{index:03d}",
+                relative_path,
+            )
+            for index, relative_path in enumerate(
+                WHEEL_REQUIRED_FILES,
+                start=18 + len(RELEASE_INTEROP_EXTRA_REQUIREMENTS),
+            )
         ],
         *[
             _wheel_excludes_task(ctx, f"{index:03d}", substring)
-            for index, substring in enumerate(WHEEL_EXCLUDED_SUBSTRINGS, start=20)
+            for index, substring in enumerate(
+                WHEEL_EXCLUDED_SUBSTRINGS,
+                start=18 + len(RELEASE_INTEROP_EXTRA_REQUIREMENTS) + len(WHEEL_REQUIRED_FILES),
+            )
         ],
         *[
             _sdist_contains_task(ctx, f"{index:03d}", suffix)
-            for index, suffix in enumerate(SDIST_REQUIRED_SUFFIXES, start=24)
+            for index, suffix in enumerate(
+                SDIST_REQUIRED_SUFFIXES,
+                start=18
+                + len(RELEASE_INTEROP_EXTRA_REQUIREMENTS)
+                + len(WHEEL_REQUIRED_FILES)
+                + len(WHEEL_EXCLUDED_SUBSTRINGS),
+            )
         ],
         *[
             _sdist_excludes_task(ctx, f"{index:03d}", substring)
-            for index, substring in enumerate(SDIST_EXCLUDED_SUBSTRINGS, start=24 + len(SDIST_REQUIRED_SUFFIXES))
+            for index, substring in enumerate(
+                SDIST_EXCLUDED_SUBSTRINGS,
+                start=18
+                + len(RELEASE_INTEROP_EXTRA_REQUIREMENTS)
+                + len(WHEEL_REQUIRED_FILES)
+                + len(WHEEL_EXCLUDED_SUBSTRINGS)
+                + len(SDIST_REQUIRED_SUFFIXES),
+            )
         ],
     ]
 
     expected_task_count = 5 + len(PROJECT_URLS) + len(OPTIONAL_EXTRAS) + len(WHEEL_REQUIRED_FILES)
+    expected_task_count += len(RELEASE_INTEROP_EXTRA_REQUIREMENTS)
     expected_task_count += len(WHEEL_EXCLUDED_SUBSTRINGS) + len(SDIST_REQUIRED_SUFFIXES) + len(SDIST_EXCLUDED_SUBSTRINGS)
     if len(tasks) != expected_task_count:
         raise RuntimeError(f"expected {expected_task_count} scan tasks, found {len(tasks)}")

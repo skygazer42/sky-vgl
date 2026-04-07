@@ -31,6 +31,10 @@ PROJECT_URLS = {
 OPTIONAL_EXTRAS = ("dev", "scipy", "networkx", "tensorboard", "dgl", "pyg", "full")
 DEFAULT_LIGHTWEIGHT_EXTRAS = ("networkx", "scipy", "tensorboard")
 REAL_INTEROP_BACKENDS = ("pyg", "dgl")
+RELEASE_INTEROP_EXTRA_REQUIREMENTS = {
+    "pyg": "torch-geometric>=2.5; extra == 'pyg'",
+    "dgl": "dgl>=2.1; extra == 'dgl'",
+}
 INTEROP_SMOKE_SCRIPT = "scripts/interop_smoke.py"
 RELEASE_ARTIFACT_INTEROP_COMMAND = (
     "python scripts/release_smoke.py --artifact-dir dist --kind wheel --interop-backend dgl"
@@ -50,6 +54,7 @@ SDIST_REQUIRED_SUFFIXES = (
     "/docs/releasing.md",
     "/scripts/release_smoke.py",
     "/scripts/interop_smoke.py",
+    "/scripts/install_release_extras.py",
 )
 SDIST_EXCLUDED_SUBSTRINGS = ("/.factory/", "/docs/plans/", "__pycache__")
 WHEEL_IMPORT_SYMBOLS = ("Graph", "Trainer", "PlanetoidDataset", "NodeClassificationTask")

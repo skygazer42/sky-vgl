@@ -15,6 +15,7 @@ from scripts.contracts import (
     DOCS_INDEX_VERSION_BADGE,
     PROJECT_NAME,
     PROJECT_URLS,
+    RELEASE_INTEROP_EXTRA_REQUIREMENTS,
     README_VERSION_BADGE,
     RELEASE_VERSION,
     WHEEL_IMPORT_SYMBOLS,
@@ -122,6 +123,7 @@ def test_release_metadata_exposes_public_package_information(built_release_artif
     wheel_path, _ = built_release_artifacts
     metadata = _wheel_metadata(wheel_path)
     project_urls = metadata.get_all("Project-URL", [])
+    requires_dist = set(metadata.get_all("Requires-Dist", []))
 
     assert metadata["Name"] == PROJECT_NAME
     assert metadata["Requires-Python"] == ">=3.10"
@@ -139,6 +141,8 @@ def test_release_metadata_exposes_public_package_information(built_release_artif
         "pyg",
         "full",
     }
+    for requirement in RELEASE_INTEROP_EXTRA_REQUIREMENTS.values():
+        assert requirement in requires_dist
 
 
 def test_release_artifacts_exclude_internal_repo_only_content(built_release_artifacts):
