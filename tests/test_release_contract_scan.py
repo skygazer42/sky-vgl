@@ -1,4 +1,5 @@
 import importlib.util
+import shutil
 import subprocess
 import sys
 import textwrap
@@ -30,6 +31,17 @@ def _load_release_contract_scan(module_name: str = "release_contract_scan"):
     sys.modules[module_name] = module
     spec.loader.exec_module(module)
     return module
+
+
+def _repo_relative_artifact_dir(name: str, source_dir: Path) -> tuple[Path, str]:
+    artifact_dir = REPO_ROOT / ".tmp_test_artifacts" / name
+    if artifact_dir.exists():
+        shutil.rmtree(artifact_dir)
+    artifact_dir.mkdir(parents=True)
+    for artifact in source_dir.iterdir():
+        if artifact.is_file():
+            shutil.copy2(artifact, artifact_dir / artifact.name)
+    return artifact_dir, str(artifact_dir.relative_to(REPO_ROOT))
 
 
 @pytest.fixture(scope="module")
@@ -130,3 +142,30 @@ def test_release_contract_scan_passes_on_built_artifacts(built_artifact_dir: Pat
     assert f"SUMMARY {expected}/{expected} passed" in completed.stdout
     for requirement in RELEASE_INTEROP_EXTRA_REQUIREMENTS.values():
         assert requirement in completed.stdout
+
+
+def test_release_contract_scan_resolves_relative_artifact_dir_from_repo_root(
+    built_artifact_dir: Path,
+    tmp_path: Path,
+):
+    artifact_dir, relative_artifact_dir = _repo_relative_artifact_dir(
+        "release-contract-scan-relative",
+        built_artifact_dir,
+    )
+    try:
+        completed = subprocess.run(
+            [
+                sys.executable,
+                str(SCAN_SCRIPT),
+                "--artifact-dir",
+                relative_artifact_dir,
+            ],
+            cwd=tmp_path,
+            capture_output=True,
+            text=True,
+        )
+    finally:
+        shutil.rmtree(artifact_dir)
+
+    assert completed.returncode == 0, completed.stderr
+    assert "SUMMARY" in completed.stdout

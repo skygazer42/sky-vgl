@@ -19,6 +19,7 @@ except ModuleNotFoundError:
     repo_script_imports = importlib.import_module("repo_script_imports")
 
 load_repo_module = repo_script_imports.load_repo_module
+resolve_repo_relative_path = repo_script_imports.resolve_repo_relative_path
 
 
 _contracts = load_repo_module("scripts.contracts")
@@ -309,8 +310,8 @@ def _smoke_install(kind: str, artifact: Path, *, repo_root: Path, interop_backen
 
 def main() -> None:
     args = _parse_args()
-    repo_root = Path(__file__).resolve().parents[1]
-    artifact_dir = Path(args.artifact_dir).resolve()
+    repo_root = repo_script_imports.REPO_ROOT
+    artifact_dir = resolve_repo_relative_path(Path(args.artifact_dir))
 
     if not artifact_dir.exists():
         raise SystemExit(f"artifact directory does not exist: {artifact_dir}")

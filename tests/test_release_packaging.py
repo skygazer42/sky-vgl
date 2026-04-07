@@ -2,6 +2,7 @@ import email
 import importlib
 import importlib.util
 import os
+import shutil
 import subprocess
 import sys
 import tarfile
@@ -125,6 +126,16 @@ def _wheel_metadata(wheel_path: Path):
     with zipfile.ZipFile(wheel_path) as archive:
         metadata_name = next(name for name in archive.namelist() if name.endswith("METADATA"))
         return email.message_from_bytes(archive.read(metadata_name))
+
+
+def _repo_relative_artifact_dir(name: str, built_release_artifacts) -> tuple[Path, str]:
+    artifact_dir = REPO_ROOT / ".tmp_test_artifacts" / name
+    if artifact_dir.exists():
+        shutil.rmtree(artifact_dir)
+    artifact_dir.mkdir(parents=True)
+    for artifact in built_release_artifacts:
+        shutil.copy2(artifact, artifact_dir / artifact.name)
+    return artifact_dir, str(artifact_dir.relative_to(REPO_ROOT))
 
 
 @pytest.fixture(scope="module")
@@ -373,6 +384,39 @@ def test_install_release_extras_rejects_unknown_extras(built_release_artifacts):
     assert "does-not-exist" in completed.stderr
 
 
+def test_install_release_extras_resolves_relative_artifact_dir_from_repo_root(
+    built_release_artifacts,
+    tmp_path: Path,
+):
+    script = REPO_ROOT / "scripts" / "install_release_extras.py"
+    artifact_dir, relative_artifact_dir = _repo_relative_artifact_dir(
+        "install-release-extras-relative",
+        built_release_artifacts,
+    )
+    try:
+        completed = subprocess.run(
+            [
+                sys.executable,
+                str(script),
+                "--artifact-dir",
+                relative_artifact_dir,
+                "--extras",
+                "pyg",
+                "dgl",
+                "--print-only",
+            ],
+            cwd=tmp_path,
+            capture_output=True,
+            text=True,
+        )
+    finally:
+        shutil.rmtree(artifact_dir)
+
+    assert completed.returncode == 0, completed.stderr
+    requirements = [line.strip() for line in completed.stdout.splitlines() if line.strip()]
+    assert requirements == ["torch-geometric>=2.5", "dgl>=2.1"]
+
+
 def test_generated_site_directory_is_ignored_and_not_tracked():
     gitignore = (REPO_ROOT / ".gitignore").read_text(encoding="utf-8")
     tracked_site = subprocess.run(
@@ -427,6 +471,37 @@ def test_release_smoke_script_can_install_built_wheel(built_release_artifacts):
         capture_output=True,
         text=True,
     )
+
+    assert completed.returncode == 0, completed.stderr
+    assert f"wheel smoke check passed for {wheel_path.name}" in completed.stdout
+
+
+def test_release_smoke_resolves_relative_artifact_dir_from_repo_root(
+    built_release_artifacts,
+    tmp_path: Path,
+):
+    wheel_path, _ = built_release_artifacts
+    smoke_script = REPO_ROOT / "scripts" / "release_smoke.py"
+    artifact_dir, relative_artifact_dir = _repo_relative_artifact_dir(
+        "release-smoke-relative",
+        built_release_artifacts,
+    )
+    try:
+        completed = subprocess.run(
+            [
+                sys.executable,
+                str(smoke_script),
+                "--artifact-dir",
+                relative_artifact_dir,
+                "--kind",
+                "wheel",
+            ],
+            cwd=tmp_path,
+            capture_output=True,
+            text=True,
+        )
+    finally:
+        shutil.rmtree(artifact_dir)
 
     assert completed.returncode == 0, completed.stderr
     assert f"wheel smoke check passed for {wheel_path.name}" in completed.stdout

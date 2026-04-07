@@ -24,6 +24,12 @@ def ensure_repo_root_on_path() -> Path:
     return REPO_ROOT
 
 
+def resolve_repo_relative_path(path: Path, *, repo_root: Path = REPO_ROOT) -> Path:
+    if path.is_absolute():
+        return path.resolve()
+    return (repo_root / path).resolve()
+
+
 def load_repo_module(module_name: str):
     ensure_repo_root_on_path()
     return importlib.import_module(module_name)

@@ -24,6 +24,7 @@ except ModuleNotFoundError:
     repo_script_imports = importlib.import_module("repo_script_imports")
 
 load_repo_module = repo_script_imports.load_repo_module
+resolve_repo_relative_path = repo_script_imports.resolve_repo_relative_path
 
 
 _contracts = load_repo_module("scripts.contracts")
@@ -355,7 +356,7 @@ def main() -> int:
     args = parser.parse_args()
 
     repo_root = args.repo_root.resolve()
-    artifact_dir = (args.artifact_dir or (repo_root / "dist")).resolve()
+    artifact_dir = resolve_repo_relative_path(args.artifact_dir or Path("dist"), repo_root=repo_root)
     tasks = build_tasks(repo_root, artifact_dir)
 
     if args.list:

@@ -18,6 +18,7 @@ except ModuleNotFoundError:
     repo_script_imports = importlib.import_module("repo_script_imports")
 
 load_repo_module = repo_script_imports.load_repo_module
+resolve_repo_relative_path = repo_script_imports.resolve_repo_relative_path
 
 
 read_wheel_metadata = load_repo_module("scripts.release_artifact_metadata").read_wheel_metadata
@@ -111,7 +112,7 @@ def _resolved_extra_requirements(wheel_path: Path, extras: list[str]) -> list[st
 
 def main() -> None:
     args = _parse_args()
-    wheel_path = _find_single_wheel(Path(args.artifact_dir))
+    wheel_path = _find_single_wheel(resolve_repo_relative_path(Path(args.artifact_dir)))
     requirements = _resolved_extra_requirements(wheel_path, list(args.extras))
 
     if args.print_only:
