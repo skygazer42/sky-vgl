@@ -17,6 +17,10 @@ except ModuleNotFoundError:
     from scripts.contracts import REAL_INTEROP_BACKENDS, WHEEL_IMPORT_SYMBOLS
 
 INTEROP_BACKENDS = ("none", *REAL_INTEROP_BACKENDS, "all")
+INTEROP_BACKEND_IMPORT_MODULES = {
+    "pyg": "torch_geometric",
+    "dgl": "dgl",
+}
 
 
 def _parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
@@ -126,6 +130,38 @@ def _selected_interop_backends(backend: str | None) -> tuple[str, ...]:
     raise ValueError(f"unsupported interop backend: {backend}")
 
 
+def _backend_import_module_name(backend: str) -> str:
+    try:
+        return INTEROP_BACKEND_IMPORT_MODULES[backend]
+    except KeyError as exc:
+        raise ValueError(f"unsupported interop backend: {backend}") from exc
+
+
+def _check_backend_availability(module_name: str, dependency_paths: list[Path]) -> bool:
+    bootstrap = "".join(f"site.addsitedir({str(path)!r})\n" for path in dependency_paths)
+    script = "import site\n" f"{bootstrap}" f"import {module_name}\n"
+    completed = subprocess.run(
+        [sys.executable, "-c", script],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    return completed.returncode == 0
+
+
+def _preflight_interop_backends(selected_backends: Sequence[str], dependency_paths: list[Path]) -> None:
+    missing = []
+    for backend in selected_backends:
+        module_name = _backend_import_module_name(backend)
+        if not _check_backend_availability(module_name, dependency_paths):
+            missing.append(f"{backend} ({module_name})")
+    if missing:
+        raise SystemExit(
+            "artifact interop backend(s) unavailable from outer site-packages: "
+            + ", ".join(missing)
+        )
+
+
 def _build_interop_check_script(
     backend: str,
     *,
@@ -179,7 +215,9 @@ def _interop_check(
     dependency_paths: list[Path],
     backend: str,
 ) -> None:
-    for selected_backend in _selected_interop_backends(backend):
+    selected_backends = _selected_interop_backends(backend)
+    _preflight_interop_backends(selected_backends, dependency_paths)
+    for selected_backend in selected_backends:
         script = _build_interop_check_script(
             selected_backend,
             repo_root=repo_root,

@@ -97,3 +97,36 @@ def test_build_interop_check_script_for_pyg_uses_installed_public_api():
 
     assert "Graph.from_pyg(graph.to_pyg())" in script
     assert "edge_attr" in script
+
+
+def test_backend_import_module_name_returns_expected_names():
+    release_smoke = _load_release_smoke_module()
+
+    assert release_smoke._backend_import_module_name("pyg") == "torch_geometric"
+    assert release_smoke._backend_import_module_name("dgl") == "dgl"
+
+
+def test_preflight_reports_missing_backends(monkeypatch):
+    release_smoke = _load_release_smoke_module()
+
+    def fake_check(module_name, dependency_paths):
+        return module_name == "dgl"
+
+    monkeypatch.setattr(release_smoke, "_check_backend_availability", fake_check)
+
+    with pytest.raises(SystemExit, match="pyg"):
+        release_smoke._preflight_interop_backends(
+            release_smoke._selected_interop_backends("all"),
+            dependency_paths=[],
+        )
+
+
+def test_preflight_succeeds_when_all_backends_present(monkeypatch):
+    release_smoke = _load_release_smoke_module()
+
+    monkeypatch.setattr(release_smoke, "_check_backend_availability", lambda module_name, dependency_paths: True)
+
+    release_smoke._preflight_interop_backends(
+        release_smoke._selected_interop_backends("all"),
+        dependency_paths=[],
+    )

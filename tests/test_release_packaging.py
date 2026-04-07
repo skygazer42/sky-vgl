@@ -278,6 +278,66 @@ def test_release_smoke_script_supports_artifact_interop_backend_dgl(built_releas
     assert f"wheel smoke check passed for {wheel_path.name}" in completed.stdout
 
 
+@pytest.mark.skipif(
+    not _artifact_smoke_backend_available("dgl"),
+    reason="dgl is not available to release_smoke artifact checks",
+)
+def test_release_smoke_script_supports_sdist_artifact_interop_backend_dgl(built_release_artifacts):
+    _, sdist_path = built_release_artifacts
+    smoke_script = REPO_ROOT / "scripts" / "release_smoke.py"
+
+    completed = subprocess.run(
+        [
+            sys.executable,
+            str(smoke_script),
+            "--artifact-dir",
+            str(sdist_path.parent),
+            "--kind",
+            "sdist",
+            "--interop-backend",
+            "dgl",
+        ],
+        cwd=REPO_ROOT,
+        capture_output=True,
+        text=True,
+    )
+
+    assert completed.returncode == 0, completed.stderr
+    assert "dgl interop smoke check passed" in completed.stdout
+    assert f"sdist smoke check passed for {sdist_path.name}" in completed.stdout
+
+
+@pytest.mark.skipif(
+    not _artifact_smoke_backend_available("dgl") or _artifact_smoke_backend_available("pyg"),
+    reason="requires dgl available and pyg unavailable for artifact smoke",
+)
+def test_release_smoke_script_reports_missing_backend_for_all_artifact_interop(
+    built_release_artifacts,
+):
+    wheel_path, _ = built_release_artifacts
+    smoke_script = REPO_ROOT / "scripts" / "release_smoke.py"
+
+    completed = subprocess.run(
+        [
+            sys.executable,
+            str(smoke_script),
+            "--artifact-dir",
+            str(wheel_path.parent),
+            "--kind",
+            "wheel",
+            "--interop-backend",
+            "all",
+        ],
+        cwd=REPO_ROOT,
+        capture_output=True,
+        text=True,
+    )
+
+    assert completed.returncode != 0
+    assert "artifact interop backend(s) unavailable from outer site-packages" in completed.stderr
+    assert "pyg (torch_geometric)" in completed.stderr
+
+
 def test_release_readme_documents_public_install_paths():
     readme = (REPO_ROOT / "README.md").read_text(encoding="utf-8")
     docs_index = (REPO_ROOT / "docs" / "index.md").read_text(encoding="utf-8")
@@ -314,6 +374,9 @@ def test_release_readme_documents_public_install_paths():
     assert "PYPI_API_TOKEN" in releasing
     assert "TEST_PYPI_API_TOKEN" in releasing
     assert "host-installed" in releasing
+    assert "--interop-backend all" in releasing
+    assert "both host backends" in releasing
+    assert "fail early" in releasing
     assert "python scripts/release_smoke.py --artifact-dir dist --kind all" in releasing
     assert "python scripts/release_smoke.py --artifact-dir dist --kind wheel --interop-backend dgl" in releasing
     assert "python scripts/interop_smoke.py --backend all" in releasing

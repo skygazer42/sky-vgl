@@ -30,7 +30,12 @@ checkout.
 are installed. The reusable checkout-level script is the same one used by the
 manual/nightly workflow. Artifact-level interop smoke reuses host-installed
 torch and optional backend packages from the outer `site-packages` while still
-verifying that `vgl` resolves from the installed wheel instead of the checkout:
+verifying that `vgl` resolves from the installed wheel instead of the checkout.
+Before the inline interop checks run, `scripts/release_smoke.py` probes
+the same host `site-packages` and will exit with a clear error if any requested
+backend is unavailable. `--interop-backend all` therefore requires both host backends,
+PyG and DGL, to be importable in the host environment; missing support causes the
+command to fail early with a descriptive message instead of a cryptic import traceback.
 
 ```bash
 python scripts/interop_smoke.py --list-backends
@@ -79,7 +84,7 @@ when present and falls back to Trusted Publishing otherwise.
 
 1. Install from PyPI in a clean environment.
 2. Import `vgl` and the golden-path public imports.
-3. If the release touched interop adapters, rerun `python scripts/interop_smoke.py --backend dgl` and/or `python scripts/interop_smoke.py --backend pyg` for the extras you have installed. Use `--backend all` only when both extras are present. For artifact-level validation, also run `python scripts/release_smoke.py --artifact-dir dist --kind wheel --interop-backend dgl` (or `pyg`).
+3. If the release touched interop adapters, rerun `python scripts/interop_smoke.py --backend dgl` and/or `python scripts/interop_smoke.py --backend pyg` for the extras you have installed. Use `--backend all` only when both extras are present; the host-assisted release smoke script will abort early when either backend is missing. For artifact-level validation, also run `python scripts/release_smoke.py --artifact-dir dist --kind wheel --interop-backend dgl` (or `pyg`). Ensure the extras are importable from the host environment before invoking `--interop-backend all`.
 4. Verify the PyPI project page links for Homepage, Repository, Documentation, and Issues.
 5. Check that the tagged source and published package versions match.
 6. Confirm `refs/tags/vX.Y.Z` matches `vgl.__version__ == "X.Y.Z"` and that README/docs no longer show stale hard-coded version badges.
