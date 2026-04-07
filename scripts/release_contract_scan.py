@@ -4,34 +4,41 @@ from __future__ import annotations
 
 import argparse
 import email
+import importlib
 import re
+import sys
 import tarfile
 import zipfile
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Callable
 
-from contracts import (
-    OPTIONAL_EXTRAS,
-    PROJECT_NAME,
-    PROJECT_URLS,
-    RELEASE_INTEROP_EXTRA_REQUIREMENTS,
-    REQUIRES_PYTHON,
-    SDIST_EXCLUDED_SUBSTRINGS,
-    SDIST_REQUIRED_SUFFIXES,
-    WHEEL_EXCLUDED_SUBSTRINGS,
-    WHEEL_REQUIRED_FILES,
-)
-
 try:
     import tomllib  # type: ignore[attr-defined]
 except ModuleNotFoundError:  # pragma: no cover - Python 3.10 fallback
     import tomli as tomllib  # type: ignore[no-redef]
 
-if __package__:
-    from .release_artifact_metadata import read_wheel_metadata
-else:
-    from release_artifact_metadata import read_wheel_metadata
+
+def _load_repo_module(module_name: str):
+    repo_root = Path(__file__).resolve().parent.parent
+    repo_root_str = str(repo_root)
+    if repo_root_str in sys.path:
+        sys.path.remove(repo_root_str)
+    sys.path.insert(0, repo_root_str)
+    return importlib.import_module(module_name)
+
+
+_contracts = _load_repo_module("scripts.contracts")
+OPTIONAL_EXTRAS = _contracts.OPTIONAL_EXTRAS
+PROJECT_NAME = _contracts.PROJECT_NAME
+PROJECT_URLS = _contracts.PROJECT_URLS
+RELEASE_INTEROP_EXTRA_REQUIREMENTS = _contracts.RELEASE_INTEROP_EXTRA_REQUIREMENTS
+REQUIRES_PYTHON = _contracts.REQUIRES_PYTHON
+SDIST_EXCLUDED_SUBSTRINGS = _contracts.SDIST_EXCLUDED_SUBSTRINGS
+SDIST_REQUIRED_SUFFIXES = _contracts.SDIST_REQUIRED_SUFFIXES
+WHEEL_EXCLUDED_SUBSTRINGS = _contracts.WHEEL_EXCLUDED_SUBSTRINGS
+WHEEL_REQUIRED_FILES = _contracts.WHEEL_REQUIRED_FILES
+read_wheel_metadata = _load_repo_module("scripts.release_artifact_metadata").read_wheel_metadata
 
 
 CheckFn = Callable[[], tuple[bool, str]]

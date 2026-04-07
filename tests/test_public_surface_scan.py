@@ -1,12 +1,54 @@
+import importlib.util
 import subprocess
 import sys
+import textwrap
 from pathlib import Path
 
+import scripts.contracts as contracts
 from scripts.contracts import PUBLIC_EXAMPLE_MODULES, public_surface_specs
 
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 SCAN_SCRIPT = REPO_ROOT / "scripts" / "public_surface_scan.py"
+
+
+def _load_public_surface_scan(module_name: str = "public_surface_scan"):
+    spec = importlib.util.spec_from_file_location(module_name, SCAN_SCRIPT)
+    assert spec is not None
+    assert spec.loader is not None
+    module = importlib.util.module_from_spec(spec)
+    sys.modules[module_name] = module
+    spec.loader.exec_module(module)
+    return module
+
+
+def test_public_surface_scan_prefers_repo_contracts_module(monkeypatch, tmp_path):
+    shadow_module = tmp_path / "contracts.py"
+    shadow_module.write_text(
+        textwrap.dedent(
+            """
+            FORBIDDEN_PREFERRED_IMPORT_PREFIXES = ()
+            PUBLIC_EXAMPLE_MODULES = ()
+
+            def public_surface_specs():
+                return ()
+            """
+        ).strip()
+        + "\n",
+        encoding="utf-8",
+    )
+
+    monkeypatch.syspath_prepend(str(tmp_path))
+    shadowed = sys.modules.pop("contracts", None)
+    try:
+        public_surface_scan = _load_public_surface_scan("public_surface_scan_shadowed")
+    finally:
+        sys.modules.pop("public_surface_scan_shadowed", None)
+        if shadowed is not None:
+            sys.modules["contracts"] = shadowed
+
+    assert public_surface_scan.PUBLIC_EXAMPLE_MODULES == contracts.PUBLIC_EXAMPLE_MODULES
+    assert public_surface_scan.public_surface_specs() == contracts.public_surface_specs()
 
 
 def test_public_surface_scan_lists_stable_catalog():

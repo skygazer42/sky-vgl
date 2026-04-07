@@ -4,12 +4,27 @@ from __future__ import annotations
 
 import argparse
 import ast
+import importlib
 import re
+import sys
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Callable
 
-from contracts import FORBIDDEN_PREFERRED_IMPORT_PREFIXES, PUBLIC_EXAMPLE_MODULES, public_surface_specs
+
+def _load_repo_module(module_name: str):
+    repo_root = Path(__file__).resolve().parent.parent
+    repo_root_str = str(repo_root)
+    if repo_root_str in sys.path:
+        sys.path.remove(repo_root_str)
+    sys.path.insert(0, repo_root_str)
+    return importlib.import_module(module_name)
+
+
+_contracts = _load_repo_module("scripts.contracts")
+FORBIDDEN_PREFERRED_IMPORT_PREFIXES = _contracts.FORBIDDEN_PREFERRED_IMPORT_PREFIXES
+PUBLIC_EXAMPLE_MODULES = _contracts.PUBLIC_EXAMPLE_MODULES
+public_surface_specs = _contracts.public_surface_specs
 
 
 CheckFn = Callable[[], tuple[bool, str]]

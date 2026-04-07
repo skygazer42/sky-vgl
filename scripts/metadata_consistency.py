@@ -3,14 +3,30 @@
 from __future__ import annotations
 
 import argparse
+import importlib
 from pathlib import Path
-
-from contracts import DOCS_INDEX_VERSION_BADGE, PROJECT_URLS, README_VERSION_BADGE, RELEASE_VERSION
+import sys
 
 try:
     import tomllib  # type: ignore[attr-defined]
 except ModuleNotFoundError:  # pragma: no cover - Python 3.10 fallback
     import tomli as tomllib  # type: ignore[no-redef]
+
+
+def _load_repo_module(module_name: str):
+    repo_root = Path(__file__).resolve().parent.parent
+    repo_root_str = str(repo_root)
+    if repo_root_str in sys.path:
+        sys.path.remove(repo_root_str)
+    sys.path.insert(0, repo_root_str)
+    return importlib.import_module(module_name)
+
+
+_contracts = _load_repo_module("scripts.contracts")
+DOCS_INDEX_VERSION_BADGE = _contracts.DOCS_INDEX_VERSION_BADGE
+PROJECT_URLS = _contracts.PROJECT_URLS
+README_VERSION_BADGE = _contracts.README_VERSION_BADGE
+RELEASE_VERSION = _contracts.RELEASE_VERSION
 
 
 def _check(condition: bool, message: str) -> tuple[bool, str]:
