@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import argparse
 import email
-import importlib
 import re
 import sys
 import tarfile
@@ -19,16 +18,17 @@ except ModuleNotFoundError:  # pragma: no cover - Python 3.10 fallback
     import tomli as tomllib  # type: ignore[no-redef]
 
 
-def _load_repo_module(module_name: str):
+if not __package__:
     repo_root = Path(__file__).resolve().parent.parent
     repo_root_str = str(repo_root)
     if repo_root_str in sys.path:
         sys.path.remove(repo_root_str)
     sys.path.insert(0, repo_root_str)
-    return importlib.import_module(module_name)
+
+from scripts.repo_script_imports import load_repo_module
 
 
-_contracts = _load_repo_module("scripts.contracts")
+_contracts = load_repo_module("scripts.contracts")
 OPTIONAL_EXTRAS = _contracts.OPTIONAL_EXTRAS
 PROJECT_NAME = _contracts.PROJECT_NAME
 PROJECT_URLS = _contracts.PROJECT_URLS
@@ -38,7 +38,7 @@ SDIST_EXCLUDED_SUBSTRINGS = _contracts.SDIST_EXCLUDED_SUBSTRINGS
 SDIST_REQUIRED_SUFFIXES = _contracts.SDIST_REQUIRED_SUFFIXES
 WHEEL_EXCLUDED_SUBSTRINGS = _contracts.WHEEL_EXCLUDED_SUBSTRINGS
 WHEEL_REQUIRED_FILES = _contracts.WHEEL_REQUIRED_FILES
-read_wheel_metadata = _load_repo_module("scripts.release_artifact_metadata").read_wheel_metadata
+read_wheel_metadata = load_repo_module("scripts.release_artifact_metadata").read_wheel_metadata
 
 
 CheckFn = Callable[[], tuple[bool, str]]

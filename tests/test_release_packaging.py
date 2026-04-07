@@ -1,4 +1,5 @@
 import email
+import importlib
 import importlib.util
 import os
 import subprocess
@@ -158,6 +159,12 @@ def test_shared_release_artifact_helper_reports_missing_metadata(tmp_path):
     assert detail == "wheel METADATA missing"
 
 
+def test_shared_repo_script_import_helper_loads_repo_local_modules():
+    from scripts.repo_script_imports import load_repo_module
+
+    assert load_repo_module("scripts.contracts") is importlib.import_module("scripts.contracts")
+
+
 def test_install_release_extras_prefers_repo_artifact_metadata_helper(monkeypatch, tmp_path):
     shadow_module = tmp_path / "release_artifact_metadata.py"
     shadow_module.write_text(
@@ -232,6 +239,7 @@ def test_release_artifacts_exclude_internal_repo_only_content(built_release_arti
     assert any(name.endswith("/scripts/interop_smoke.py") for name in sdist_names)
     assert any(name.endswith("/scripts/install_release_extras.py") for name in sdist_names)
     assert any(name.endswith("/scripts/release_artifact_metadata.py") for name in sdist_names)
+    assert any(name.endswith("/scripts/repo_script_imports.py") for name in sdist_names)
 
 
 def test_release_workflows_exist_for_ci_and_pypi_publish():

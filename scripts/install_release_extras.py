@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import argparse
-import importlib
 import subprocess
 import sys
 from pathlib import Path
@@ -12,16 +11,17 @@ from packaging.markers import default_environment
 from packaging.requirements import Requirement
 
 
-def _load_repo_module(module_name: str):
+if not __package__:
     repo_root = Path(__file__).resolve().parent.parent
     repo_root_str = str(repo_root)
     if repo_root_str in sys.path:
         sys.path.remove(repo_root_str)
     sys.path.insert(0, repo_root_str)
-    return importlib.import_module(module_name)
+
+from scripts.repo_script_imports import load_repo_module
 
 
-read_wheel_metadata = _load_repo_module("scripts.release_artifact_metadata").read_wheel_metadata
+read_wheel_metadata = load_repo_module("scripts.release_artifact_metadata").read_wheel_metadata
 
 
 def _parse_args() -> argparse.Namespace:

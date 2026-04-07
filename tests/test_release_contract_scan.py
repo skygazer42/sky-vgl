@@ -107,6 +107,7 @@ def test_release_contract_scan_lists_stable_catalog():
         assert any(f"wheel metadata exposes {extra} extra requirement line" in line for line in listed)
     assert any("sdist contains /scripts/install_release_extras.py" in line for line in listed)
     assert any("sdist contains /scripts/release_artifact_metadata.py" in line for line in listed)
+    assert any("sdist contains /scripts/repo_script_imports.py" in line for line in listed)
 
 
 def test_release_contract_scan_passes_on_built_artifacts(built_artifact_dir: Path):

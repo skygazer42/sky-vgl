@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import argparse
-import importlib
 import os
 import site
 import subprocess
@@ -13,16 +12,17 @@ from pathlib import Path
 from typing import Sequence
 
 
-def _load_repo_module(module_name: str):
+if not __package__:
     repo_root = Path(__file__).resolve().parent.parent
     repo_root_str = str(repo_root)
     if repo_root_str in sys.path:
         sys.path.remove(repo_root_str)
     sys.path.insert(0, repo_root_str)
-    return importlib.import_module(module_name)
+
+from scripts.repo_script_imports import load_repo_module
 
 
-_contracts = _load_repo_module("scripts.contracts")
+_contracts = load_repo_module("scripts.contracts")
 REAL_INTEROP_BACKENDS = _contracts.REAL_INTEROP_BACKENDS
 WHEEL_IMPORT_SYMBOLS = _contracts.WHEEL_IMPORT_SYMBOLS
 
