@@ -3,14 +3,8 @@
 from __future__ import annotations
 
 import argparse
-import importlib
+import repo_script_imports
 from typing import Sequence
-
-
-try:
-    repo_script_imports = importlib.import_module("scripts.repo_script_imports")
-except ModuleNotFoundError:
-    repo_script_imports = importlib.import_module("repo_script_imports")
 
 ensure_repo_root_on_path = repo_script_imports.ensure_repo_root_on_path
 load_repo_module = repo_script_imports.load_repo_module

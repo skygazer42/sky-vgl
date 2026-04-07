@@ -4,17 +4,11 @@ from __future__ import annotations
 
 import argparse
 import ast
-import importlib
 import re
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Callable
-
-
-try:
-    repo_script_imports = importlib.import_module("scripts.repo_script_imports")
-except ModuleNotFoundError:
-    repo_script_imports = importlib.import_module("repo_script_imports")
+import repo_script_imports
 
 load_repo_module = repo_script_imports.load_repo_module
 

@@ -3,19 +3,14 @@
 from __future__ import annotations
 
 import argparse
-import importlib
 from pathlib import Path
+import repo_script_imports
 
 try:
     import tomllib  # type: ignore[attr-defined]
 except ModuleNotFoundError:  # pragma: no cover - Python 3.10 fallback
     import tomli as tomllib  # type: ignore[no-redef]
 
-
-try:
-    repo_script_imports = importlib.import_module("scripts.repo_script_imports")
-except ModuleNotFoundError:
-    repo_script_imports = importlib.import_module("repo_script_imports")
 
 load_repo_module = repo_script_imports.load_repo_module
 

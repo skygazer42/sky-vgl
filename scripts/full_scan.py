@@ -3,10 +3,10 @@
 from __future__ import annotations
 
 import argparse
-import importlib
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Callable
+import repo_script_imports
 
 try:
     import tomllib  # type: ignore[attr-defined]
@@ -16,11 +16,6 @@ except ModuleNotFoundError:  # pragma: no cover - Python 3.10 fallback
 
 CheckFn = Callable[[], tuple[bool, str]]
 
-
-try:
-    repo_script_imports = importlib.import_module("scripts.repo_script_imports")
-except ModuleNotFoundError:
-    repo_script_imports = importlib.import_module("repo_script_imports")
 
 load_repo_module = repo_script_imports.load_repo_module
 

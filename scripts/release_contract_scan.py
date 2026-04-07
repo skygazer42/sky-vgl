@@ -4,24 +4,19 @@ from __future__ import annotations
 
 import argparse
 import email
-import importlib
 import re
 import tarfile
 import zipfile
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Callable
+import repo_script_imports
 
 try:
     import tomllib  # type: ignore[attr-defined]
 except ModuleNotFoundError:  # pragma: no cover - Python 3.10 fallback
     import tomli as tomllib  # type: ignore[no-redef]
 
-
-try:
-    repo_script_imports = importlib.import_module("scripts.repo_script_imports")
-except ModuleNotFoundError:
-    repo_script_imports = importlib.import_module("repo_script_imports")
 
 load_repo_module = repo_script_imports.load_repo_module
 resolve_repo_relative_path = repo_script_imports.resolve_repo_relative_path

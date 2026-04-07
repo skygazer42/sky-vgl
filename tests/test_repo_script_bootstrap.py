@@ -41,6 +41,15 @@ def test_script_bootstrap_is_centralized_in_repo_script_imports(script_name: str
 
 
 @pytest.mark.parametrize("script_name", sorted(SCRIPT_PATHS))
+def test_scripts_bind_repo_script_imports_without_importlib_boilerplate(script_name: str):
+    text = SCRIPT_PATHS[script_name].read_text(encoding="utf-8")
+
+    assert "import repo_script_imports" in text
+    assert 'importlib.import_module("scripts.repo_script_imports")' not in text
+    assert 'importlib.import_module("repo_script_imports")' not in text
+
+
+@pytest.mark.parametrize("script_name", sorted(SCRIPT_PATHS))
 def test_scripts_reuse_shared_repo_script_helpers(script_name: str):
     module = _load_script_module(script_name)
     shared_helpers = importlib.import_module("scripts.repo_script_imports")

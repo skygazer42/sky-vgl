@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import argparse
-import importlib
+import repo_script_imports
 import subprocess
 import sys
 from pathlib import Path
@@ -11,11 +11,6 @@ from pathlib import Path
 from packaging.markers import default_environment
 from packaging.requirements import Requirement
 
-
-try:
-    repo_script_imports = importlib.import_module("scripts.repo_script_imports")
-except ModuleNotFoundError:
-    repo_script_imports = importlib.import_module("repo_script_imports")
 
 load_repo_module = repo_script_imports.load_repo_module
 resolve_repo_relative_path = repo_script_imports.resolve_repo_relative_path
