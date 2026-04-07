@@ -5,7 +5,7 @@ import sys
 import textwrap
 from pathlib import Path
 
-from scripts.workflow_contracts import workflow_job_text
+from scripts.workflow_contracts import workflow_job_text, workflow_step_text
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 
@@ -79,13 +79,31 @@ def test_manual_interop_workflow_covers_pyg_and_dgl():
 
 
 def test_ci_and_publish_build_jobs_gate_all_backend_artifact_interop():
-    ci_job = workflow_job_text(REPO_ROOT / ".github" / "workflows" / "ci.yml", "package-check")
-    publish_job = workflow_job_text(REPO_ROOT / ".github" / "workflows" / "publish.yml", "build")
+    ci_install_step = workflow_step_text(
+        REPO_ROOT / ".github" / "workflows" / "ci.yml",
+        "package-check",
+        "Install release interop extras",
+    )
+    ci_smoke_step = workflow_step_text(
+        REPO_ROOT / ".github" / "workflows" / "ci.yml",
+        "package-check",
+        "Smoke-test built distributions with all interop backends",
+    )
+    publish_install_step = workflow_step_text(
+        REPO_ROOT / ".github" / "workflows" / "publish.yml",
+        "build",
+        "Install release interop extras",
+    )
+    publish_smoke_step = workflow_step_text(
+        REPO_ROOT / ".github" / "workflows" / "publish.yml",
+        "build",
+        "Smoke-test built distributions with all interop backends",
+    )
 
-    assert 'python -m pip install -e ".[pyg,dgl]"' in ci_job
-    assert "python scripts/release_smoke.py --artifact-dir dist --kind all --interop-backend all" in ci_job
-    assert 'python -m pip install -e ".[pyg,dgl]"' in publish_job
-    assert "python scripts/release_smoke.py --artifact-dir dist --kind all --interop-backend all" in publish_job
+    assert "python scripts/install_release_extras.py --artifact-dir dist --extras pyg dgl" in ci_install_step
+    assert "python scripts/release_smoke.py --artifact-dir dist --kind all --interop-backend all" in ci_smoke_step
+    assert "python scripts/install_release_extras.py --artifact-dir dist --extras pyg dgl" in publish_install_step
+    assert "python scripts/release_smoke.py --artifact-dir dist --kind all --interop-backend all" in publish_smoke_step
 
 
 def test_workflow_job_helper_comes_from_shared_scripts_module():
@@ -124,6 +142,61 @@ def test_workflow_job_text_anchors_to_jobs_section(tmp_path):
     assert "echo build" in job_text
     assert "SHOULD_NOT_BE_CAPTURED" not in job_text
     assert "concurrency:" not in job_text
+
+
+def test_workflow_job_text_tolerates_jobs_comments_and_quoted_keys(tmp_path):
+    workflow_path = tmp_path / "workflow.yml"
+    workflow_path.write_text(
+        textwrap.dedent(
+            """
+            name: demo
+
+            jobs:  # declared jobs
+              "build":  # build contract
+                runs-on: ubuntu-latest
+                steps:
+                  - run: echo build
+              "release":
+                runs-on: ubuntu-latest
+                steps:
+                  - run: echo release
+            """
+        ).strip()
+        + "\n",
+        encoding="utf-8",
+    )
+
+    job_text = workflow_job_text(workflow_path, "build")
+
+    assert "echo build" in job_text
+    assert "echo release" not in job_text
+
+
+def test_workflow_step_text_isolates_single_named_step(tmp_path):
+    workflow_path = tmp_path / "workflow.yml"
+    workflow_path.write_text(
+        textwrap.dedent(
+            """
+            name: demo
+
+            jobs:
+              build:
+                runs-on: ubuntu-latest
+                steps:
+                  - name: Install release interop extras
+                    run: python scripts/install_release_extras.py --artifact-dir dist --extras pyg dgl
+                  - name: Smoke-test built distributions with all interop backends
+                    run: python scripts/release_smoke.py --artifact-dir dist --kind all --interop-backend all
+            """
+        ).strip()
+        + "\n",
+        encoding="utf-8",
+    )
+
+    step_text = workflow_step_text(workflow_path, "build", "Install release interop extras")
+
+    assert "install_release_extras.py" in step_text
+    assert "interop-backend all" not in step_text
 
 
 def test_makefile_exposes_interop_smoke_target():

@@ -50,6 +50,7 @@ Changelog = "https://github.com/skygazer42/sky-vgl/releases"
 [project.optional-dependencies]
 dev = [
   "build>=1.2",
+  "packaging>=24.1",
   "mkdocs>=1.6",
   "mkdocs-material>=9.7",
   "mkdocstrings[python]>=0.29",
@@ -97,6 +98,7 @@ include = [
   "/LICENSE",
   "/scripts/release_smoke.py",
   "/scripts/interop_smoke.py",
+  "/scripts/install_release_extras.py",
   "/vgl",
   "/examples",
   "/docs/core-concepts.md",

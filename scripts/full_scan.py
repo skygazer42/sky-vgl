@@ -3,14 +3,11 @@
 from __future__ import annotations
 
 import argparse
+import importlib
+import sys
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Callable
-
-try:
-    from workflow_contracts import workflow_job_contains_text
-except ModuleNotFoundError:
-    from scripts.workflow_contracts import workflow_job_contains_text
 
 try:
     import tomllib  # type: ignore[attr-defined]
@@ -19,6 +16,20 @@ except ModuleNotFoundError:  # pragma: no cover - Python 3.10 fallback
 
 
 CheckFn = Callable[[], tuple[bool, str]]
+
+
+def _load_workflow_contracts_module():
+    repo_root = Path(__file__).resolve().parent.parent
+    repo_root_str = str(repo_root)
+    if repo_root_str in sys.path:
+        sys.path.remove(repo_root_str)
+    sys.path.insert(0, repo_root_str)
+    return importlib.import_module("scripts.workflow_contracts")
+
+
+workflow_contracts = _load_workflow_contracts_module()
+workflow_job_contains_text = workflow_contracts.workflow_job_contains_text
+workflow_step_contains_text = workflow_contracts.workflow_step_contains_text
 
 
 @dataclass(frozen=True)
@@ -61,6 +72,21 @@ class ScanContext:
         return workflow_job_contains_text(
             self._read_text(relative_path),
             job_name,
+            snippet,
+            source=relative_path,
+        )
+
+    def workflow_step_contains(
+        self,
+        relative_path: str,
+        job_name: str,
+        step_name: str,
+        snippet: str,
+    ) -> tuple[bool, str]:
+        return workflow_step_contains_text(
+            self._read_text(relative_path),
+            job_name,
+            step_name,
             snippet,
             source=relative_path,
         )
@@ -130,6 +156,39 @@ def _workflow_job_contains_task(
 ) -> ScanTask:
     def check() -> tuple[bool, str]:
         return ctx.workflow_job_contains(relative_path, job_name, snippet)
+
+    return ScanTask(task_id, category, description, check)
+
+
+def _workflow_step_contains_task(
+    ctx: ScanContext,
+    task_id: str,
+    category: str,
+    description: str,
+    relative_path: str,
+    job_name: str,
+    step_name: str,
+    snippet: str,
+) -> ScanTask:
+    def check() -> tuple[bool, str]:
+        return ctx.workflow_step_contains(relative_path, job_name, step_name, snippet)
+
+    return ScanTask(task_id, category, description, check)
+
+
+def _workflow_step_lacks_task(
+    ctx: ScanContext,
+    task_id: str,
+    category: str,
+    description: str,
+    relative_path: str,
+    job_name: str,
+    step_name: str,
+    snippet: str,
+) -> ScanTask:
+    def check() -> tuple[bool, str]:
+        contains, details = ctx.workflow_step_contains(relative_path, job_name, step_name, snippet)
+        return not contains, f"{details} is absent"
 
     return ScanTask(task_id, category, description, check)
 
@@ -559,7 +618,7 @@ def build_tasks(repo_root: Path) -> list[ScanTask]:
                 "docs",
                 "releasing doc mentions release gate interop extras install",
                 "docs/releasing.md",
-                'python -m pip install -e ".[pyg,dgl]"',
+                "python scripts/install_release_extras.py --artifact-dir dist --extras pyg dgl",
             ),
             _text_contains_task(
                 ctx,
@@ -584,23 +643,35 @@ def build_tasks(repo_root: Path) -> list[ScanTask]:
             _text_contains_task(ctx, "063", "ci", "CI runs python -m build", ".github/workflows/ci.yml", "python -m build"),
             _text_contains_task(ctx, "064", "ci", "CI runs python -m twine check", ".github/workflows/ci.yml", "python -m twine check"),
             _text_contains_task(ctx, "065", "ci", "CI runs full_scan.py", ".github/workflows/ci.yml", "python scripts/full_scan.py"),
-            _workflow_job_contains_task(
+            _workflow_step_contains_task(
                 ctx,
                 "065a",
                 "ci",
-                "CI package-check job installs release interop extras",
+                "CI package-check job installs release interop extras from built wheel",
                 ".github/workflows/ci.yml",
                 "package-check",
-                'python -m pip install -e ".[pyg,dgl]"',
+                "Install release interop extras",
+                "python scripts/install_release_extras.py --artifact-dir dist --extras pyg dgl",
             ),
-            _workflow_job_contains_task(
+            _workflow_step_contains_task(
                 ctx,
                 "065b",
                 "ci",
                 "CI package-check job runs all-backend release artifact smoke",
                 ".github/workflows/ci.yml",
                 "package-check",
+                "Smoke-test built distributions with all interop backends",
                 "python scripts/release_smoke.py --artifact-dir dist --kind all --interop-backend all",
+            ),
+            _workflow_step_lacks_task(
+                ctx,
+                "065c",
+                "ci",
+                "CI package-check install step avoids editable checkout extras",
+                ".github/workflows/ci.yml",
+                "package-check",
+                "Install release interop extras",
+                'python -m pip install -e ".[pyg,dgl]"',
             ),
         ]
     )
@@ -673,23 +744,35 @@ def build_tasks(repo_root: Path) -> list[ScanTask]:
                 ".github/workflows/publish.yml",
                 "actions/upload-artifact@v4",
             ),
-            _workflow_job_contains_task(
+            _workflow_step_contains_task(
                 ctx,
                 "075a",
                 "publish",
-                "publish build job installs release interop extras",
+                "publish build job installs release interop extras from built wheel",
                 ".github/workflows/publish.yml",
                 "build",
-                'python -m pip install -e ".[pyg,dgl]"',
+                "Install release interop extras",
+                "python scripts/install_release_extras.py --artifact-dir dist --extras pyg dgl",
             ),
-            _workflow_job_contains_task(
+            _workflow_step_contains_task(
                 ctx,
                 "075b",
                 "publish",
                 "publish build runs all-backend release artifact smoke",
                 ".github/workflows/publish.yml",
                 "build",
+                "Smoke-test built distributions with all interop backends",
                 "python scripts/release_smoke.py --artifact-dir dist --kind all --interop-backend all",
+            ),
+            _workflow_step_lacks_task(
+                ctx,
+                "075c",
+                "publish",
+                "publish build install step avoids editable checkout extras",
+                ".github/workflows/publish.yml",
+                "build",
+                "Install release interop extras",
+                'python -m pip install -e ".[pyg,dgl]"',
             ),
         ]
     )

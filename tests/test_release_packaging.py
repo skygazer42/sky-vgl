@@ -10,7 +10,7 @@ from pathlib import Path
 
 import pytest
 
-from scripts.workflow_contracts import workflow_job_text
+from scripts.workflow_contracts import workflow_step_text
 from scripts.contracts import (
     DOCS_INDEX_VERSION_BADGE,
     PROJECT_NAME,
@@ -161,6 +161,7 @@ def test_release_artifacts_exclude_internal_repo_only_content(built_release_arti
     assert any(name.endswith("/LICENSE") for name in sdist_names)
     assert any(name.endswith("/scripts/release_smoke.py") for name in sdist_names)
     assert any(name.endswith("/scripts/interop_smoke.py") for name in sdist_names)
+    assert any(name.endswith("/scripts/install_release_extras.py") for name in sdist_names)
 
 
 def test_release_workflows_exist_for_ci_and_pypi_publish():
@@ -168,16 +169,32 @@ def test_release_workflows_exist_for_ci_and_pypi_publish():
     publish_path = REPO_ROOT / ".github" / "workflows" / "publish.yml"
     smoke_script = REPO_ROOT / "scripts" / "release_smoke.py"
     interop_script = REPO_ROOT / "scripts" / "interop_smoke.py"
+    install_release_extras_script = REPO_ROOT / "scripts" / "install_release_extras.py"
 
     assert ci_path.exists()
     assert publish_path.exists()
     assert smoke_script.exists()
     assert interop_script.exists()
+    assert install_release_extras_script.exists()
 
     ci_text = ci_path.read_text(encoding="utf-8")
     publish_text = publish_path.read_text(encoding="utf-8")
-    package_check_job = workflow_job_text(ci_path, "package-check")
-    publish_build_job = workflow_job_text(publish_path, "build")
+    package_check_install_step = workflow_step_text(ci_path, "package-check", "Install release interop extras")
+    package_check_smoke_step = workflow_step_text(
+        ci_path,
+        "package-check",
+        "Smoke-test built distributions with all interop backends",
+    )
+    publish_build_install_step = workflow_step_text(
+        publish_path,
+        "build",
+        "Install release interop extras",
+    )
+    publish_build_smoke_step = workflow_step_text(
+        publish_path,
+        "build",
+        "Smoke-test built distributions with all interop backends",
+    )
 
     assert "python -m pytest -q" in ci_text
     assert "python -m mypy vgl" in ci_text
@@ -187,8 +204,10 @@ def test_release_workflows_exist_for_ci_and_pypi_publish():
     assert "python scripts/docs_link_scan.py" in ci_text
     assert "python scripts/release_contract_scan.py --artifact-dir dist" in ci_text
     assert "python scripts/release_smoke.py --artifact-dir dist --kind all" in ci_text
-    assert 'python -m pip install -e ".[pyg,dgl]"' in package_check_job
-    assert "python scripts/release_smoke.py --artifact-dir dist --kind all --interop-backend all" in package_check_job
+    assert "python scripts/install_release_extras.py --artifact-dir dist --extras pyg dgl" in package_check_install_step
+    assert 'python -m pip install -e ".[pyg,dgl]"' not in package_check_install_step
+    assert "python scripts/release_smoke.py --artifact-dir dist --kind all --interop-backend all" in package_check_smoke_step
+    assert 'python -m pip install -e ".[pyg,dgl]"' not in package_check_smoke_step
     assert "python scripts/metadata_consistency.py" in (REPO_ROOT / "docs" / "releasing.md").read_text(encoding="utf-8")
     assert "tags:" in publish_text
     assert "v*" in publish_text
@@ -202,8 +221,10 @@ def test_release_workflows_exist_for_ci_and_pypi_publish():
     assert "needs.probe-publish-auth.outputs.has_test_pypi_api_token" in publish_text
     assert "GITHUB_OUTPUT" in publish_text
     assert "python scripts/release_smoke.py --artifact-dir dist --kind all" in publish_text
-    assert 'python -m pip install -e ".[pyg,dgl]"' in publish_build_job
-    assert "python scripts/release_smoke.py --artifact-dir dist --kind all --interop-backend all" in publish_build_job
+    assert "python scripts/install_release_extras.py --artifact-dir dist --extras pyg dgl" in publish_build_install_step
+    assert 'python -m pip install -e ".[pyg,dgl]"' not in publish_build_install_step
+    assert "python scripts/release_smoke.py --artifact-dir dist --kind all --interop-backend all" in publish_build_smoke_step
+    assert 'python -m pip install -e ".[pyg,dgl]"' not in publish_build_smoke_step
     assert "Publish to PyPI with API token" in publish_text
     assert "Publish to PyPI with Trusted Publishing" in publish_text
     assert "Publish to TestPyPI with API token" in publish_text
@@ -226,6 +247,54 @@ def test_docs_publish_workflow_exists_for_github_pages():
     assert "path: site" in docs_text
 
 
+def test_install_release_extras_prints_selected_artifact_requirements(built_release_artifacts):
+    wheel_path, _ = built_release_artifacts
+    script = REPO_ROOT / "scripts" / "install_release_extras.py"
+
+    completed = subprocess.run(
+        [
+            sys.executable,
+            str(script),
+            "--artifact-dir",
+            str(wheel_path.parent),
+            "--extras",
+            "pyg",
+            "dgl",
+            "--print-only",
+        ],
+        cwd=REPO_ROOT,
+        capture_output=True,
+        text=True,
+    )
+
+    assert completed.returncode == 0, completed.stderr
+    requirements = [line.strip() for line in completed.stdout.splitlines() if line.strip()]
+    assert requirements == ["torch-geometric>=2.5", "dgl>=2.1"]
+
+
+def test_install_release_extras_rejects_unknown_extras(built_release_artifacts):
+    wheel_path, _ = built_release_artifacts
+    script = REPO_ROOT / "scripts" / "install_release_extras.py"
+
+    completed = subprocess.run(
+        [
+            sys.executable,
+            str(script),
+            "--artifact-dir",
+            str(wheel_path.parent),
+            "--extras",
+            "does-not-exist",
+            "--print-only",
+        ],
+        cwd=REPO_ROOT,
+        capture_output=True,
+        text=True,
+    )
+
+    assert completed.returncode != 0
+    assert "does-not-exist" in completed.stderr
+
+
 def test_generated_site_directory_is_ignored_and_not_tracked():
     gitignore = (REPO_ROOT / ".gitignore").read_text(encoding="utf-8")
     tracked_site = subprocess.run(
@@ -246,6 +315,12 @@ def test_release_dev_dependencies_include_docs_build_stack():
     assert 'mkdocs>=' in pyproject
     assert 'mkdocs-material>=' in pyproject
     assert 'mkdocstrings[python]>=' in pyproject
+
+
+def test_release_dev_dependencies_include_packaging_for_artifact_helper():
+    pyproject = (REPO_ROOT / "pyproject.toml").read_text(encoding="utf-8")
+
+    assert 'packaging>=' in pyproject
 
 
 def test_mkdocs_config_marks_internal_docs_as_not_in_nav():
@@ -499,7 +574,7 @@ def test_release_readme_documents_public_install_paths():
     assert "hermetic fake-backend success paths" in releasing
     assert "package-check" in releasing
     assert "publish `build` job" in releasing
-    assert 'python -m pip install -e ".[pyg,dgl]"' in releasing
+    assert "python scripts/install_release_extras.py --artifact-dir dist --extras pyg dgl" in releasing
     assert "python scripts/release_smoke.py --artifact-dir dist --kind all --interop-backend all" in releasing
     assert "python scripts/release_smoke.py --artifact-dir dist --kind all" in releasing
     assert "python scripts/release_smoke.py --artifact-dir dist --kind wheel --interop-backend dgl" in releasing

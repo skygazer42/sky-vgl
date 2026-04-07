@@ -52,9 +52,10 @@ backends, builds the artifacts, and runs
 so automation continuously exercises the artifact-level success path for both
 backends.
 The CI `package-check` job and the publish `build` job also install
-`python -m pip install -e ".[pyg,dgl]"` before running
+`python scripts/install_release_extras.py --artifact-dir dist --extras pyg dgl` before running
 `python scripts/release_smoke.py --artifact-dir dist --kind all --interop-backend all`,
-so the real release gate proves combined artifact interop before upload.
+so the real release gate provisions optional backends from built wheel metadata
+before proving combined artifact interop.
 
 7. Draft release notes from the changelog and recent commits before tagging:
 

@@ -1,10 +1,9 @@
+import importlib
 import importlib.util
 import subprocess
 import sys
 import textwrap
 from pathlib import Path
-
-from scripts.workflow_contracts import workflow_job_contains_text
 
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
@@ -39,9 +38,9 @@ def test_full_scan_catalog_contains_unique_tasks():
     assert "releasing doc mentions publish build release gate" in descriptions
     assert "releasing doc mentions release gate interop extras install" in descriptions
     assert "releasing doc mentions all-backend release artifact smoke gate" in descriptions
-    assert "CI package-check job installs release interop extras" in descriptions
+    assert "CI package-check job installs release interop extras from built wheel" in descriptions
     assert "CI package-check job runs all-backend release artifact smoke" in descriptions
-    assert "publish build job installs release interop extras" in descriptions
+    assert "publish build job installs release interop extras from built wheel" in descriptions
     assert "publish build runs all-backend release artifact smoke" in descriptions
 
 
@@ -107,10 +106,103 @@ def test_scan_context_workflow_job_contains_anchors_to_jobs_section(tmp_path):
     assert ctx.workflow_job_contains("workflow.yml", "build", "concurrency:")[0] is False
 
 
+def test_full_scan_release_gate_tasks_require_named_ci_steps(tmp_path):
+    scan = _load_scan_module()
+    workflow_path = tmp_path / ".github" / "workflows" / "ci.yml"
+    workflow_path.parent.mkdir(parents=True)
+    workflow_path.write_text(
+        textwrap.dedent(
+            """
+            name: ci
+
+            jobs:
+              package-check:
+                runs-on: ubuntu-latest
+                steps:
+                  - name: Build distributions
+                    run: python -m build
+                  - name: Prepare release interop extras
+                    run: python scripts/install_release_extras.py --artifact-dir dist --extras pyg dgl
+                  - name: Verify all interop backends
+                    run: python scripts/release_smoke.py --artifact-dir dist --kind all --interop-backend all
+            """
+        ).strip()
+        + "\n",
+        encoding="utf-8",
+    )
+
+    tasks = {task.id: task for task in scan.build_tasks(tmp_path)}
+
+    assert tasks["065a"].check()[0] is False
+    assert tasks["065b"].check()[0] is False
+
+
+def test_full_scan_release_gate_tasks_reject_editable_ci_install_step(tmp_path):
+    scan = _load_scan_module()
+    workflow_path = tmp_path / ".github" / "workflows" / "ci.yml"
+    workflow_path.parent.mkdir(parents=True)
+    workflow_path.write_text(
+        textwrap.dedent(
+            """
+            name: ci
+
+            jobs:
+              package-check:
+                runs-on: ubuntu-latest
+                steps:
+                  - name: Install release interop extras
+                    run: |
+                      python scripts/install_release_extras.py --artifact-dir dist --extras pyg dgl
+                      python -m pip install -e ".[pyg,dgl]"
+                  - name: Smoke-test built distributions with all interop backends
+                    run: python scripts/release_smoke.py --artifact-dir dist --kind all --interop-backend all
+            """
+        ).strip()
+        + "\n",
+        encoding="utf-8",
+    )
+
+    tasks = {task.id: task for task in scan.build_tasks(tmp_path)}
+
+    assert tasks["065c"].check()[0] is False
+
+
 def test_full_scan_reuses_shared_workflow_job_helper():
     scan = _load_scan_module()
 
-    assert scan.workflow_job_contains_text is workflow_job_contains_text
+    shared_module = importlib.import_module("scripts.workflow_contracts")
+    assert scan.workflow_job_contains_text is shared_module.workflow_job_contains_text
+
+
+def test_full_scan_prefers_repo_workflow_contracts_module(monkeypatch, tmp_path):
+    shadow_module = tmp_path / "workflow_contracts.py"
+    shadow_module.write_text(
+        textwrap.dedent(
+            """
+            def workflow_job_contains_text(*args, **kwargs):
+                raise AssertionError("shadow module should not be imported")
+            """
+        ).strip()
+        + "\n",
+        encoding="utf-8",
+    )
+
+    monkeypatch.syspath_prepend(str(tmp_path))
+    shadowed = sys.modules.pop("workflow_contracts", None)
+    shared = sys.modules.pop("scripts.workflow_contracts", None)
+    full_scan = sys.modules.pop("full_scan", None)
+    try:
+        scan = _load_scan_module()
+    finally:
+        sys.modules.pop("full_scan", None)
+        if shadowed is not None:
+            sys.modules["workflow_contracts"] = shadowed
+        if shared is not None:
+            sys.modules["scripts.workflow_contracts"] = shared
+        if full_scan is not None:
+            sys.modules["full_scan"] = full_scan
+
+    assert scan.workflow_job_contains_text.__module__ == "scripts.workflow_contracts"
 
 
 def test_ci_workflow_runs_the_full_scan_script():
