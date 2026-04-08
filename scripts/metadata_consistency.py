@@ -6,15 +6,9 @@ import argparse
 from pathlib import Path
 import repo_script_imports
 
-try:
-    import tomllib  # type: ignore[attr-defined]
-except ModuleNotFoundError:  # pragma: no cover - Python 3.10 fallback
-    import tomli as tomllib  # type: ignore[no-redef]
-
 
 load_repo_module = repo_script_imports.load_repo_module
-
-
+load_toml_file = repo_script_imports.load_toml_file
 _contracts = load_repo_module("scripts.contracts")
 DOCS_INDEX_VERSION_BADGE = _contracts.DOCS_INDEX_VERSION_BADGE
 PROJECT_URLS = _contracts.PROJECT_URLS
@@ -27,8 +21,7 @@ def _check(condition: bool, message: str) -> tuple[bool, str]:
 
 
 def _pyproject_urls(repo_root: Path) -> tuple[bool, str]:
-    with (repo_root / "pyproject.toml").open("rb") as handle:
-        pyproject = tomllib.load(handle)
+    pyproject = load_toml_file(repo_root / "pyproject.toml")
     return _check(pyproject["project"]["urls"] == PROJECT_URLS, "pyproject project.urls matches contracts")
 
 
@@ -36,14 +29,20 @@ def _readme_version_badge(repo_root: Path) -> tuple[bool, str]:
     readme = (repo_root / "README.md").read_text(encoding="utf-8")
     if README_VERSION_BADGE not in readme:
         return False, "README uses the shared dynamic PyPI version badge"
-    return _check(f"version-{RELEASE_VERSION}" not in readme, "README avoids stale hard-coded version badge text")
+    return _check(
+        f"version-{RELEASE_VERSION}" not in readme,
+        "README avoids stale hard-coded version badge text",
+    )
 
 
 def _docs_index_version_badge(repo_root: Path) -> tuple[bool, str]:
     index = (repo_root / "docs" / "index.md").read_text(encoding="utf-8")
     if DOCS_INDEX_VERSION_BADGE not in index:
         return False, "docs index uses the shared dynamic PyPI version badge"
-    return _check(f"version-{RELEASE_VERSION}" not in index, "docs index avoids stale hard-coded version badge text")
+    return _check(
+        f"version-{RELEASE_VERSION}" not in index,
+        "docs index avoids stale hard-coded version badge text",
+    )
 
 
 def _installation_example(repo_root: Path) -> tuple[bool, str]:

@@ -8,18 +8,12 @@ from pathlib import Path
 from typing import Callable
 import repo_script_imports
 
-try:
-    import tomllib  # type: ignore[attr-defined]
-except ModuleNotFoundError:  # pragma: no cover - Python 3.10 fallback
-    import tomli as tomllib  # type: ignore[no-redef]
-
 
 CheckFn = Callable[[], tuple[bool, str]]
 
 
 load_repo_module = repo_script_imports.load_repo_module
-
-
+load_toml_file = repo_script_imports.load_toml_file
 workflow_contracts = load_repo_module("scripts.workflow_contracts")
 workflow_job_contains_text = workflow_contracts.workflow_job_contains_text
 workflow_step_contains_text = workflow_contracts.workflow_step_contains_text
@@ -118,8 +112,7 @@ class ScanContext:
 
     def _load_pyproject(self) -> dict:
         if self._pyproject_cache is None:
-            with self.resolve("pyproject.toml").open("rb") as handle:
-                self._pyproject_cache = tomllib.load(handle)
+            self._pyproject_cache = load_toml_file(self.resolve("pyproject.toml"))
         return self._pyproject_cache
 
 

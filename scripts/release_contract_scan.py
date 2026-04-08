@@ -12,13 +12,9 @@ from pathlib import Path
 from typing import Callable
 import repo_script_imports
 
-try:
-    import tomllib  # type: ignore[attr-defined]
-except ModuleNotFoundError:  # pragma: no cover - Python 3.10 fallback
-    import tomli as tomllib  # type: ignore[no-redef]
-
 
 load_repo_module = repo_script_imports.load_repo_module
+load_toml_file = repo_script_imports.load_toml_file
 resolve_repo_relative_path = repo_script_imports.resolve_repo_relative_path
 
 
@@ -44,6 +40,63 @@ class ScanTask:
     category: str
     description: str
     check: CheckFn
+
+
+@dataclass(frozen=True)
+class ListTaskSpec:
+    id: str
+    category: str
+    description: str
+
+
+def list_task_specs(_repo_root: Path) -> list[ListTaskSpec]:
+    tasks = [
+        ListTaskSpec("001", "artifact", "built wheel exists"),
+        ListTaskSpec("002", "artifact", "built sdist exists"),
+        ListTaskSpec("003", "metadata", "wheel name matches project"),
+        ListTaskSpec("004", "metadata", "wheel version matches repo version"),
+        ListTaskSpec("005", "metadata", "wheel Requires-Python matches pyproject"),
+    ]
+    next_id = len(tasks) + 1
+    tasks.extend(
+        ListTaskSpec(f"{index:03d}", "metadata", f"wheel exposes {label} project URL")
+        for index, label in enumerate(PROJECT_URLS, start=next_id)
+    )
+    next_id = len(tasks) + 1
+    tasks.extend(
+        ListTaskSpec(f"{index:03d}", "metadata", f"wheel provides extra {extra}")
+        for index, extra in enumerate(OPTIONAL_EXTRAS, start=next_id)
+    )
+    next_id = len(tasks) + 1
+    tasks.extend(
+        ListTaskSpec(
+            f"{index:03d}",
+            "metadata",
+            f"wheel metadata exposes {extra} extra requirement line {requirement}",
+        )
+        for index, (extra, requirement) in enumerate(RELEASE_INTEROP_EXTRA_REQUIREMENTS.items(), start=next_id)
+    )
+    next_id = len(tasks) + 1
+    tasks.extend(
+        ListTaskSpec(f"{index:03d}", "wheel", f"wheel contains {relative_path}")
+        for index, relative_path in enumerate(WHEEL_REQUIRED_FILES, start=next_id)
+    )
+    next_id = len(tasks) + 1
+    tasks.extend(
+        ListTaskSpec(f"{index:03d}", "wheel", f"wheel excludes {substring}")
+        for index, substring in enumerate(WHEEL_EXCLUDED_SUBSTRINGS, start=next_id)
+    )
+    next_id = len(tasks) + 1
+    tasks.extend(
+        ListTaskSpec(f"{index:03d}", "sdist", f"sdist contains {suffix}")
+        for index, suffix in enumerate(SDIST_REQUIRED_SUFFIXES, start=next_id)
+    )
+    next_id = len(tasks) + 1
+    tasks.extend(
+        ListTaskSpec(f"{index:03d}", "sdist", f"sdist excludes {substring}")
+        for index, substring in enumerate(SDIST_EXCLUDED_SUBSTRINGS, start=next_id)
+    )
+    return tasks
 
 
 class ArtifactContext:
@@ -118,8 +171,7 @@ class ArtifactContext:
 
     def _load_pyproject(self) -> dict:
         if self._pyproject is None:
-            with (self.repo_root / "pyproject.toml").open("rb") as handle:
-                self._pyproject = tomllib.load(handle)
+            self._pyproject = load_toml_file(self.repo_root / "pyproject.toml")
         return self._pyproject
 
     def _single_artifact(self, pattern: str) -> tuple[Path | None, str]:
@@ -240,8 +292,7 @@ def _sdist_excludes_task(ctx: ArtifactContext, task_id: str, substring: str) -> 
 
 def build_tasks(repo_root: Path, artifact_dir: Path) -> list[ScanTask]:
     ctx = ArtifactContext(repo_root, artifact_dir)
-    project_urls = ctx.pyproject_value("project", "urls")
-    if project_urls != PROJECT_URLS:
+    if ctx.pyproject_value("project", "urls") != PROJECT_URLS:
         raise RuntimeError("pyproject project.urls must match scripts/contracts.py")
     if str(ctx.pyproject_value("project", "name")) != PROJECT_NAME:
         raise RuntimeError("pyproject project.name must match scripts/contracts.py")
@@ -260,58 +311,42 @@ def build_tasks(repo_root: Path, artifact_dir: Path) -> list[ScanTask]:
             "Requires-Python",
             REQUIRES_PYTHON,
         ),
-        *[
-            _project_url_task(ctx, f"{index:03d}", label, PROJECT_URLS[label])
-            for index, label in enumerate(PROJECT_URLS, start=6)
-        ],
-        *[
-            _provides_extra_task(ctx, f"{index:03d}", extra)
-            for index, extra in enumerate(OPTIONAL_EXTRAS, start=11)
-        ],
-        *[
-            _requires_dist_task(ctx, f"{index:03d}", extra, requirement)
-            for index, (extra, requirement) in enumerate(RELEASE_INTEROP_EXTRA_REQUIREMENTS.items(), start=18)
-        ],
-        *[
-            _wheel_contains_task(
-                ctx,
-                f"{index:03d}",
-                relative_path,
-            )
-            for index, relative_path in enumerate(
-                WHEEL_REQUIRED_FILES,
-                start=18 + len(RELEASE_INTEROP_EXTRA_REQUIREMENTS),
-            )
-        ],
-        *[
-            _wheel_excludes_task(ctx, f"{index:03d}", substring)
-            for index, substring in enumerate(
-                WHEEL_EXCLUDED_SUBSTRINGS,
-                start=18 + len(RELEASE_INTEROP_EXTRA_REQUIREMENTS) + len(WHEEL_REQUIRED_FILES),
-            )
-        ],
-        *[
-            _sdist_contains_task(ctx, f"{index:03d}", suffix)
-            for index, suffix in enumerate(
-                SDIST_REQUIRED_SUFFIXES,
-                start=18
-                + len(RELEASE_INTEROP_EXTRA_REQUIREMENTS)
-                + len(WHEEL_REQUIRED_FILES)
-                + len(WHEEL_EXCLUDED_SUBSTRINGS),
-            )
-        ],
-        *[
-            _sdist_excludes_task(ctx, f"{index:03d}", substring)
-            for index, substring in enumerate(
-                SDIST_EXCLUDED_SUBSTRINGS,
-                start=18
-                + len(RELEASE_INTEROP_EXTRA_REQUIREMENTS)
-                + len(WHEEL_REQUIRED_FILES)
-                + len(WHEEL_EXCLUDED_SUBSTRINGS)
-                + len(SDIST_REQUIRED_SUFFIXES),
-            )
-        ],
     ]
+    next_id = len(tasks) + 1
+    tasks.extend(
+        _project_url_task(ctx, f"{index:03d}", label, PROJECT_URLS[label])
+        for index, label in enumerate(PROJECT_URLS, start=next_id)
+    )
+    next_id = len(tasks) + 1
+    tasks.extend(
+        _provides_extra_task(ctx, f"{index:03d}", extra)
+        for index, extra in enumerate(OPTIONAL_EXTRAS, start=next_id)
+    )
+    next_id = len(tasks) + 1
+    tasks.extend(
+        _requires_dist_task(ctx, f"{index:03d}", extra, requirement)
+        for index, (extra, requirement) in enumerate(RELEASE_INTEROP_EXTRA_REQUIREMENTS.items(), start=next_id)
+    )
+    next_id = len(tasks) + 1
+    tasks.extend(
+        _wheel_contains_task(ctx, f"{index:03d}", relative_path)
+        for index, relative_path in enumerate(WHEEL_REQUIRED_FILES, start=next_id)
+    )
+    next_id = len(tasks) + 1
+    tasks.extend(
+        _wheel_excludes_task(ctx, f"{index:03d}", substring)
+        for index, substring in enumerate(WHEEL_EXCLUDED_SUBSTRINGS, start=next_id)
+    )
+    next_id = len(tasks) + 1
+    tasks.extend(
+        _sdist_contains_task(ctx, f"{index:03d}", suffix)
+        for index, suffix in enumerate(SDIST_REQUIRED_SUFFIXES, start=next_id)
+    )
+    next_id = len(tasks) + 1
+    tasks.extend(
+        _sdist_excludes_task(ctx, f"{index:03d}", substring)
+        for index, substring in enumerate(SDIST_EXCLUDED_SUBSTRINGS, start=next_id)
+    )
 
     expected_task_count = 5 + len(PROJECT_URLS) + len(OPTIONAL_EXTRAS) + len(WHEEL_REQUIRED_FILES)
     expected_task_count += len(RELEASE_INTEROP_EXTRA_REQUIREMENTS)
@@ -351,13 +386,12 @@ def main() -> int:
     args = parser.parse_args()
 
     repo_root = args.repo_root.resolve()
-    artifact_dir = resolve_repo_relative_path(args.artifact_dir or Path("dist"), repo_root=repo_root)
-    tasks = build_tasks(repo_root, artifact_dir)
-
     if args.list:
-        for task in tasks:
+        for task in list_task_specs(repo_root):
             print(f"SCAN {task.id} [{task.category}] {task.description}")
         return 0
+    artifact_dir = resolve_repo_relative_path(args.artifact_dir or Path("dist"), repo_root=repo_root)
+    tasks = build_tasks(repo_root, artifact_dir)
     return run_tasks(tasks)
 
 

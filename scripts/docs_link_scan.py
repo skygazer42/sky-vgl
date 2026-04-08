@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import fnmatch
 import re
 from dataclasses import dataclass
 from pathlib import Path
@@ -29,11 +30,21 @@ class DocsContext:
     def __init__(self, repo_root: Path):
         self.repo_root = repo_root.resolve()
         self._anchor_cache: dict[Path, set[str]] = {}
+        self._public_docs_cache: list[Path] | None = None
 
     def public_docs(self) -> list[Path]:
-        docs = [self.repo_root / "README.md"]
-        docs.extend(sorted((self.repo_root / "docs").glob("*.md")))
-        return docs
+        cached = self._public_docs_cache
+        if cached is None:
+            docs_root = self.repo_root / "docs"
+            excluded_patterns = _mkdocs_not_in_nav_patterns(self.repo_root)
+            cached = [self.repo_root / "README.md"]
+            for path in sorted(docs_root.rglob("*.md")):
+                relative_doc = path.relative_to(docs_root).as_posix()
+                if any(fnmatch.fnmatch(relative_doc, pattern) for pattern in excluded_patterns):
+                    continue
+                cached.append(path)
+            self._public_docs_cache = cached
+        return cached
 
     def anchors_for(self, path: Path) -> set[str]:
         path = path.resolve()
@@ -54,6 +65,72 @@ class DocsContext:
             cached = anchors
             self._anchor_cache[path] = cached
         return cached
+
+
+def _mkdocs_not_in_nav_patterns(repo_root: Path) -> tuple[str, ...]:
+    mkdocs_path = repo_root / "mkdocs.yml"
+    if not mkdocs_path.is_file():
+        return ()
+
+    patterns: list[str] = []
+    in_block = False
+    for line in mkdocs_path.read_text(encoding="utf-8").splitlines():
+        if not in_block:
+            if line.startswith("not_in_nav:"):
+                payload = line.partition(":")[2].strip()
+                if payload:
+                    if payload in {"|", ">"}:
+                        in_block = True
+                        continue
+                    if payload.startswith("[") and payload.endswith("]"):
+                        patterns.extend(_flow_sequence_patterns(payload))
+                    else:
+                        patterns.append(_strip_optional_quotes(payload))
+                    break
+                in_block = True
+            continue
+        if line and not line.startswith(" "):
+            break
+        pattern = line.strip()
+        if pattern.startswith("- "):
+            pattern = pattern[2:].strip()
+        pattern = _strip_optional_quotes(pattern)
+        if pattern:
+            patterns.append(pattern)
+    return tuple(patterns)
+
+
+def _flow_sequence_patterns(payload: str) -> tuple[str, ...]:
+    items: list[str] = []
+    current: list[str] = []
+    quote: str | None = None
+    for char in payload[1:-1]:
+        if quote is not None:
+            if char == quote:
+                quote = None
+            current.append(char)
+            continue
+        if char in {'"', "'"}:
+            quote = char
+            current.append(char)
+            continue
+        if char == ",":
+            item = _strip_optional_quotes("".join(current).strip())
+            if item:
+                items.append(item)
+            current = []
+            continue
+        current.append(char)
+    tail = _strip_optional_quotes("".join(current).strip())
+    if tail:
+        items.append(tail)
+    return tuple(items)
+
+
+def _strip_optional_quotes(pattern: str) -> str:
+    if len(pattern) >= 2 and pattern[0] == pattern[-1] and pattern[0] in {'"', "'"}:
+        return pattern[1:-1]
+    return pattern
 
 
 def _same_doc_anchor_task(ctx: DocsContext, task_id: str, source: Path, fragment: str) -> ScanTask:

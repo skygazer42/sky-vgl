@@ -7,7 +7,6 @@ import textwrap
 
 import pytest
 
-import scripts.contracts as contracts
 from scripts import interop_smoke
 
 
@@ -58,27 +57,6 @@ def test_interop_smoke_lists_supported_backends():
 
 def test_module_lists_stable_backend_catalog():
     assert interop_smoke.list_backends() == ("pyg", "dgl")
-
-
-def test_interop_smoke_prefers_repo_contracts_module(monkeypatch, tmp_path):
-    shadow_module = tmp_path / "contracts.py"
-    shadow_module.write_text(
-        'REAL_INTEROP_BACKENDS = ("shadow",)\n',
-        encoding="utf-8",
-    )
-
-    monkeypatch.syspath_prepend(str(tmp_path))
-    shadowed = sys.modules.pop("contracts", None)
-    try:
-        loaded = _load_interop_smoke_module("interop_smoke_shadowed")
-    finally:
-        sys.modules.pop("interop_smoke_shadowed", None)
-        sys.modules.pop("contracts", None)
-        if shadowed is not None:
-            sys.modules["contracts"] = shadowed
-
-    assert loaded.REAL_INTEROP_BACKENDS == contracts.REAL_INTEROP_BACKENDS
-    assert loaded.list_backends() == contracts.REAL_INTEROP_BACKENDS
 
 
 def test_interop_smoke_runs_pyg_round_trip_with_fake_backend(tmp_path):

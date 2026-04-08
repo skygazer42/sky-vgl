@@ -6,20 +6,11 @@ import sys
 
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
-TOP_LEVEL_MODULE_NAME = "repo_script_imports"
-PACKAGE_MODULE_NAME = "scripts.repo_script_imports"
-
-
-if __name__ == TOP_LEVEL_MODULE_NAME:
-    sys.modules.setdefault(PACKAGE_MODULE_NAME, sys.modules[__name__])
-elif __name__ == PACKAGE_MODULE_NAME:
-    sys.modules.setdefault(TOP_LEVEL_MODULE_NAME, sys.modules[__name__])
 
 
 def ensure_repo_root_on_path() -> Path:
     repo_root_str = str(REPO_ROOT)
-    if repo_root_str in sys.path:
-        sys.path.remove(repo_root_str)
+    sys.path[:] = [entry for entry in sys.path if entry != repo_root_str]
     sys.path.insert(0, repo_root_str)
     return REPO_ROOT
 
@@ -33,3 +24,17 @@ def resolve_repo_relative_path(path: Path, *, repo_root: Path = REPO_ROOT) -> Pa
 def load_repo_module(module_name: str):
     ensure_repo_root_on_path()
     return importlib.import_module(module_name)
+
+
+if sys.version_info >= (3, 11):
+    def load_toml_file(path: Path):
+        import tomllib
+
+        with Path(path).open("rb") as handle:
+            return tomllib.load(handle)
+else:
+    def load_toml_file(path: Path):
+        import tomli
+
+        with Path(path).open("rb") as handle:
+            return tomli.load(handle)

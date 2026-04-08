@@ -3,15 +3,14 @@ from __future__ import annotations
 import argparse
 import json
 from pathlib import Path
-import sys
 from tempfile import TemporaryDirectory
 from time import perf_counter
+import repo_script_imports
 
-import torch
+ensure_repo_root_on_path = repo_script_imports.ensure_repo_root_on_path
 
-REPO_ROOT = Path(__file__).resolve().parents[1]
-if str(REPO_ROOT) not in sys.path:
-    sys.path.insert(0, str(REPO_ROOT))
+
+ensure_repo_root_on_path()
 
 BENCHMARK_SCHEMA_VERSION = 1
 PRESETS = {
@@ -53,6 +52,7 @@ def _time_call(fn, *, warmup: int, repeats: int) -> float:
 
 
 def _build_graph(*, num_nodes: int, num_edges: int, seed: int):
+    import torch
     from vgl.graph import Graph
 
     generator = torch.Generator().manual_seed(seed)
@@ -64,6 +64,7 @@ def _build_graph(*, num_nodes: int, num_edges: int, seed: int):
 
 
 def benchmark_query_ops(*, num_nodes: int, num_edges: int, num_queries: int, warmup: int, repeats: int, seed: int):
+    import torch
     from vgl.ops import edge_ids, find_edges, has_edges_between
 
     graph = _build_graph(num_nodes=num_nodes, num_edges=num_edges, seed=seed)
@@ -92,6 +93,7 @@ def benchmark_query_ops(*, num_nodes: int, num_edges: int, num_queries: int, war
 
 
 def benchmark_routing(*, num_nodes: int, num_edges: int, num_partitions: int, num_queries: int, warmup: int, repeats: int, seed: int):
+    import torch
     from vgl.distributed.coordinator import LocalSamplingCoordinator, StoreBackedSamplingCoordinator
     from vgl.distributed.shard import LocalGraphShard
     from vgl.distributed.writer import write_partitioned_graph
@@ -125,6 +127,7 @@ def benchmark_routing(*, num_nodes: int, num_edges: int, num_partitions: int, nu
 
 
 def benchmark_sampling(*, num_nodes: int, num_edges: int, warmup: int, repeats: int, seed: int):
+    import torch
     from vgl.dataloading import LinkNeighborSampler, TemporalNeighborSampler
     from vgl.data.sample import LinkPredictionRecord, TemporalEventRecord
     from vgl.graph import Graph

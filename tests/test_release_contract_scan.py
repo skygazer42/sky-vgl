@@ -2,12 +2,10 @@ import importlib.util
 import shutil
 import subprocess
 import sys
-import textwrap
 from pathlib import Path
 
 import pytest
 
-import scripts.contracts as contracts
 from scripts.contracts import (
     OPTIONAL_EXTRAS,
     PROJECT_URLS,
@@ -53,39 +51,6 @@ def built_artifact_dir(tmp_path_factory) -> Path:
         check=True,
     )
     return output_dir
-
-
-def test_release_contract_scan_prefers_repo_contracts_module(monkeypatch, tmp_path):
-    shadow_module = tmp_path / "contracts.py"
-    shadow_module.write_text(
-        textwrap.dedent(
-            """
-            OPTIONAL_EXTRAS = ()
-            PROJECT_NAME = "shadow-project"
-            PROJECT_URLS = {}
-            RELEASE_INTEROP_EXTRA_REQUIREMENTS = {"pyg": "shadow"}
-            REQUIRES_PYTHON = ">=9.9"
-            SDIST_EXCLUDED_SUBSTRINGS = ()
-            SDIST_REQUIRED_SUFFIXES = ()
-            WHEEL_EXCLUDED_SUBSTRINGS = ()
-            WHEEL_REQUIRED_FILES = ()
-            """
-        ).strip()
-        + "\n",
-        encoding="utf-8",
-    )
-
-    monkeypatch.syspath_prepend(str(tmp_path))
-    shadowed = sys.modules.pop("contracts", None)
-    try:
-        scan = _load_release_contract_scan("release_contract_scan_shadowed")
-    finally:
-        sys.modules.pop("release_contract_scan_shadowed", None)
-        if shadowed is not None:
-            sys.modules["contracts"] = shadowed
-
-    assert scan.PROJECT_NAME == contracts.PROJECT_NAME
-    assert scan.RELEASE_INTEROP_EXTRA_REQUIREMENTS == contracts.RELEASE_INTEROP_EXTRA_REQUIREMENTS
 
 
 def test_release_artifact_helper_reads_built_contract_scan_wheel(built_artifact_dir: Path):

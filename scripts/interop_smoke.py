@@ -10,7 +10,8 @@ ensure_repo_root_on_path = repo_script_imports.ensure_repo_root_on_path
 load_repo_module = repo_script_imports.load_repo_module
 
 
-REAL_INTEROP_BACKENDS = load_repo_module("scripts.contracts").REAL_INTEROP_BACKENDS
+REAL_INTEROP_BACKENDS = tuple(load_repo_module("scripts.contracts").REAL_INTEROP_BACKENDS)
+
 
 def _parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(
@@ -20,7 +21,7 @@ def _parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
         "--backend",
         choices=(*REAL_INTEROP_BACKENDS, "all"),
         default="all",
-        help="Interop backend to validate.",
+        help="Interop backend to validate. Use --list-backends to print the supported backend names.",
     )
     parser.add_argument(
         "--list-backends",
@@ -31,7 +32,7 @@ def _parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
 
 
 def list_backends() -> tuple[str, ...]:
-    return tuple(REAL_INTEROP_BACKENDS)
+    return REAL_INTEROP_BACKENDS
 
 
 def build_smoke_graph():

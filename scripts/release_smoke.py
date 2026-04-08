@@ -18,10 +18,11 @@ resolve_repo_relative_path = repo_script_imports.resolve_repo_relative_path
 
 
 _contracts = load_repo_module("scripts.contracts")
-REAL_INTEROP_BACKENDS = _contracts.REAL_INTEROP_BACKENDS
-WHEEL_IMPORT_SYMBOLS = _contracts.WHEEL_IMPORT_SYMBOLS
-
+REAL_INTEROP_BACKENDS = tuple(_contracts.REAL_INTEROP_BACKENDS)
+WHEEL_IMPORT_SYMBOLS = tuple(_contracts.WHEEL_IMPORT_SYMBOLS)
 INTEROP_BACKENDS = ("none", *REAL_INTEROP_BACKENDS, "all")
+
+
 INTEROP_BACKEND_IMPORT_MODULES = {
     "pyg": "torch_geometric",
     "dgl": "dgl",
@@ -53,7 +54,8 @@ def _parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
         default="none",
         help=(
             "Optionally run backend interop smoke inside the artifact-installed "
-            "environment. Defaults to disabled."
+            "environment. Supported values are none, all, or a backend name from "
+            "`python scripts/interop_smoke.py --list-backends`. Defaults to disabled."
         ),
     )
     return parser.parse_args(argv)

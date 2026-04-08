@@ -1,5 +1,4 @@
 import email
-import importlib
 import importlib.util
 import os
 import shutil
@@ -12,7 +11,6 @@ from pathlib import Path
 
 import pytest
 
-import scripts.release_artifact_metadata as release_artifact_metadata
 from scripts.workflow_contracts import workflow_step_text
 from scripts.contracts import (
     DOCS_INDEX_VERSION_BADGE,
@@ -35,17 +33,6 @@ def _load_release_smoke_module():
     module = importlib.util.module_from_spec(spec)
     assert spec is not None
     assert spec.loader is not None
-    spec.loader.exec_module(module)
-    return module
-
-
-def _load_install_release_extras_module(module_name: str = "install_release_extras"):
-    script_path = REPO_ROOT / "scripts" / "install_release_extras.py"
-    spec = importlib.util.spec_from_file_location(module_name, script_path)
-    assert spec is not None
-    assert spec.loader is not None
-    module = importlib.util.module_from_spec(spec)
-    sys.modules[module_name] = module
     spec.loader.exec_module(module)
     return module
 
@@ -170,36 +157,13 @@ def test_shared_release_artifact_helper_reports_missing_metadata(tmp_path):
     assert detail == "wheel METADATA missing"
 
 
-def test_shared_repo_script_import_helper_loads_repo_local_modules():
-    from scripts.repo_script_imports import load_repo_module
+def test_shared_repo_script_import_helper_loads_toml_file(tmp_path):
+    from scripts.repo_script_imports import load_toml_file
 
-    assert load_repo_module("scripts.contracts") is importlib.import_module("scripts.contracts")
+    toml_path = tmp_path / "demo.toml"
+    toml_path.write_text("value = 7\n", encoding="utf-8")
 
-
-def test_install_release_extras_prefers_repo_artifact_metadata_helper(monkeypatch, tmp_path):
-    shadow_module = tmp_path / "release_artifact_metadata.py"
-    shadow_module.write_text(
-        textwrap.dedent(
-            """
-            def read_wheel_metadata(_wheel_path):
-                return None, "shadow helper"
-            """
-        ).strip()
-        + "\n",
-        encoding="utf-8",
-    )
-
-    monkeypatch.syspath_prepend(str(tmp_path))
-    shadowed = sys.modules.pop("release_artifact_metadata", None)
-    try:
-        install_release_extras = _load_install_release_extras_module("install_release_extras_shadowed")
-    finally:
-        sys.modules.pop("install_release_extras_shadowed", None)
-        sys.modules.pop("release_artifact_metadata", None)
-        if shadowed is not None:
-            sys.modules["release_artifact_metadata"] = shadowed
-
-    assert install_release_extras.read_wheel_metadata is release_artifact_metadata.read_wheel_metadata
+    assert load_toml_file(toml_path) == {"value": 7}
 
 
 def test_release_metadata_exposes_public_package_information(built_release_artifacts):

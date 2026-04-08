@@ -8,14 +8,9 @@ import subprocess
 import sys
 from pathlib import Path
 
-from packaging.markers import default_environment
-from packaging.requirements import Requirement
-
 
 load_repo_module = repo_script_imports.load_repo_module
 resolve_repo_relative_path = repo_script_imports.resolve_repo_relative_path
-
-
 read_wheel_metadata = load_repo_module("scripts.release_artifact_metadata").read_wheel_metadata
 
 
@@ -61,7 +56,7 @@ def _wheel_metadata(wheel_path: Path):
     return metadata
 
 
-def _requirement_without_marker(requirement: Requirement) -> str:
+def _requirement_without_marker(requirement) -> str:
     text = requirement.name
     if requirement.extras:
         text += f"[{','.join(sorted(requirement.extras))}]"
@@ -73,6 +68,9 @@ def _requirement_without_marker(requirement: Requirement) -> str:
 
 
 def _resolved_extra_requirements(wheel_path: Path, extras: list[str]) -> list[str]:
+    from packaging.markers import default_environment
+    from packaging.requirements import Requirement
+
     metadata = _wheel_metadata(wheel_path)
     available_extras = {extra for extra in metadata.get_all("Provides-Extra", []) if extra}
     requirement_lines = metadata.get_all("Requires-Dist", [])

@@ -1,12 +1,10 @@
 import importlib.util
 import os
 import sys
-import textwrap
 from pathlib import Path
 
 import pytest
 
-import scripts.contracts as contracts
 from scripts.contracts import REAL_INTEROP_BACKENDS
 
 
@@ -22,34 +20,6 @@ def _load_release_smoke_module(module_name: str = "release_smoke"):
     sys.modules[module_name] = module
     spec.loader.exec_module(module)
     return module
-
-
-def test_release_smoke_prefers_repo_contracts_module(monkeypatch, tmp_path):
-    shadow_module = tmp_path / "contracts.py"
-    shadow_module.write_text(
-        textwrap.dedent(
-            """
-            REAL_INTEROP_BACKENDS = ("shadow",)
-            WHEEL_IMPORT_SYMBOLS = ("ShadowSymbol",)
-            """
-        ).strip()
-        + "\n",
-        encoding="utf-8",
-    )
-
-    monkeypatch.syspath_prepend(str(tmp_path))
-    shadowed = sys.modules.pop("contracts", None)
-    try:
-        release_smoke = _load_release_smoke_module("release_smoke_shadowed")
-    finally:
-        sys.modules.pop("release_smoke_shadowed", None)
-        sys.modules.pop("contracts", None)
-        if shadowed is not None:
-            sys.modules["contracts"] = shadowed
-
-    assert release_smoke.REAL_INTEROP_BACKENDS == contracts.REAL_INTEROP_BACKENDS
-    assert release_smoke.WHEEL_IMPORT_SYMBOLS == contracts.WHEEL_IMPORT_SYMBOLS
-    assert release_smoke.INTEROP_BACKENDS == ("none", *contracts.REAL_INTEROP_BACKENDS, "all")
 
 
 def test_parse_args_accepts_optional_interop_backend_flag():

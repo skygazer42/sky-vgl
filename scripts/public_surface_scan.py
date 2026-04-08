@@ -17,10 +17,6 @@ _contracts = load_repo_module("scripts.contracts")
 FORBIDDEN_PREFERRED_IMPORT_PREFIXES = _contracts.FORBIDDEN_PREFERRED_IMPORT_PREFIXES
 PUBLIC_EXAMPLE_MODULES = _contracts.PUBLIC_EXAMPLE_MODULES
 public_surface_specs = _contracts.public_surface_specs
-
-
-CheckFn = Callable[[], tuple[bool, str]]
-
 FORBIDDEN_IMPORT_PATTERNS = tuple(
     pattern
     for prefix in FORBIDDEN_PREFERRED_IMPORT_PREFIXES
@@ -31,12 +27,22 @@ FORBIDDEN_IMPORT_PATTERNS = tuple(
 )
 
 
+CheckFn = Callable[[], tuple[bool, str]]
+
+
 @dataclass(frozen=True)
 class ScanTask:
     id: str
     category: str
     description: str
     check: CheckFn
+
+
+@dataclass(frozen=True)
+class ListTaskSpec:
+    id: str
+    category: str
+    description: str
 
 
 @dataclass(frozen=True)
@@ -115,6 +121,22 @@ def _string_sequence(node: ast.AST) -> set[str]:
         if isinstance(item, ast.Constant) and isinstance(item.value, str):
             values.add(item.value)
     return values
+
+
+def list_task_specs(_repo_root: Path) -> list[ListTaskSpec]:
+    tasks = [
+        ListTaskSpec(f"{index:03d}", spec.category, spec.description)
+        for index, spec in enumerate(public_surface_specs(), start=1)
+    ]
+    next_id = len(tasks) + 1
+    tasks.extend(
+        ListTaskSpec(f"{index:03d}", "example", f"{relative_path} has __main__ guard")
+        for index, relative_path in enumerate(PUBLIC_EXAMPLE_MODULES, start=next_id)
+    )
+    next_id = len(tasks) + 1
+    tasks.append(ListTaskSpec(f"{next_id:03d}", "imports", "examples avoids legacy import paths"))
+    tasks.append(ListTaskSpec(f"{next_id + 1:03d}", "imports", "tests/integration avoids legacy import paths"))
+    return tasks
 
 
 def _reexport_task(
@@ -206,12 +228,13 @@ def main() -> int:
         help="Repository root to scan. Defaults to this checkout root.",
     )
     args = parser.parse_args()
+    repo_root = args.repo_root.resolve()
 
-    tasks = build_tasks(args.repo_root.resolve())
     if args.list:
-        for task in tasks:
+        for task in list_task_specs(repo_root):
             print(f"SCAN {task.id} [{task.category}] {task.description}")
         return 0
+    tasks = build_tasks(repo_root)
     return run_tasks(tasks)
 
 
