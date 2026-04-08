@@ -1,18 +1,8 @@
 from __future__ import annotations
 
-from scripts.repo_script_imports import (
-    REPO_ROOT,
-    ensure_repo_root_on_path,
-    load_repo_module,
-    load_toml_file,
-    resolve_repo_relative_path,
-)
+import sys
+
+from scripts import repo_script_imports as _shared_repo_script_imports
 
 
-__all__ = [
-    "REPO_ROOT",
-    "ensure_repo_root_on_path",
-    "load_repo_module",
-    "load_toml_file",
-    "resolve_repo_relative_path",
-]
+sys.modules[__name__] = _shared_repo_script_imports

@@ -1,3 +1,4 @@
+import importlib
 import importlib.util
 import subprocess
 import sys
@@ -220,6 +221,51 @@ def test_full_scan_release_gate_negative_step_checks_fail_when_step_is_missing(t
     tasks = {task.id: task for task in scan.build_tasks(tmp_path)}
 
     assert tasks["065c"].check()[0] is False
+
+
+def test_full_scan_reuses_shared_workflow_job_helper():
+    scan = _load_scan_module()
+
+    shared_module = importlib.import_module("scripts.workflow_contracts")
+    assert scan.workflow_job_contains_text is shared_module.workflow_job_contains_text
+
+
+def test_full_scan_reuses_shared_repo_script_loader():
+    scan = _load_scan_module()
+
+    shared_loader = importlib.import_module("scripts.repo_script_imports")
+    assert scan.load_repo_module is shared_loader.load_repo_module
+
+
+def test_full_scan_prefers_repo_workflow_contracts_module(monkeypatch, tmp_path):
+    shadow_module = tmp_path / "workflow_contracts.py"
+    shadow_module.write_text(
+        textwrap.dedent(
+            """
+            def workflow_job_contains_text(*args, **kwargs):
+                raise AssertionError("shadow module should not be imported")
+            """
+        ).strip()
+        + "\n",
+        encoding="utf-8",
+    )
+
+    monkeypatch.syspath_prepend(str(tmp_path))
+    shadowed = sys.modules.pop("workflow_contracts", None)
+    shared = sys.modules.pop("scripts.workflow_contracts", None)
+    full_scan = sys.modules.pop("full_scan", None)
+    try:
+        scan = _load_scan_module()
+    finally:
+        sys.modules.pop("full_scan", None)
+        if shadowed is not None:
+            sys.modules["workflow_contracts"] = shadowed
+        if shared is not None:
+            sys.modules["scripts.workflow_contracts"] = shared
+        if full_scan is not None:
+            sys.modules["full_scan"] = full_scan
+
+    assert scan.workflow_job_contains_text.__module__ == "scripts.workflow_contracts"
 
 
 def test_ci_workflow_runs_the_full_scan_script():

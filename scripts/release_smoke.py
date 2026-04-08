@@ -17,10 +17,36 @@ load_repo_module = repo_script_imports.load_repo_module
 resolve_repo_relative_path = repo_script_imports.resolve_repo_relative_path
 
 
-_contracts = load_repo_module("scripts.contracts")
-REAL_INTEROP_BACKENDS = tuple(_contracts.REAL_INTEROP_BACKENDS)
-WHEEL_IMPORT_SYMBOLS = tuple(_contracts.WHEEL_IMPORT_SYMBOLS)
-INTEROP_BACKENDS = ("none", *REAL_INTEROP_BACKENDS, "all")
+_CONTRACTS = None
+
+
+def _contracts_module():
+    global _CONTRACTS
+    if _CONTRACTS is None:
+        _CONTRACTS = load_repo_module("scripts.contracts")
+    return _CONTRACTS
+
+
+def _real_interop_backends() -> tuple[str, ...]:
+    return tuple(_contracts_module().REAL_INTEROP_BACKENDS)
+
+
+def _wheel_import_symbols() -> tuple[str, ...]:
+    return tuple(_contracts_module().WHEEL_IMPORT_SYMBOLS)
+
+
+def _interop_backends() -> tuple[str, ...]:
+    return ("none", *_real_interop_backends(), "all")
+
+
+def __getattr__(name: str):
+    if name == "REAL_INTEROP_BACKENDS":
+        return _real_interop_backends()
+    if name == "WHEEL_IMPORT_SYMBOLS":
+        return _wheel_import_symbols()
+    if name == "INTEROP_BACKENDS":
+        return _interop_backends()
+    raise AttributeError(name)
 
 
 INTEROP_BACKEND_IMPORT_MODULES = {
@@ -50,7 +76,6 @@ def _parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     )
     parser.add_argument(
         "--interop-backend",
-        choices=INTEROP_BACKENDS,
         default="none",
         help=(
             "Optionally run backend interop smoke inside the artifact-installed "
@@ -58,7 +83,10 @@ def _parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
             "`python scripts/interop_smoke.py --list-backends`. Defaults to disabled."
         ),
     )
-    return parser.parse_args(argv)
+    args = parser.parse_args(argv)
+    if args.interop_backend not in _interop_backends():
+        parser.error(f"argument --interop-backend: invalid choice: {args.interop_backend!r}")
+    return args
 
 
 def _find_single(artifact_dir: Path, pattern: str) -> Path:
@@ -139,8 +167,9 @@ def _import_check(
         f"site.addsitedir({str(path)!r})\n"
         for path in dependency_paths
     )
-    root_imports = ", ".join(WHEEL_IMPORT_SYMBOLS)
-    symbol_prints = "".join(f"print({symbol})\n" for symbol in WHEEL_IMPORT_SYMBOLS)
+    wheel_import_symbols = _wheel_import_symbols()
+    root_imports = ", ".join(wheel_import_symbols)
+    symbol_prints = "".join(f"print({symbol})\n" for symbol in wheel_import_symbols)
     script = (
         "import site\n"
         "from pathlib import Path\n"
@@ -157,11 +186,12 @@ def _import_check(
 
 
 def _selected_interop_backends(backend: str | None) -> tuple[str, ...]:
+    real_interop_backends = _real_interop_backends()
     if backend in {None, "none"}:
         return ()
     if backend == "all":
-        return REAL_INTEROP_BACKENDS
-    if backend in REAL_INTEROP_BACKENDS:
+        return real_interop_backends
+    if backend in real_interop_backends:
         return (backend,)
     raise ValueError(f"unsupported interop backend: {backend}")
 

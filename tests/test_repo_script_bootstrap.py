@@ -1,3 +1,5 @@
+import importlib
+import importlib.util
 from pathlib import Path
 import subprocess
 import sys
@@ -18,15 +20,54 @@ SCRIPT_PATHS = {
     "interop_smoke": REPO_ROOT / "scripts" / "interop_smoke.py",
 }
 
+EXPECTED_SHARED_HELPERS = {
+    "benchmark_hotpaths": ("ensure_repo_root_on_path",),
+    "full_scan": ("load_repo_module",),
+    "install_release_extras": ("load_repo_module",),
+    "interop_smoke": ("ensure_repo_root_on_path", "load_repo_module"),
+    "metadata_consistency": ("load_repo_module",),
+    "public_surface_scan": ("load_repo_module",),
+    "release_contract_scan": ("load_repo_module",),
+    "release_smoke": ("load_repo_module",),
+}
+
+
+def _load_script_module(script_name: str):
+    module_name = f"{script_name}_bootstrap_probe"
+    script_path = SCRIPT_PATHS[script_name]
+    spec = importlib.util.spec_from_file_location(module_name, script_path)
+    assert spec is not None
+    assert spec.loader is not None
+    module = importlib.util.module_from_spec(spec)
+    sys.modules[module_name] = module
+    spec.loader.exec_module(module)
+    return module
+
+
 @pytest.mark.parametrize("script_name", sorted(SCRIPT_PATHS))
-def test_scripts_use_shared_repo_script_bootstrap(script_name: str):
+def test_script_bootstrap_is_centralized_in_repo_script_imports(script_name: str):
     text = SCRIPT_PATHS[script_name].read_text(encoding="utf-8")
 
     assert "if not __package__:" not in text
     assert "sys.path.insert(0, repo_root_str)" not in text
+
+
+@pytest.mark.parametrize("script_name", sorted(SCRIPT_PATHS))
+def test_scripts_bind_repo_script_imports_without_importlib_boilerplate(script_name: str):
+    text = SCRIPT_PATHS[script_name].read_text(encoding="utf-8")
+
     assert "import repo_script_imports" in text
     assert 'importlib.import_module("scripts.repo_script_imports")' not in text
     assert 'importlib.import_module("repo_script_imports")' not in text
+
+
+@pytest.mark.parametrize("script_name", sorted(SCRIPT_PATHS))
+def test_scripts_reuse_shared_repo_script_helpers(script_name: str):
+    module = _load_script_module(script_name)
+    shared_helpers = importlib.import_module("scripts.repo_script_imports")
+
+    for helper_name in EXPECTED_SHARED_HELPERS[script_name]:
+        assert getattr(module, helper_name) is getattr(shared_helpers, helper_name)
 
 
 def test_benchmark_hotpaths_module_load_avoids_eager_torch_import(tmp_path: Path):

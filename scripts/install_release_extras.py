@@ -11,7 +11,22 @@ from pathlib import Path
 
 load_repo_module = repo_script_imports.load_repo_module
 resolve_repo_relative_path = repo_script_imports.resolve_repo_relative_path
-read_wheel_metadata = load_repo_module("scripts.release_artifact_metadata").read_wheel_metadata
+
+
+_READ_WHEEL_METADATA = None
+
+
+def _read_wheel_metadata_fn():
+    global _READ_WHEEL_METADATA
+    if _READ_WHEEL_METADATA is None:
+        _READ_WHEEL_METADATA = load_repo_module("scripts.release_artifact_metadata").read_wheel_metadata
+    return _READ_WHEEL_METADATA
+
+
+def __getattr__(name: str):
+    if name == "read_wheel_metadata":
+        return _read_wheel_metadata_fn()
+    raise AttributeError(name)
 
 
 def _parse_args() -> argparse.Namespace:
@@ -50,7 +65,7 @@ def _find_single_wheel(artifact_dir: Path) -> Path:
 
 
 def _wheel_metadata(wheel_path: Path):
-    metadata, detail = read_wheel_metadata(wheel_path)
+    metadata, detail = _read_wheel_metadata_fn()(wheel_path)
     if metadata is None:
         raise SystemExit(detail)
     return metadata

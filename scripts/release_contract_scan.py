@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import ast
 import email
 import re
 import tarfile
@@ -14,21 +15,63 @@ import repo_script_imports
 
 
 load_repo_module = repo_script_imports.load_repo_module
-load_toml_file = repo_script_imports.load_toml_file
 resolve_repo_relative_path = repo_script_imports.resolve_repo_relative_path
 
 
-_contracts = load_repo_module("scripts.contracts")
-OPTIONAL_EXTRAS = _contracts.OPTIONAL_EXTRAS
-PROJECT_NAME = _contracts.PROJECT_NAME
-PROJECT_URLS = _contracts.PROJECT_URLS
-RELEASE_INTEROP_EXTRA_REQUIREMENTS = _contracts.RELEASE_INTEROP_EXTRA_REQUIREMENTS
-REQUIRES_PYTHON = _contracts.REQUIRES_PYTHON
-SDIST_EXCLUDED_SUBSTRINGS = _contracts.SDIST_EXCLUDED_SUBSTRINGS
-SDIST_REQUIRED_SUFFIXES = _contracts.SDIST_REQUIRED_SUFFIXES
-WHEEL_EXCLUDED_SUBSTRINGS = _contracts.WHEEL_EXCLUDED_SUBSTRINGS
-WHEEL_REQUIRED_FILES = _contracts.WHEEL_REQUIRED_FILES
-read_wheel_metadata = load_repo_module("scripts.release_artifact_metadata").read_wheel_metadata
+_CONTRACTS = None
+_READ_WHEEL_METADATA = None
+_LIST_CONTRACT_NAMES = (
+    "OPTIONAL_EXTRAS",
+    "PROJECT_URLS",
+    "RELEASE_INTEROP_EXTRA_REQUIREMENTS",
+    "SDIST_EXCLUDED_SUBSTRINGS",
+    "SDIST_REQUIRED_SUFFIXES",
+    "WHEEL_EXCLUDED_SUBSTRINGS",
+    "WHEEL_REQUIRED_FILES",
+)
+
+
+def _contracts_module():
+    global _CONTRACTS
+    if _CONTRACTS is None:
+        _CONTRACTS = load_repo_module("scripts.contracts")
+    return _CONTRACTS
+
+
+def _read_wheel_metadata_fn():
+    global _READ_WHEEL_METADATA
+    if _READ_WHEEL_METADATA is None:
+        _READ_WHEEL_METADATA = load_repo_module("scripts.release_artifact_metadata").read_wheel_metadata
+    return _READ_WHEEL_METADATA
+
+
+def __getattr__(name: str):
+    if name == "read_wheel_metadata":
+        return _read_wheel_metadata_fn()
+    if name in {
+        "OPTIONAL_EXTRAS",
+        "PROJECT_NAME",
+        "PROJECT_URLS",
+        "RELEASE_INTEROP_EXTRA_REQUIREMENTS",
+        "REQUIRES_PYTHON",
+        "SDIST_EXCLUDED_SUBSTRINGS",
+        "SDIST_REQUIRED_SUFFIXES",
+        "WHEEL_EXCLUDED_SUBSTRINGS",
+        "WHEEL_REQUIRED_FILES",
+    }:
+        return getattr(_contracts_module(), name)
+    raise AttributeError(name)
+
+
+def _iter_named_assignment_values(tree: ast.Module):
+    for node in tree.body:
+        if isinstance(node, ast.Assign):
+            for target in node.targets:
+                if isinstance(target, ast.Name):
+                    yield target.id, node.value
+            continue
+        if isinstance(node, ast.AnnAssign) and node.value is not None and isinstance(node.target, ast.Name):
+            yield node.target.id, node.value
 
 
 CheckFn = Callable[[], tuple[bool, str]]
@@ -49,7 +92,73 @@ class ListTaskSpec:
     description: str
 
 
-def list_task_specs(_repo_root: Path) -> list[ListTaskSpec]:
+def _list_contract_values(repo_root: Path) -> dict[str, object]:
+    contracts_path = repo_root / "scripts" / "contracts.py"
+    tree = ast.parse(contracts_path.read_text(encoding="utf-8"), filename=str(contracts_path))
+
+    scope: dict[str, object] = {}
+    values: dict[str, object] = {}
+    for name, value_node in _iter_named_assignment_values(tree):
+        try:
+            value = _literal_contract_value(value_node, scope)
+        except ValueError:
+            continue
+        scope[name] = value
+        if name in _LIST_CONTRACT_NAMES:
+            values[name] = value
+
+    missing = [name for name in _LIST_CONTRACT_NAMES if name not in values]
+    if missing:
+        raise RuntimeError(f"scripts/contracts.py missing release list constants: {', '.join(missing)}")
+    return values
+
+
+def _literal_contract_value(node: ast.AST, scope: dict[str, object]) -> object:
+    if isinstance(node, ast.Constant):
+        return node.value
+    if isinstance(node, ast.BinOp) and isinstance(node.op, ast.Add):
+        left = _literal_contract_value(node.left, scope)
+        right = _literal_contract_value(node.right, scope)
+        try:
+            return left + right  # type: ignore[operator]
+        except TypeError as exc:
+            raise ValueError("unsupported contract addition") from exc
+    if isinstance(node, ast.BinOp) and isinstance(node.op, ast.BitOr):
+        left = _literal_contract_value(node.left, scope)
+        right = _literal_contract_value(node.right, scope)
+        try:
+            return left | right  # type: ignore[operator]
+        except TypeError as exc:
+            raise ValueError("unsupported contract union") from exc
+    if isinstance(node, ast.Name):
+        try:
+            return scope[node.id]
+        except KeyError as exc:
+            raise ValueError(f"unsupported name reference {node.id!r}") from exc
+    if isinstance(node, ast.Tuple):
+        return tuple(_literal_contract_value(item, scope) for item in node.elts)
+    if isinstance(node, ast.List):
+        return [_literal_contract_value(item, scope) for item in node.elts]
+    if isinstance(node, ast.Set):
+        return {_literal_contract_value(item, scope) for item in node.elts}
+    if isinstance(node, ast.Dict):
+        return {
+            _literal_contract_value(key, scope): _literal_contract_value(value, scope)
+            for key, value in zip(node.keys, node.values, strict=True)
+        }
+    raise ValueError(f"unsupported contract AST node: {type(node).__name__}")
+
+
+def list_task_specs(repo_root: Path) -> list[ListTaskSpec]:
+    values = _list_contract_values(repo_root.resolve())
+    project_urls = values["PROJECT_URLS"]
+    optional_extras = values["OPTIONAL_EXTRAS"]
+    release_interop_extra_requirements = values["RELEASE_INTEROP_EXTRA_REQUIREMENTS"]
+    wheel_required_files = values["WHEEL_REQUIRED_FILES"]
+    wheel_excluded_substrings = values["WHEEL_EXCLUDED_SUBSTRINGS"]
+    sdist_required_suffixes = values["SDIST_REQUIRED_SUFFIXES"]
+    sdist_excluded_substrings = values["SDIST_EXCLUDED_SUBSTRINGS"]
+
     tasks = [
         ListTaskSpec("001", "artifact", "built wheel exists"),
         ListTaskSpec("002", "artifact", "built sdist exists"),
@@ -60,12 +169,12 @@ def list_task_specs(_repo_root: Path) -> list[ListTaskSpec]:
     next_id = len(tasks) + 1
     tasks.extend(
         ListTaskSpec(f"{index:03d}", "metadata", f"wheel exposes {label} project URL")
-        for index, label in enumerate(PROJECT_URLS, start=next_id)
+        for index, label in enumerate(project_urls, start=next_id)
     )
     next_id = len(tasks) + 1
     tasks.extend(
         ListTaskSpec(f"{index:03d}", "metadata", f"wheel provides extra {extra}")
-        for index, extra in enumerate(OPTIONAL_EXTRAS, start=next_id)
+        for index, extra in enumerate(optional_extras, start=next_id)
     )
     next_id = len(tasks) + 1
     tasks.extend(
@@ -74,27 +183,27 @@ def list_task_specs(_repo_root: Path) -> list[ListTaskSpec]:
             "metadata",
             f"wheel metadata exposes {extra} extra requirement line {requirement}",
         )
-        for index, (extra, requirement) in enumerate(RELEASE_INTEROP_EXTRA_REQUIREMENTS.items(), start=next_id)
+        for index, (extra, requirement) in enumerate(release_interop_extra_requirements.items(), start=next_id)
     )
     next_id = len(tasks) + 1
     tasks.extend(
         ListTaskSpec(f"{index:03d}", "wheel", f"wheel contains {relative_path}")
-        for index, relative_path in enumerate(WHEEL_REQUIRED_FILES, start=next_id)
+        for index, relative_path in enumerate(wheel_required_files, start=next_id)
     )
     next_id = len(tasks) + 1
     tasks.extend(
         ListTaskSpec(f"{index:03d}", "wheel", f"wheel excludes {substring}")
-        for index, substring in enumerate(WHEEL_EXCLUDED_SUBSTRINGS, start=next_id)
+        for index, substring in enumerate(wheel_excluded_substrings, start=next_id)
     )
     next_id = len(tasks) + 1
     tasks.extend(
         ListTaskSpec(f"{index:03d}", "sdist", f"sdist contains {suffix}")
-        for index, suffix in enumerate(SDIST_REQUIRED_SUFFIXES, start=next_id)
+        for index, suffix in enumerate(sdist_required_suffixes, start=next_id)
     )
     next_id = len(tasks) + 1
     tasks.extend(
         ListTaskSpec(f"{index:03d}", "sdist", f"sdist excludes {substring}")
-        for index, substring in enumerate(SDIST_EXCLUDED_SUBSTRINGS, start=next_id)
+        for index, substring in enumerate(sdist_excluded_substrings, start=next_id)
     )
     return tasks
 
@@ -144,7 +253,7 @@ class ArtifactContext:
             if wheel_path is None:
                 self._wheel_metadata = (None, detail)
             else:
-                self._wheel_metadata = read_wheel_metadata(wheel_path)
+                self._wheel_metadata = _read_wheel_metadata_fn()(wheel_path)
         return self._wheel_metadata
 
     def wheel_names(self) -> tuple[list[str] | None, str]:
@@ -171,7 +280,12 @@ class ArtifactContext:
 
     def _load_pyproject(self) -> dict:
         if self._pyproject is None:
-            self._pyproject = load_toml_file(self.repo_root / "pyproject.toml")
+            try:
+                import tomllib  # type: ignore[attr-defined]
+            except ModuleNotFoundError:  # pragma: no cover - Python 3.10 fallback
+                import tomli as tomllib  # type: ignore[no-redef]
+            with (self.repo_root / "pyproject.toml").open("rb") as handle:
+                self._pyproject = tomllib.load(handle)
         return self._pyproject
 
     def _single_artifact(self, pattern: str) -> tuple[Path | None, str]:
@@ -290,67 +404,84 @@ def _sdist_excludes_task(ctx: ArtifactContext, task_id: str, substring: str) -> 
     return ScanTask(task_id, "sdist", f"sdist excludes {substring}", check)
 
 
-def build_tasks(repo_root: Path, artifact_dir: Path) -> list[ScanTask]:
+def build_tasks(
+    repo_root: Path,
+    artifact_dir: Path,
+    *,
+    validate_repo_contracts: bool = True,
+) -> list[ScanTask]:
+    contracts = _contracts_module()
+    optional_extras = contracts.OPTIONAL_EXTRAS
+    project_name = contracts.PROJECT_NAME
+    project_urls = contracts.PROJECT_URLS
+    release_interop_extra_requirements = contracts.RELEASE_INTEROP_EXTRA_REQUIREMENTS
+    requires_python = contracts.REQUIRES_PYTHON
+    sdist_excluded_substrings = contracts.SDIST_EXCLUDED_SUBSTRINGS
+    sdist_required_suffixes = contracts.SDIST_REQUIRED_SUFFIXES
+    wheel_excluded_substrings = contracts.WHEEL_EXCLUDED_SUBSTRINGS
+    wheel_required_files = contracts.WHEEL_REQUIRED_FILES
+
     ctx = ArtifactContext(repo_root, artifact_dir)
-    if ctx.pyproject_value("project", "urls") != PROJECT_URLS:
-        raise RuntimeError("pyproject project.urls must match scripts/contracts.py")
-    if str(ctx.pyproject_value("project", "name")) != PROJECT_NAME:
-        raise RuntimeError("pyproject project.name must match scripts/contracts.py")
-    if str(ctx.pyproject_value("project", "requires-python")) != REQUIRES_PYTHON:
-        raise RuntimeError("pyproject project.requires-python must match scripts/contracts.py")
+    if validate_repo_contracts:
+        if ctx.pyproject_value("project", "urls") != project_urls:
+            raise RuntimeError("pyproject project.urls must match scripts/contracts.py")
+        if str(ctx.pyproject_value("project", "name")) != project_name:
+            raise RuntimeError("pyproject project.name must match scripts/contracts.py")
+        if str(ctx.pyproject_value("project", "requires-python")) != requires_python:
+            raise RuntimeError("pyproject project.requires-python must match scripts/contracts.py")
 
     tasks = [
         _artifact_exists_task(ctx, "001", "built wheel exists", ctx.wheel_path),
         _artifact_exists_task(ctx, "002", "built sdist exists", ctx.sdist_path),
-        _metadata_header_equals_task(ctx, "003", "wheel name matches project", "Name", PROJECT_NAME),
+        _metadata_header_equals_task(ctx, "003", "wheel name matches project", "Name", project_name),
         _metadata_header_equals_task(ctx, "004", "wheel version matches repo version", "Version", ctx.repo_version()),
         _metadata_header_equals_task(
             ctx,
             "005",
             "wheel Requires-Python matches pyproject",
             "Requires-Python",
-            REQUIRES_PYTHON,
+            requires_python,
         ),
     ]
     next_id = len(tasks) + 1
     tasks.extend(
-        _project_url_task(ctx, f"{index:03d}", label, PROJECT_URLS[label])
-        for index, label in enumerate(PROJECT_URLS, start=next_id)
+        _project_url_task(ctx, f"{index:03d}", label, project_urls[label])
+        for index, label in enumerate(project_urls, start=next_id)
     )
     next_id = len(tasks) + 1
     tasks.extend(
         _provides_extra_task(ctx, f"{index:03d}", extra)
-        for index, extra in enumerate(OPTIONAL_EXTRAS, start=next_id)
+        for index, extra in enumerate(optional_extras, start=next_id)
     )
     next_id = len(tasks) + 1
     tasks.extend(
         _requires_dist_task(ctx, f"{index:03d}", extra, requirement)
-        for index, (extra, requirement) in enumerate(RELEASE_INTEROP_EXTRA_REQUIREMENTS.items(), start=next_id)
+        for index, (extra, requirement) in enumerate(release_interop_extra_requirements.items(), start=next_id)
     )
     next_id = len(tasks) + 1
     tasks.extend(
         _wheel_contains_task(ctx, f"{index:03d}", relative_path)
-        for index, relative_path in enumerate(WHEEL_REQUIRED_FILES, start=next_id)
+        for index, relative_path in enumerate(wheel_required_files, start=next_id)
     )
     next_id = len(tasks) + 1
     tasks.extend(
         _wheel_excludes_task(ctx, f"{index:03d}", substring)
-        for index, substring in enumerate(WHEEL_EXCLUDED_SUBSTRINGS, start=next_id)
+        for index, substring in enumerate(wheel_excluded_substrings, start=next_id)
     )
     next_id = len(tasks) + 1
     tasks.extend(
         _sdist_contains_task(ctx, f"{index:03d}", suffix)
-        for index, suffix in enumerate(SDIST_REQUIRED_SUFFIXES, start=next_id)
+        for index, suffix in enumerate(sdist_required_suffixes, start=next_id)
     )
     next_id = len(tasks) + 1
     tasks.extend(
         _sdist_excludes_task(ctx, f"{index:03d}", substring)
-        for index, substring in enumerate(SDIST_EXCLUDED_SUBSTRINGS, start=next_id)
+        for index, substring in enumerate(sdist_excluded_substrings, start=next_id)
     )
 
-    expected_task_count = 5 + len(PROJECT_URLS) + len(OPTIONAL_EXTRAS) + len(WHEEL_REQUIRED_FILES)
-    expected_task_count += len(RELEASE_INTEROP_EXTRA_REQUIREMENTS)
-    expected_task_count += len(WHEEL_EXCLUDED_SUBSTRINGS) + len(SDIST_REQUIRED_SUFFIXES) + len(SDIST_EXCLUDED_SUBSTRINGS)
+    expected_task_count = 5 + len(project_urls) + len(optional_extras) + len(wheel_required_files)
+    expected_task_count += len(release_interop_extra_requirements)
+    expected_task_count += len(wheel_excluded_substrings) + len(sdist_required_suffixes) + len(sdist_excluded_substrings)
     if len(tasks) != expected_task_count:
         raise RuntimeError(f"expected {expected_task_count} scan tasks, found {len(tasks)}")
     return tasks

@@ -3,14 +3,10 @@
 from __future__ import annotations
 
 import argparse
-import repo_script_imports
 import subprocess
 import sys
 import tempfile
 from pathlib import Path
-
-
-load_toml_file = repo_script_imports.load_toml_file
 
 
 def _parse_args() -> argparse.Namespace:
@@ -30,7 +26,13 @@ def _parse_args() -> argparse.Namespace:
 
 
 def _runtime_requirements(repo_root: Path) -> list[str]:
-    payload = load_toml_file(repo_root / "pyproject.toml")
+    try:
+        import tomllib  # type: ignore[attr-defined]
+    except ModuleNotFoundError:  # pragma: no cover - Python 3.10 fallback
+        import tomli as tomllib  # type: ignore[no-redef]
+
+    with (repo_root / "pyproject.toml").open("rb") as handle:
+        payload = tomllib.load(handle)
     dependencies = payload["project"]["dependencies"]
     return [str(requirement) for requirement in dependencies]
 

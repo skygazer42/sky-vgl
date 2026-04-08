@@ -7,6 +7,7 @@ import textwrap
 
 import pytest
 
+import scripts.contracts as contracts
 from scripts import interop_smoke
 
 
@@ -57,6 +58,93 @@ def test_interop_smoke_lists_supported_backends():
 
 def test_module_lists_stable_backend_catalog():
     assert interop_smoke.list_backends() == ("pyg", "dgl")
+
+
+def test_interop_smoke_list_catalog_follows_contract_file(tmp_path: Path):
+    repo_root = tmp_path / "repo"
+    contracts_path = repo_root / "scripts" / "contracts.py"
+    contracts_path.parent.mkdir(parents=True)
+    contracts_path.write_text(
+        textwrap.dedent(
+            """
+            BASE_BACKENDS = ("custom",)
+            REAL_INTEROP_BACKENDS = BASE_BACKENDS + ("other",)
+            """
+        ).strip()
+        + "\n",
+        encoding="utf-8",
+    )
+
+    loaded = _load_interop_smoke_module("interop_smoke_catalog_probe")
+    try:
+        assert loaded._listable_backends_from_repo(repo_root) == ("custom", "other")
+    finally:
+        sys.modules.pop("interop_smoke_catalog_probe", None)
+
+
+def test_interop_smoke_list_catalog_supports_named_backend_constants(tmp_path: Path):
+    repo_root = tmp_path / "repo"
+    contracts_path = repo_root / "scripts" / "contracts.py"
+    contracts_path.parent.mkdir(parents=True)
+    contracts_path.write_text(
+        textwrap.dedent(
+            """
+            PRIMARY_BACKEND = "custom"
+            REAL_INTEROP_BACKENDS = (PRIMARY_BACKEND, "other")
+            """
+        ).strip()
+        + "\n",
+        encoding="utf-8",
+    )
+
+    loaded = _load_interop_smoke_module("interop_smoke_named_backend_probe")
+    try:
+        assert loaded._listable_backends_from_repo(repo_root) == ("custom", "other")
+    finally:
+        sys.modules.pop("interop_smoke_named_backend_probe", None)
+
+
+def test_interop_smoke_list_catalog_supports_annotated_assignments(tmp_path: Path):
+    repo_root = tmp_path / "repo"
+    contracts_path = repo_root / "scripts" / "contracts.py"
+    contracts_path.parent.mkdir(parents=True)
+    contracts_path.write_text(
+        textwrap.dedent(
+            """
+            BASE_BACKENDS: tuple[str, ...] = ("custom",)
+            REAL_INTEROP_BACKENDS: tuple[str, ...] = BASE_BACKENDS + ("other",)
+            """
+        ).strip()
+        + "\n",
+        encoding="utf-8",
+    )
+
+    loaded = _load_interop_smoke_module("interop_smoke_annotated_probe")
+    try:
+        assert loaded._listable_backends_from_repo(repo_root) == ("custom", "other")
+    finally:
+        sys.modules.pop("interop_smoke_annotated_probe", None)
+
+
+def test_interop_smoke_prefers_repo_contracts_module(monkeypatch, tmp_path):
+    shadow_module = tmp_path / "contracts.py"
+    shadow_module.write_text(
+        'REAL_INTEROP_BACKENDS = ("shadow",)\n',
+        encoding="utf-8",
+    )
+
+    monkeypatch.syspath_prepend(str(tmp_path))
+    shadowed = sys.modules.pop("contracts", None)
+    try:
+        loaded = _load_interop_smoke_module("interop_smoke_shadowed")
+    finally:
+        sys.modules.pop("interop_smoke_shadowed", None)
+        sys.modules.pop("contracts", None)
+        if shadowed is not None:
+            sys.modules["contracts"] = shadowed
+
+    assert loaded.REAL_INTEROP_BACKENDS == contracts.REAL_INTEROP_BACKENDS
+    assert loaded.list_backends() == contracts.REAL_INTEROP_BACKENDS
 
 
 def test_interop_smoke_runs_pyg_round_trip_with_fake_backend(tmp_path):

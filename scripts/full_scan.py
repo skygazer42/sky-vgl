@@ -13,11 +13,36 @@ CheckFn = Callable[[], tuple[bool, str]]
 
 
 load_repo_module = repo_script_imports.load_repo_module
-load_toml_file = repo_script_imports.load_toml_file
-workflow_contracts = load_repo_module("scripts.workflow_contracts")
-workflow_job_contains_text = workflow_contracts.workflow_job_contains_text
-workflow_step_contains_text = workflow_contracts.workflow_step_contains_text
-workflow_step_lacks_text = workflow_contracts.workflow_step_lacks_text
+
+
+_WORKFLOW_CONTRACTS = None
+
+
+def _bind_workflow_contracts():
+    global _WORKFLOW_CONTRACTS
+    global workflow_contracts
+    global workflow_job_contains_text
+    global workflow_step_contains_text
+    global workflow_step_lacks_text
+    if _WORKFLOW_CONTRACTS is None:
+        _WORKFLOW_CONTRACTS = load_repo_module("scripts.workflow_contracts")
+        workflow_contracts = _WORKFLOW_CONTRACTS
+        workflow_job_contains_text = _WORKFLOW_CONTRACTS.workflow_job_contains_text
+        workflow_step_contains_text = _WORKFLOW_CONTRACTS.workflow_step_contains_text
+        workflow_step_lacks_text = _WORKFLOW_CONTRACTS.workflow_step_lacks_text
+    return _WORKFLOW_CONTRACTS
+
+
+def __getattr__(name: str):
+    if name in {
+        "workflow_contracts",
+        "workflow_job_contains_text",
+        "workflow_step_contains_text",
+        "workflow_step_lacks_text",
+    }:
+        _bind_workflow_contracts()
+        return globals()[name]
+    raise AttributeError(name)
 
 
 @dataclass(frozen=True)
@@ -57,6 +82,7 @@ class ScanContext:
         return snippet in text, f"{relative_path} contains {snippet!r}"
 
     def workflow_job_contains(self, relative_path: str, job_name: str, snippet: str) -> tuple[bool, str]:
+        _bind_workflow_contracts()
         return workflow_job_contains_text(
             self._read_text(relative_path),
             job_name,
@@ -71,6 +97,7 @@ class ScanContext:
         step_name: str,
         snippet: str,
     ) -> tuple[bool, str]:
+        _bind_workflow_contracts()
         return workflow_step_contains_text(
             self._read_text(relative_path),
             job_name,
@@ -86,6 +113,7 @@ class ScanContext:
         step_name: str,
         snippet: str,
     ) -> tuple[bool, str]:
+        _bind_workflow_contracts()
         return workflow_step_lacks_text(
             self._read_text(relative_path),
             job_name,
@@ -112,7 +140,12 @@ class ScanContext:
 
     def _load_pyproject(self) -> dict:
         if self._pyproject_cache is None:
-            self._pyproject_cache = load_toml_file(self.resolve("pyproject.toml"))
+            try:
+                import tomllib  # type: ignore[attr-defined]
+            except ModuleNotFoundError:  # pragma: no cover - Python 3.10 fallback
+                import tomli as tomllib  # type: ignore[no-redef]
+            with self.resolve("pyproject.toml").open("rb") as handle:
+                self._pyproject_cache = tomllib.load(handle)
         return self._pyproject_cache
 
 
