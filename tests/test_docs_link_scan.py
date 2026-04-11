@@ -133,3 +133,24 @@ def test_docs_link_scan_passes_on_public_docs_surface():
     assert completed.returncode == 0, completed.stderr
     assert "SUMMARY" in completed.stdout
     assert "passed" in completed.stdout
+
+
+def test_docs_link_scan_resolves_local_image_sources(tmp_path: Path):
+    repo_root = tmp_path / "repo"
+    docs_root = repo_root / "docs"
+    assets_root = repo_root / "assets"
+    docs_root.mkdir(parents=True)
+    assets_root.mkdir(parents=True)
+    (assets_root / "logo.svg").write_text("<svg />\n", encoding="utf-8")
+    (repo_root / "README.md").write_text(
+        '<p align="center"><img src="assets/logo.svg" alt="Demo"/></p>\n',
+        encoding="utf-8",
+    )
+    (docs_root / "index.md").write_text("# Demo\n", encoding="utf-8")
+
+    tasks = docs_link_scan.build_tasks(repo_root)
+    image_tasks = [task for task in tasks if task.category == "asset"]
+
+    assert len(image_tasks) == 1
+    assert image_tasks[0].description == "README.md asset assets/logo.svg resolves"
+    assert image_tasks[0].check() == (True, "README.md -> assets/logo.svg")

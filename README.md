@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="https://raw.githubusercontent.com/skygazer42/sky-vgl/main/assets/logo.svg" width="420" alt="VGL – Versatile Graph Learning"/>
+  <img src="assets/logo.svg" width="420" alt="VGL – Versatile Graph Learning"/>
 </p>
 
 <p align="center">
@@ -18,7 +18,7 @@
 **VGL** (Versatile Graph Learning) is a PyTorch-first graph learning library that provides **one canonical `Graph` abstraction** for homogeneous, heterogeneous, and temporal graphs — plus a batteries-included training pipeline from data loading to evaluation.
 
 <p align="center">
-  <img src="https://raw.githubusercontent.com/skygazer42/sky-vgl/main/assets/graph-types.svg" width="780" alt="Supported Graph Types"/>
+  <img src="assets/graph-types.svg" width="780" alt="Supported Graph Types"/>
 </p>
 
 ---
@@ -99,15 +99,15 @@ Use the editable install when developing locally or validating the latest branch
 ## Architecture
 
 <p align="center">
-  <img src="https://raw.githubusercontent.com/skygazer42/sky-vgl/main/assets/architecture.svg" width="780" alt="VGL Architecture Overview"/>
+  <img src="assets/architecture.svg" width="780" alt="VGL Architecture Overview"/>
 </p>
 
 <p align="center">
-  <img src="https://raw.githubusercontent.com/skygazer42/sky-vgl/main/assets/pipeline.svg" width="780" alt="VGL Training Pipeline"/>
+  <img src="assets/pipeline.svg" width="780" alt="VGL Training Pipeline"/>
 </p>
 
 <p align="center">
-  <img src="https://raw.githubusercontent.com/skygazer42/sky-vgl/main/assets/conv-layers.svg" width="780" alt="VGL Convolution Layer Coverage"/>
+  <img src="assets/conv-layers.svg" width="780" alt="VGL Convolution Layer Coverage"/>
 </p>
 
 | Module | Description |

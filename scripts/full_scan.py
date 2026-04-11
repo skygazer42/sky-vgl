@@ -504,7 +504,6 @@ def build_tasks(repo_root: Path) -> list[ScanTask]:
         ]
     )
 
-    asset_base = "https://raw.githubusercontent.com/skygazer42/sky-vgl/main/assets/"
     tasks.extend(
         [
             _text_contains_task(ctx, "036", "readme", "README documents pip install sky-vgl", "README.md", "pip install sky-vgl"),
@@ -528,22 +527,38 @@ def build_tasks(repo_root: Path) -> list[ScanTask]:
                 "git clone https://github.com/skygazer42/sky-vgl.git",
             ),
             _text_contains_task(ctx, "042", "readme", "README documents cd sky-vgl", "README.md", "cd sky-vgl"),
-            _text_contains_task(ctx, "043", "readme", "README uses raw logo URL", "README.md", f'{asset_base}logo.svg'),
+            _text_contains_task(ctx, "043", "readme", "README uses repo logo asset path", "README.md", 'src="assets/logo.svg"'),
             _text_contains_task(
                 ctx,
                 "044",
                 "readme",
-                "README uses raw graph-types URL",
+                "README uses repo graph-types asset path",
                 "README.md",
-                f'{asset_base}graph-types.svg',
+                'src="assets/graph-types.svg"',
             ),
             _text_contains_task(
                 ctx,
                 "045",
                 "readme",
-                "README uses raw architecture URL",
+                "README uses repo architecture asset path",
                 "README.md",
-                f'{asset_base}architecture.svg',
+                'src="assets/architecture.svg"',
+            ),
+            _text_contains_task(
+                ctx,
+                "045a",
+                "readme",
+                "README uses repo pipeline asset path",
+                "README.md",
+                'src="assets/pipeline.svg"',
+            ),
+            _text_contains_task(
+                ctx,
+                "045b",
+                "readme",
+                "README uses repo conv-layers asset path",
+                "README.md",
+                'src="assets/conv-layers.svg"',
             ),
         ]
     )

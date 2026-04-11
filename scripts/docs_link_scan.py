@@ -166,6 +166,22 @@ def _local_link_task(ctx: DocsContext, task_id: str, source: Path, target: str) 
     return ScanTask(task_id, "link", f"{source_rel} link {target} resolves", check)
 
 
+def _local_asset_task(ctx: DocsContext, task_id: str, source: Path, target: str) -> ScanTask:
+    source_rel = source.relative_to(ctx.repo_root)
+
+    def check() -> tuple[bool, str]:
+        parsed = urlparse(target)
+        asset_target = unquote(parsed.path)
+        candidate = (source.parent / asset_target).resolve()
+        try:
+            candidate_rel = candidate.relative_to(ctx.repo_root)
+        except ValueError:
+            return False, f"{target!r} escapes repository root"
+        return candidate.is_file(), f"{source_rel} -> {candidate_rel}"
+
+    return ScanTask(task_id, "asset", f"{source_rel} asset {target} resolves", check)
+
+
 def _raw_asset_task(ctx: DocsContext, task_id: str, source: Path, target: str) -> ScanTask:
     source_rel = source.relative_to(ctx.repo_root)
 
@@ -187,7 +203,7 @@ def _raw_asset_task(ctx: DocsContext, task_id: str, source: Path, target: str) -
             return False, f"{target} escapes repository root"
         return asset_path.is_file(), f"{source_rel} -> {asset_rel}"
 
-    return ScanTask(task_id, "asset", f"{source_rel} raw asset {target} resolves", check)
+    return ScanTask(task_id, "asset", f"{source_rel} asset {target} resolves", check)
 
 
 def build_tasks(repo_root: Path) -> list[ScanTask]:
@@ -210,6 +226,10 @@ def build_tasks(repo_root: Path) -> list[ScanTask]:
 
         for target in IMG_SRC_PATTERN.findall(text):
             parsed = urlparse(target)
+            if not parsed.scheme and not parsed.netloc:
+                tasks.append(_local_asset_task(ctx, f"{next_id:03d}", source, target))
+                next_id += 1
+                continue
             if parsed.scheme not in {"http", "https"}:
                 continue
             if parsed.netloc != RAW_REPO_PREFIX[0]:

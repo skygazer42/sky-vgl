@@ -714,8 +714,6 @@ def test_release_readme_documents_public_install_paths():
     releasing = (REPO_ROOT / "docs" / "releasing.md").read_text(encoding="utf-8")
     support_matrix = (REPO_ROOT / "docs" / "support-matrix.md").read_text(encoding="utf-8")
 
-    asset_base = "https://raw.githubusercontent.com/skygazer42/sky-vgl/main/assets/"
-
     assert README_VERSION_BADGE in readme
     assert DOCS_INDEX_VERSION_BADGE in docs_index
     assert f"version-{RELEASE_VERSION}" not in readme
@@ -727,12 +725,12 @@ def test_release_readme_documents_public_install_paths():
     assert 'pip install "sky-vgl[dgl]"' in readme
     assert "git clone https://github.com/skygazer42/sky-vgl.git" in readme
     assert "cd sky-vgl" in readme
-    assert 'src="assets/' not in readme
-    assert f'{asset_base}logo.svg' in readme
-    assert f'{asset_base}graph-types.svg' in readme
-    assert f'{asset_base}architecture.svg' in readme
-    assert f'{asset_base}pipeline.svg' in readme
-    assert f'{asset_base}conv-layers.svg' in readme
+    assert 'src="assets/logo.svg"' in readme
+    assert 'src="assets/graph-types.svg"' in readme
+    assert 'src="assets/architecture.svg"' in readme
+    assert 'src="assets/pipeline.svg"' in readme
+    assert 'src="assets/conv-layers.svg"' in readme
+    assert "raw.githubusercontent.com/skygazer42/sky-vgl/main/assets/" not in readme
     assert "pip install sky-vgl" in quickstart
     assert 'pip install "sky-vgl[full]"' in quickstart
     assert "installed release version" in installation
