@@ -1,5 +1,6 @@
 import torch
 from torch import nn
+import pytest
 
 from vgl._artifact import ARTIFACT_FORMAT_KEY, ARTIFACT_FORMAT_VERSION_KEY
 from vgl.engine.checkpoints import (
@@ -126,3 +127,54 @@ def test_checkpoint_event_fields_include_checkpoint_artifact_metadata(tmp_path):
     assert event_fields["path"] == str(checkpoint)
     assert event_fields["size_bytes"] > 0
     assert event_fields["save_seconds"] == 0.25
+
+
+def test_load_checkpoint_rejects_non_mapping_history_state(tmp_path):
+    checkpoint = tmp_path / "bad-history.pt"
+    torch.save(
+        {
+            ARTIFACT_FORMAT_KEY: CHECKPOINT_FORMAT,
+            ARTIFACT_FORMAT_VERSION_KEY: CHECKPOINT_FORMAT_VERSION,
+            "model_state_dict": {"weight": torch.tensor([1.0])},
+            "metadata": {},
+            "history_state": ["not", "a", "mapping"],
+        },
+        checkpoint,
+    )
+
+    with pytest.raises(ValueError, match="history_state must be a mapping"):
+        load_checkpoint(checkpoint)
+
+
+def test_load_checkpoint_rejects_non_sequence_callback_states(tmp_path):
+    checkpoint = tmp_path / "bad-callbacks.pt"
+    torch.save(
+        {
+            ARTIFACT_FORMAT_KEY: CHECKPOINT_FORMAT,
+            ARTIFACT_FORMAT_VERSION_KEY: CHECKPOINT_FORMAT_VERSION,
+            "model_state_dict": {"weight": torch.tensor([1.0])},
+            "metadata": {},
+            "callback_states": {"callback": "x"},
+        },
+        checkpoint,
+    )
+
+    with pytest.raises(ValueError, match="callback_states must be a sequence"):
+        load_checkpoint(checkpoint)
+
+
+def test_load_checkpoint_rejects_non_mapping_callback_state_entries(tmp_path):
+    checkpoint = tmp_path / "bad-callback-entry.pt"
+    torch.save(
+        {
+            ARTIFACT_FORMAT_KEY: CHECKPOINT_FORMAT,
+            ARTIFACT_FORMAT_VERSION_KEY: CHECKPOINT_FORMAT_VERSION,
+            "model_state_dict": {"weight": torch.tensor([1.0])},
+            "metadata": {},
+            "callback_states": ["bad-entry"],
+        },
+        checkpoint,
+    )
+
+    with pytest.raises(ValueError, match="callback_states entries must be mappings"):
+        load_checkpoint(checkpoint)

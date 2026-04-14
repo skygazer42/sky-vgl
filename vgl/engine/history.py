@@ -38,6 +38,14 @@ class TrainingHistory(dict):
 
     @classmethod
     def from_state_dict(cls, state):
+        if not isinstance(state, dict):
+            raise ValueError("history_state must be a mapping")
+        required_keys = {"epochs", "monitor"}
+        missing_keys = sorted(required_keys - set(state))
+        if missing_keys:
+            raise ValueError(
+                "history_state missing required keys: " + ", ".join(missing_keys)
+            )
         history = cls(
             epochs=state["epochs"],
             monitor=state["monitor"],

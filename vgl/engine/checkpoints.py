@@ -17,6 +17,29 @@ LEGACY_CHECKPOINT_FORMAT = "legacy.state_dict"
 LEGACY_CHECKPOINT_FORMAT_VERSION = 0
 
 
+def _ensure_mapping_section(payload, key):
+    value = payload.get(key)
+    if value is None:
+        return None
+    if not isinstance(value, dict):
+        raise ValueError(f"{key} must be a mapping")
+    return value
+
+
+def _ensure_callback_states(payload):
+    value = payload.get("callback_states")
+    if value is None:
+        return None
+    if isinstance(value, (str, bytes)) or not isinstance(value, (list, tuple)):
+        raise ValueError("callback_states must be a sequence")
+    normalized = []
+    for entry in value:
+        if not isinstance(entry, dict):
+            raise ValueError("callback_states entries must be mappings")
+        normalized.append(entry)
+    return normalized
+
+
 def build_checkpoint_payload(
     model_state_dict,
     *,
@@ -100,22 +123,28 @@ def normalize_checkpoint_payload(payload):
         and checkpoint_format == CHECKPOINT_FORMAT
         and "model_state_dict" in payload
     ):
+        metadata = payload.get("metadata") or {}
+        if not isinstance(metadata, dict):
+            raise ValueError("metadata must be a mapping")
         normalized = {
             ARTIFACT_FORMAT_KEY: checkpoint_format,
             ARTIFACT_FORMAT_VERSION_KEY: checkpoint_format_version,
             "model_state_dict": payload["model_state_dict"],
-            "metadata": dict(payload.get("metadata") or {}),
+            "metadata": dict(metadata),
         }
         for key in (
             "optimizer_state_dict",
             "lr_scheduler_state_dict",
             "grad_scaler_state_dict",
-            "callback_states",
             "trainer_state",
             "history_state",
         ):
-            if key in payload:
-                normalized[key] = payload[key]
+            value = _ensure_mapping_section(payload, key)
+            if value is not None:
+                normalized[key] = value
+        callback_states = _ensure_callback_states(payload)
+        if callback_states is not None:
+            normalized["callback_states"] = callback_states
         return normalized
     if isinstance(payload, dict):
         return {

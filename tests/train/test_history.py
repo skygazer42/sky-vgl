@@ -1,5 +1,6 @@
 from vgl.engine import TrainingHistory
 from vgl.train import TrainingHistory as LegacyTrainingHistory
+import pytest
 
 
 def test_training_history_is_exported_from_training_packages():
@@ -67,3 +68,8 @@ def test_training_history_records_epochs_and_stop_state():
     assert history["epoch_elapsed_seconds"] == [None, None]
     assert history["final_train"] is None
     assert history["final_val"] is None
+
+
+def test_training_history_from_state_dict_rejects_missing_required_keys():
+    with pytest.raises(ValueError, match="missing required keys"):
+        TrainingHistory.from_state_dict({"epochs": 3})
