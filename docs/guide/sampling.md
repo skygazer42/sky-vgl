@@ -141,6 +141,61 @@ for batch in loader:
     pass
 ```
 
+### Loader 预取与回压
+
+`DataLoader` 现在把预取职责分成两条明确路径：
+
+- `prefetch` 只用于 `num_workers == 0` 的单线程路径
+- `prefetch_factor` 只用于 `num_workers > 0` 的 worker 预取
+- `persistent_workers=True` 也只适用于 `num_workers > 0`
+
+如果你在 worker 模式下同时传 `prefetch > 0`，构造器会直接报错：
+
+```python
+from vgl.dataloading import DataLoader, ListDataset, NodeNeighborSampler
+
+loader = DataLoader(
+    dataset=ListDataset(samples),
+    sampler=NodeNeighborSampler(num_neighbors=[15, 10]),
+    batch_size=64,
+    num_workers=4,
+    prefetch=2,  # ValueError: use prefetch_factor for worker prefetch
+)
+```
+
+单线程路径下，`prefetch` 控制内部 pending 队列上限，等价于“当前 batch + 额外预取项”：
+
+```python
+loader = DataLoader(
+    dataset=ListDataset(samples),
+    sampler=NodeNeighborSampler(num_neighbors=[15, 10]),
+    batch_size=64,
+    prefetch=2,
+)
+```
+
+多 worker 路径下，用 `prefetch_factor` 和 `persistent_workers` 做吞吐调优：
+
+```python
+loader = DataLoader(
+    dataset=ListDataset(samples),
+    sampler=NodeNeighborSampler(num_neighbors=[15, 10]),
+    batch_size=64,
+    num_workers=4,
+    prefetch_factor=2,
+    persistent_workers=True,
+)
+```
+
+可以按下面的规则选择参数：
+
+| 目标 | 推荐配置 |
+|------|----------|
+| 最简单、最可预测的顺序调试 | `num_workers=0`, 可选 `prefetch>0` |
+| 利用 worker 并行提高吞吐 | `num_workers>0`, 可选 `prefetch_factor` |
+| 避免每轮重启 worker | `num_workers>0`, `persistent_workers=True` |
+| 避免配置歧义 | 不要在 `num_workers>0` 时设置 `prefetch` |
+
 Storage-backed coordinators such as `StoreBackedSamplingCoordinator` can reuse the same loader contracts while materializing features lazily from partitioned files; the smoke scenario in `tests/integration/test_foundation_partition_local.py` validates this pathway before heavier distributed runs.
 
 ## 分布式采样

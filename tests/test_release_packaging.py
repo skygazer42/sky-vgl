@@ -170,6 +170,16 @@ def test_shared_release_artifact_helper_reports_missing_metadata(tmp_path):
     assert detail == "wheel METADATA missing"
 
 
+def test_changelog_unreleased_reserves_api_performance_interop_and_migration_sections():
+    changelog = (REPO_ROOT / "docs" / "changelog.md").read_text(encoding="utf-8")
+
+    assert "## Unreleased" in changelog
+    assert "### API" in changelog
+    assert "### Performance" in changelog
+    assert "### Interop" in changelog
+    assert "### Migration" in changelog
+
+
 def test_shared_repo_script_import_helper_loads_repo_local_modules():
     from scripts.repo_script_imports import load_repo_module
 

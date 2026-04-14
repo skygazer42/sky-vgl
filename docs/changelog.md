@@ -2,17 +2,24 @@
 
 ## Unreleased
 
-### Changed
+### API
 
 - Release and public-surface policy now lives in a shared machine-readable contract used by scans, tests, and smoke tooling.
+
+### Performance
+
 - Documentation entry pages now include a verified support matrix and bilingual summary blocks for the highest-traffic entry points.
 - Benchmark hotpath artifacts are now documented as versioned JSON contracts with timestamp and runner metadata.
 - Release smoke now supports an explicit import-time budget and reports import timing evidence for installed artifacts.
 
-### Fixed
+### Interop
 
 - Packaging metadata now points PyPI users to the published docs site instead of the repository README.
 - Example smoke coverage now tracks the full public example catalog rather than a hand-picked subset.
+
+### Migration
+
+- Legacy `vgl.core`, `vgl.data`, and `vgl.train` namespaces now emit one-time compatibility warnings while preserving the existing import surface.
 
 ## v0.1.5
 
