@@ -16,6 +16,12 @@ Python 3.10 及以上版本。
 pip install "sky-vgl[full]"
 ```
 
+### 去哪里确认受支持的环境组合和发布验证流程？
+
+- 日常安装与 extras 组合，先看 [Support Matrix](support-matrix.md)
+- 具体安装命令与本地校验，查看 [安装指南](getting-started/installation.md)
+- 如果你在做发布、回归排查或 artifact smoke，查看 [发布指南](releasing.md)
+
 ## Graph
 
 ### VGL 的 Graph 和 DGL/PyG 的区别是什么？

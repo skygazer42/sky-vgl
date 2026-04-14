@@ -37,6 +37,12 @@ Track the combinations that CI and release verification currently exercise so yo
 5. For DGL/PyG environments, run `python scripts/interop_smoke.py --backend dgl` and/or `python scripts/interop_smoke.py --backend pyg` for the extras you installed. Use `--backend all` only when both are present; the host-assisted artifact smoke script now checks for both backends before proceeding and reports which dependency is missing.
 6. For release candidates, run artifact-level backend smoke with `python scripts/release_smoke.py --artifact-dir dist --kind wheel --interop-backend dgl` (or `pyg`) to validate installed artifacts, not checkout imports. This path is host-assisted: install the desired torch/backend stack first, then let `release_smoke.py` borrow it while checking the built wheel.
 
+## Where To Go Next
+
+- Need install commands and extras examples? Read the [installation guide](getting-started/installation.md).
+- Need parameter-level usage guidance or troubleshooting answers? Check the [FAQ](faq.md).
+- Need maintainer-facing release validation and failure triage? Use the [release guide](releasing.md).
+
 ## Documented Source of Truth
 
 All of these expectations are driven from `scripts/contracts.py` so they stay in sync with release-item scans, tests, packaging metadata, and public surface verification.

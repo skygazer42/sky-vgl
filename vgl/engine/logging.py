@@ -125,6 +125,22 @@ _EVENT_CORE_RECORD_FIELDS = {
         "stopped_early",
         "stop_reason",
     ),
+    "monitor_improved": (
+        "monitor_name",
+        "previous_best",
+        "current_value",
+        "improvement_delta",
+    ),
+    "checkpoint_saved": (
+        "checkpoint_tag",
+        "path",
+        "size_bytes",
+        "save_seconds",
+        "monitor_name",
+        "monitor_value",
+        "format",
+        "format_version",
+    ),
 }
 
 

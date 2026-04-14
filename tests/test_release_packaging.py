@@ -749,6 +749,7 @@ def test_release_readme_documents_public_install_paths():
     quickstart = (REPO_ROOT / "docs" / "public-surface-contract.md").read_text(encoding="utf-8")
     releasing = (REPO_ROOT / "docs" / "releasing.md").read_text(encoding="utf-8")
     support_matrix = (REPO_ROOT / "docs" / "support-matrix.md").read_text(encoding="utf-8")
+    faq = (REPO_ROOT / "docs" / "faq.md").read_text(encoding="utf-8")
     training = (REPO_ROOT / "docs" / "guide" / "training.md").read_text(encoding="utf-8")
 
     assert README_VERSION_BADGE in readme
@@ -799,6 +800,15 @@ def test_release_readme_documents_public_install_paths():
     assert "Interop Failure" in releasing
     assert "Dataset Or On-Disk Bug" in releasing
     assert "providing automated artifact-level verification for the combined backend scenario" in support_matrix
+    assert "[Installation guide →](getting-started/installation.md)" in docs_index
+    assert "[FAQ →](faq.md)" in docs_index
+    assert "[Release verification and triage →](releasing.md)" in docs_index
+    assert "[installation guide](getting-started/installation.md)" in support_matrix
+    assert "[FAQ](faq.md)" in support_matrix
+    assert "[release guide](releasing.md)" in support_matrix
+    assert "[Support Matrix](support-matrix.md)" in faq
+    assert "[安装指南](getting-started/installation.md)" in faq
+    assert "[发布指南](releasing.md)" in faq
     assert "python scripts/benchmark_hotpaths.py --preset ci --output artifacts/benchmark-hotpaths.json" in training
     assert "schema_version" in training
     assert "metric_unit" in training

@@ -532,6 +532,101 @@ def test_json_lines_logger_preserves_fit_end_core_fields_without_context(tmp_pat
     assert records[0]["stopped_early"] is False
 
 
+def test_json_lines_logger_preserves_monitor_improved_core_fields_without_context(tmp_path):
+    path = tmp_path / "monitor_improved.jsonl"
+    trainer = Trainer(
+        model=ToyModel(),
+        task=ToyTask(),
+        optimizer=torch.optim.SGD,
+        lr=0.1,
+        max_epochs=1,
+        loggers=[
+            JSONLinesLogger(
+                path,
+                flush=True,
+                events={"monitor_improved"},
+                include_context=False,
+            )
+        ],
+        enable_console_logging=False,
+    )
+
+    trainer.fit([ToyBatch(1.0)], val_data=[ToyBatch(1.0)])
+
+    records = [json.loads(line) for line in path.read_text().splitlines()]
+
+    assert len(records) == 1
+    assert records[0].keys() == {
+        "batch_idx",
+        "current_value",
+        "epoch",
+        "epochs",
+        "event",
+        "global_step",
+        "improvement_delta",
+        "metrics",
+        "monitor_name",
+        "previous_best",
+        "stage",
+    }
+    assert records[0]["event"] == "monitor_improved"
+    assert records[0]["monitor_name"] == "val_loss"
+    assert records[0]["previous_best"] is None
+    assert records[0]["improvement_delta"] is None
+
+
+def test_json_lines_logger_preserves_checkpoint_saved_core_fields_without_context(tmp_path):
+    path = tmp_path / "checkpoint_saved.jsonl"
+    checkpoint = tmp_path / "best.pt"
+    trainer = Trainer(
+        model=ToyModel(),
+        task=ToyTask(),
+        optimizer=torch.optim.SGD,
+        lr=0.1,
+        max_epochs=1,
+        save_best_path=checkpoint,
+        loggers=[
+            JSONLinesLogger(
+                path,
+                flush=True,
+                events={"checkpoint_saved"},
+                include_context=False,
+            )
+        ],
+        enable_console_logging=False,
+    )
+
+    trainer.fit([ToyBatch(1.0)], val_data=[ToyBatch(1.0)])
+
+    records = [json.loads(line) for line in path.read_text().splitlines()]
+
+    assert len(records) == 1
+    assert records[0].keys() == {
+        "batch_idx",
+        "checkpoint_tag",
+        "epoch",
+        "epochs",
+        "event",
+        "format",
+        "format_version",
+        "global_step",
+        "metrics",
+        "monitor_name",
+        "monitor_value",
+        "path",
+        "save_seconds",
+        "size_bytes",
+        "stage",
+    }
+    assert records[0]["event"] == "checkpoint_saved"
+    assert records[0]["checkpoint_tag"] == "best"
+    assert records[0]["monitor_name"] == "val_loss"
+    assert records[0]["format"] == "vgl.trainer_checkpoint"
+    assert records[0]["format_version"] == 1
+    assert records[0]["size_bytes"] > 0
+    assert records[0]["save_seconds"] >= 0.0
+
+
 def test_json_lines_logger_preserves_fit_start_core_fields_without_context(tmp_path):
     path = tmp_path / "fit_start.jsonl"
     trainer = Trainer(

@@ -164,6 +164,12 @@ Track Python, PyTorch, and extras coverage so your environment matches the CI-te
 
 [Verified combinations →](support-matrix.md)
 
+Need installation and troubleshooting context before you pick an environment?
+
+- [Installation guide →](getting-started/installation.md)
+- [FAQ →](faq.md)
+- [Release verification and triage →](releasing.md)
+
 ---
 
 <div style="text-align: center; color: var(--md-default-fg-color--light); margin-top: 2rem;">
