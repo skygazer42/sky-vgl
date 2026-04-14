@@ -152,11 +152,13 @@ jobs:
           python -m pip install --upgrade pip
           python -m pip install -e ".[dev,networkx,scipy,tensorboard]"
       - name: Run benchmark hotpaths
-        run: python scripts/benchmark_hotpaths.py --preset ci --output artifacts/benchmark-hotpaths.json
+        run: python scripts/benchmark_hotpaths.py --preset ci --output artifacts/benchmark-hotpaths.json --print
       - uses: actions/upload-artifact@v4
         with:
           name: benchmark-hotpaths
           path: artifacts/benchmark-hotpaths.json
+          if-no-files-found: error
+          retention-days: 14
 
   package-check:
     runs-on: ubuntu-latest
@@ -176,8 +178,8 @@ jobs:
       - name: Validate package metadata
         run: python -m twine check dist/*.whl dist/*.tar.gz
       - name: Smoke-test built distributions
-        run: python scripts/release_smoke.py --artifact-dir dist --kind all
+        run: python scripts/release_smoke.py --artifact-dir dist --kind all --max-import-seconds 30
       - name: Install release interop extras
         run: python scripts/install_release_extras.py --artifact-dir dist --extras pyg dgl
       - name: Smoke-test built distributions with all interop backends
-        run: python scripts/release_smoke.py --artifact-dir dist --kind all --interop-backend all
+        run: python scripts/release_smoke.py --artifact-dir dist --kind all --interop-backend all --max-import-seconds 30

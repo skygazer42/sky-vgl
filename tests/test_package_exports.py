@@ -1,3 +1,7 @@
+import ast
+from pathlib import Path
+
+import vgl
 from vgl import (
     AGNNConv,
     ASAM,
@@ -164,7 +168,13 @@ from vgl import (
     global_max_pool,
     __version__,
 )
-from scripts.contracts import RELEASE_VERSION
+from scripts.contracts import (
+    GOLDEN_PATH_ROOT_EXPORTS,
+    RELEASE_VERSION,
+    ROOT_COMPATIBILITY_EXPORTS,
+    ROOT_STABLE_EXPORTS,
+    root_export_specs,
+)
 
 
 def test_package_exposes_broad_vgl_root_surface():
@@ -258,6 +268,20 @@ def test_package_exposes_broad_vgl_root_surface():
     assert GraphView.__name__ == "GraphView"
     assert H2GCNConv.__name__ == "H2GCNConv"
     assert IdentityTemporalMessage.__name__ == "IdentityTemporalMessage"
+
+
+def test_root_exports_start_with_golden_path_contract():
+    golden_symbols = tuple(spec.symbol for spec in GOLDEN_PATH_ROOT_EXPORTS)
+
+    assert tuple(vgl.__all__[: len(golden_symbols)]) == golden_symbols
+
+
+def test_root_compat_exports_are_stably_ordered_after_golden_path():
+    golden_symbols = tuple(spec.symbol for spec in GOLDEN_PATH_ROOT_EXPORTS)
+    compat_symbols = tuple(vgl.__all__[len(golden_symbols) :])
+
+    assert not set(golden_symbols) & set(compat_symbols)
+    assert compat_symbols == ROOT_COMPATIBILITY_EXPORTS
     assert KarateClubDataset.__name__ == "KarateClubDataset"
     assert LastMessageAggregator.__name__ == "LastMessageAggregator"
     assert ListDataset.__name__ == "ListDataset"
@@ -333,3 +357,47 @@ def test_package_exposes_broad_vgl_root_surface():
     assert callable(global_sum_pool)
     assert callable(global_max_pool)
     assert __version__ == RELEASE_VERSION
+
+
+def _root_surface_contract():
+    module_path = Path(__file__).resolve().parents[1] / "vgl" / "__init__.py"
+    tree = ast.parse(module_path.read_text(encoding="utf-8"), filename=str(module_path))
+    imports: list[tuple[str, str]] = []
+    exports: tuple[str, ...] = ()
+
+    for node in tree.body:
+        if isinstance(node, ast.ImportFrom) and node.module is not None:
+            for alias in node.names:
+                imports.append((alias.asname or alias.name, f"{node.module}.{alias.name}"))
+            continue
+        if isinstance(node, ast.Assign):
+            for target in node.targets:
+                if isinstance(target, ast.Name) and target.id == "__all__":
+                    exports = tuple(
+                        element.value
+                        for element in node.value.elts
+                        if isinstance(element, ast.Constant) and isinstance(element.value, str)
+                    )
+                    break
+    return imports, exports
+
+
+def test_root_init_matches_contract_catalog():
+    imports, exports = _root_surface_contract()
+    expected_specs = root_export_specs()
+
+    assert imports == [(spec.symbol, f"{spec.module}.{spec.symbol}") for spec in expected_specs]
+    assert exports == tuple(spec.symbol for spec in expected_specs)
+
+
+def test_root_export_tiers_match_contract_policy():
+    tier_by_symbol = {spec.symbol: spec.tier for spec in root_export_specs()}
+
+    assert set(ROOT_STABLE_EXPORTS) == {symbol for symbol, tier in tier_by_symbol.items() if tier == "stable"}
+    assert set(ROOT_COMPATIBILITY_EXPORTS) == {
+        symbol for symbol, tier in tier_by_symbol.items() if tier == "compatibility"
+    }
+    assert tier_by_symbol["Graph"] == "stable"
+    assert tier_by_symbol["DataLoader"] == "stable"
+    assert tier_by_symbol["Trainer"] == "stable"
+    assert tier_by_symbol["Loader"] == "compatibility"

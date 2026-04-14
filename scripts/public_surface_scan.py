@@ -84,6 +84,7 @@ class StaticReexportSpec:
 class ModuleSurface:
     imports: dict[str, str]
     exports: set[str]
+    ordered_exports: tuple[str, ...]
 
 
 class ScanContext:
@@ -112,6 +113,7 @@ class ScanContext:
         tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
         imports: dict[str, str] = {}
         exports: set[str] = set()
+        ordered_exports: tuple[str, ...] = ()
 
         for node in tree.body:
             if isinstance(node, ast.ImportFrom) and node.module is not None:
@@ -124,10 +126,11 @@ class ScanContext:
             if isinstance(node, ast.Assign):
                 for target in node.targets:
                     if isinstance(target, ast.Name) and target.id == "__all__":
-                        exports = _string_sequence(node.value)
+                        ordered_exports = _ordered_string_literals(node.value)
+                        exports = set(ordered_exports)
                         break
 
-        cached = ModuleSurface(imports=imports, exports=exports)
+        cached = ModuleSurface(imports=imports, exports=exports, ordered_exports=ordered_exports)
         self._surface_cache[path] = cached
         return cached
 
@@ -157,6 +160,16 @@ def _string_sequence(node: ast.AST) -> set[str]:
         if isinstance(item, ast.Constant) and isinstance(item.value, str):
             values.add(item.value)
     return values
+
+
+def _ordered_string_literals(node: ast.AST) -> tuple[str, ...]:
+    if not isinstance(node, (ast.List, ast.Tuple, ast.Set)):
+        return ()
+    values: list[str] = []
+    for item in node.elts:
+        if isinstance(item, ast.Constant) and isinstance(item.value, str):
+            values.append(item.value)
+    return tuple(values)
 
 
 def _named_assignments(tree: ast.Module) -> dict[str, ast.AST]:
@@ -302,6 +315,16 @@ def _list_catalog(repo_root: Path) -> tuple[tuple[StaticReexportSpec, ...], tupl
     return reexport_specs, public_example_modules
 
 
+def _root_export_policy_description(repo_root: Path) -> str | None:
+    contracts_path = repo_root / "scripts" / "contracts.py"
+    tree = ast.parse(contracts_path.read_text(encoding="utf-8"), filename=str(contracts_path))
+    assignments = _named_assignments(tree)
+    policy = assignments.get("ROOT_EXPORT_POLICY_DESCRIPTION")
+    if policy is None:
+        return None
+    return _string_literal(policy, assignments)
+
+
 def list_task_specs(repo_root: Path) -> list[ListTaskSpec]:
     reexport_specs, public_example_modules = _list_catalog(repo_root.resolve())
 
@@ -315,6 +338,10 @@ def list_task_specs(repo_root: Path) -> list[ListTaskSpec]:
         for index, relative_path in enumerate(public_example_modules, start=next_id)
     )
     next_id = len(tasks) + 1
+    root_policy_description = _root_export_policy_description(repo_root.resolve())
+    if root_policy_description is not None:
+        tasks.append(ListTaskSpec(f"{next_id:03d}", "root", root_policy_description))
+        next_id += 1
     tasks.append(ListTaskSpec(f"{next_id:03d}", "imports", "examples avoids legacy import paths"))
     tasks.append(ListTaskSpec(f"{next_id + 1:03d}", "imports", "tests/integration avoids legacy import paths"))
     return tasks
@@ -358,8 +385,26 @@ def _forbidden_import_task(ctx: ScanContext, task_id: str, relative_dir: str) ->
     return ScanTask(task_id, "imports", f"{relative_dir} avoids legacy import paths", check)
 
 
+def _root_export_policy_task(ctx: ScanContext, task_id: str, description: str) -> ScanTask:
+    def check() -> tuple[bool, str]:
+        contracts = _bind_contracts()
+        expected_specs = tuple(contracts.root_export_specs())
+        expected_symbols = tuple(spec.symbol for spec in expected_specs)
+        ordered_exports = ctx.module_surface("vgl/__init__.py").ordered_exports
+        if ordered_exports != expected_symbols:
+            return False, "vgl/__init__.py __all__ does not match root_export_specs() ordering"
+
+        stable_prefix = tuple(spec.symbol for spec in expected_specs if spec.tier == "stable")
+        if ordered_exports[: len(stable_prefix)] != stable_prefix:
+            return False, "vgl/__init__.py no longer keeps stable exports as the prefix"
+
+        return True, "vgl/__init__.py matches the stable-first root export contract"
+
+    return ScanTask(task_id, "root", description, check)
+
+
 def build_tasks(repo_root: Path) -> list[ScanTask]:
-    _bind_contracts()
+    contracts = _bind_contracts()
     ctx = ScanContext(repo_root)
     tasks = [
         _reexport_task(
@@ -379,10 +424,16 @@ def build_tasks(repo_root: Path) -> list[ScanTask]:
         for index, relative_path in enumerate(PUBLIC_EXAMPLE_MODULES, start=next_id)
     )
     next_id = len(tasks) + 1
+    root_policy_description = getattr(contracts, "ROOT_EXPORT_POLICY_DESCRIPTION", None)
+    if root_policy_description is not None:
+        tasks.append(_root_export_policy_task(ctx, f"{next_id:03d}", root_policy_description))
+        next_id += 1
     tasks.append(_forbidden_import_task(ctx, f"{next_id:03d}", "examples"))
     tasks.append(_forbidden_import_task(ctx, f"{next_id + 1:03d}", "tests/integration"))
 
     expected_task_count = len(public_surface_specs()) + len(PUBLIC_EXAMPLE_MODULES) + 2
+    if root_policy_description is not None:
+        expected_task_count += 1
     if len(tasks) != expected_task_count:
         raise RuntimeError(f"expected {expected_task_count} scan tasks, found {len(tasks)}")
     return tasks

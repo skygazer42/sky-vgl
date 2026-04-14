@@ -14,6 +14,15 @@ from vgl.ops import to_block
 REPO_ROOT = Path(__file__).resolve().parents[1]
 
 
+def _run_python_script(script: str) -> subprocess.CompletedProcess[str]:
+    return subprocess.run(
+        [sys.executable, "-c", script],
+        cwd=REPO_ROOT,
+        capture_output=True,
+        text=True,
+    )
+
+
 def _driverless_pin_memory_error(self):
     raise RuntimeError(
         "Found no NVIDIA driver on your system. Please check that you have an NVIDIA GPU "
@@ -41,14 +50,69 @@ def test_import_vgl_does_not_require_numpy():
         """
     )
 
-    completed = subprocess.run(
-        [sys.executable, "-c", script],
-        cwd=REPO_ROOT,
-        capture_output=True,
-        text=True,
-    )
+    completed = _run_python_script(script)
 
     assert completed.returncode == 0, completed.stderr
+
+
+def test_legacy_namespace_imports_do_not_repeat_after_reload():
+    expectations = {
+        "vgl.core": "vgl.core is a legacy compatibility namespace; prefer `vgl.graph` for graph containers and related errors.",
+        "vgl.data": "vgl.data is a legacy compatibility namespace; prefer `vgl.dataloading` for loaders, samplers, plans, and materialization helpers; dataset and catalog APIs remain under `vgl.data`.",
+        "vgl.train": "vgl.train is a legacy compatibility namespace; prefer `vgl.engine`, `vgl.tasks`, and `vgl.metrics`.",
+    }
+
+    for module_name, expected_message in expectations.items():
+        script = textwrap.dedent(
+            f"""
+            import importlib
+            import warnings
+
+            with warnings.catch_warnings(record=True) as captured:
+                warnings.simplefilter("always", FutureWarning)
+                importlib.import_module({module_name!r})
+                importlib.reload(importlib.import_module({module_name!r}))
+                legacy_messages = [
+                    str(warning.message)
+                    for warning in captured
+                    if str(warning.message).startswith("vgl.")
+                ]
+                print(len(legacy_messages))
+                for message in legacy_messages:
+                    print(message)
+            """
+        )
+
+        completed = _run_python_script(script)
+
+        assert completed.returncode == 0, completed.stderr
+        lines = [line for line in completed.stdout.splitlines() if line]
+        legacy_messages = lines[1:]
+        assert expected_message in legacy_messages
+        assert len(legacy_messages) == len(set(legacy_messages))
+
+
+def test_import_vgl_root_does_not_emit_legacy_namespace_warnings():
+    script = textwrap.dedent(
+        """
+        import warnings
+
+        with warnings.catch_warnings(record=True) as captured:
+            warnings.simplefilter("always", FutureWarning)
+            import vgl
+            legacy_messages = [
+                str(warning.message)
+                for warning in captured
+                if str(warning.message).startswith("vgl.")
+            ]
+            print(len(legacy_messages))
+        """
+    )
+
+    completed = _run_python_script(script)
+
+    assert completed.returncode == 0, completed.stderr
+    assert completed.stdout.strip() == "0"
 
 
 def test_edge_store_pin_memory_gracefully_skips_when_driver_is_unavailable(monkeypatch):

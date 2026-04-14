@@ -5,7 +5,7 @@ import textwrap
 from pathlib import Path
 
 import scripts.contracts as contracts
-from scripts.contracts import PUBLIC_EXAMPLE_MODULES, public_surface_specs
+from scripts.contracts import PUBLIC_EXAMPLE_MODULES, ROOT_EXPORT_POLICY_DESCRIPTION, public_surface_specs
 
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
@@ -61,7 +61,7 @@ def test_public_surface_scan_lists_stable_catalog():
 
     assert completed.returncode == 0, completed.stderr
     listed = [line for line in completed.stdout.splitlines() if line.startswith("SCAN ")]
-    assert len(listed) == len(public_surface_specs()) + len(PUBLIC_EXAMPLE_MODULES) + 2
+    assert len(listed) == len(public_surface_specs()) + len(PUBLIC_EXAMPLE_MODULES) + 3
     assert any("vgl.data reexports PlanStage from vgl.dataloading" in line for line in listed)
     assert any("vgl.data.plan reexports PlanStage from vgl.dataloading.plan" in line for line in listed)
     assert any("vgl.data.materialize reexports materialize_batch from vgl.dataloading.materialize" in line for line in listed)
@@ -78,6 +78,7 @@ def test_public_surface_scan_lists_stable_catalog():
     assert any("vgl.train reexports FloodingTask from vgl.tasks" in line for line in listed)
     assert any("vgl.core reexports EdgeStore from vgl.graph" in line for line in listed)
     assert any("vgl.core reexports SchemaError from vgl.graph" in line for line in listed)
+    assert any(ROOT_EXPORT_POLICY_DESCRIPTION in line for line in listed)
 
 
 def test_public_surface_scan_list_catalog_follows_public_surface_specs_function(tmp_path: Path):
@@ -319,5 +320,6 @@ def test_public_surface_scan_passes_on_repository():
     )
 
     assert completed.returncode == 0, completed.stderr
-    expected = len(public_surface_specs()) + len(PUBLIC_EXAMPLE_MODULES) + 2
+    expected = len(public_surface_specs()) + len(PUBLIC_EXAMPLE_MODULES) + 3
     assert f"SUMMARY {expected}/{expected} passed" in completed.stdout
+    assert ROOT_EXPORT_POLICY_DESCRIPTION in completed.stdout

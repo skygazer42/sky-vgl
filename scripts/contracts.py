@@ -60,6 +60,19 @@ SDIST_REQUIRED_SUFFIXES = (
 )
 SDIST_EXCLUDED_SUBSTRINGS = ("/.factory/", "/docs/plans/", "__pycache__")
 WHEEL_IMPORT_SYMBOLS = ("Graph", "Trainer", "PlanetoidDataset", "NodeClassificationTask")
+WHEEL_IMPORT_MODULES = (
+    "vgl",
+    "vgl.graph",
+    "vgl.dataloading",
+    "vgl.engine",
+    "vgl.tasks",
+)
+PREFERRED_IMPORT_SMOKES = (
+    ("vgl.graph", "Graph"),
+    ("vgl.engine", "Trainer"),
+    ("vgl.data", "PlanetoidDataset"),
+    ("vgl.tasks", "NodeClassificationTask"),
+)
 README_VERSION_BADGE = "https://img.shields.io/pypi/v/sky-vgl?style=flat-square"
 DOCS_INDEX_VERSION_BADGE = "https://img.shields.io/pypi/v/sky-vgl?style=for-the-badge"
 PUBLIC_EXAMPLE_MODULES = (
@@ -100,6 +113,16 @@ class LegacyNamespacePolicy:
     module: str
     preferred_module: str
     guidance: str
+
+
+@dataclass(frozen=True)
+class RootExportSpec:
+    module: str
+    symbol: str
+    tier: str
+
+
+ROOT_EXPORT_POLICY_DESCRIPTION = "vgl root exports follow stable-first module contract"
 
 
 GOLDEN_PATH_ROOT_EXPORTS = (
@@ -183,6 +206,234 @@ GOLDEN_PATH_ROOT_EXPORTS = (
         "vgl.data.PlanetoidDataset",
     ),
     ReexportSpec("root", "vgl exports TUDataset from vgl.data", "vgl/__init__.py", "TUDataset", "vgl.data.TUDataset"),
+)
+
+ROOT_EXPORT_GROUPS = (
+    (
+        "vgl.engine",
+        (
+            "ASAM",
+            "AdaptiveGradientClipping",
+            "BootstrapBetaScheduler",
+            "CSVLogger",
+            "Callback",
+            "ConfidencePenaltyScheduler",
+            "ConsoleLogger",
+            "DeferredReweighting",
+            "EarlyStopping",
+            "ExponentialMovingAverage",
+            "FloodingLevelScheduler",
+            "FocalGammaScheduler",
+            "GSAM",
+            "GeneralizedCrossEntropyScheduler",
+            "GradientAccumulationScheduler",
+            "GradientCentralization",
+            "GradientNoiseInjection",
+            "GradientValueClipping",
+            "GradualUnfreezing",
+            "HistoryLogger",
+            "JSONLinesLogger",
+            "LabelSmoothingScheduler",
+            "LayerwiseLrDecay",
+            "LdamMarginScheduler",
+            "Logger",
+            "LogitAdjustTauScheduler",
+            "Lookahead",
+            "ModelCheckpoint",
+            "Poly1EpsilonScheduler",
+            "PosWeightScheduler",
+            "SAM",
+            "StochasticWeightAveraging",
+            "StopTraining",
+            "SymmetricCrossEntropyBetaScheduler",
+            "TensorBoardLogger",
+            "Trainer",
+            "TrainingHistory",
+            "WarmupCosineScheduler",
+            "WeightDecayScheduler",
+        ),
+    ),
+    (
+        "vgl.dataloading",
+        (
+            "CandidateLinkSampler",
+            "ClusterData",
+            "ClusterLoader",
+            "DataLoader",
+            "FullGraphSampler",
+            "GraphSAINTEdgeSampler",
+            "GraphSAINTNodeSampler",
+            "GraphSAINTRandomWalkSampler",
+            "HardNegativeLinkSampler",
+            "LinkNeighborSampler",
+            "LinkPredictionRecord",
+            "ListDataset",
+            "Loader",
+            "Node2VecWalkSampler",
+            "NodeNeighborSampler",
+            "NodeSeedSubgraphSampler",
+            "RandomWalkSampler",
+            "SampleRecord",
+            "ShaDowKHopSampler",
+            "TemporalEventRecord",
+            "TemporalNeighborSampler",
+            "UniformNegativeLinkSampler",
+        ),
+    ),
+    (
+        "vgl.data",
+        (
+            "DatasetManifest",
+            "DatasetRegistry",
+            "DatasetSplit",
+            "KarateClubDataset",
+            "OnDiskGraphDataset",
+            "PlanetoidDataset",
+            "TUDataset",
+        ),
+    ),
+    (
+        "vgl.graph",
+        (
+            "Block",
+            "Graph",
+            "GraphBatch",
+            "GraphSchema",
+            "GraphView",
+            "HeteroBlock",
+            "LinkPredictionBatch",
+            "NodeBatch",
+            "TemporalEventBatch",
+        ),
+    ),
+    (
+        "vgl.metrics",
+        (
+            "Accuracy",
+            "FilteredHitsAtK",
+            "FilteredMRR",
+            "HitsAtK",
+            "MRR",
+            "Metric",
+        ),
+    ),
+    (
+        "vgl.nn",
+        (
+            "AGNNConv",
+            "APPNPConv",
+            "ARMAConv",
+            "AntiSymmetricConv",
+            "BernConv",
+            "CGConv",
+            "ChebConv",
+            "ClusterGCNConv",
+            "DAGNNConv",
+            "DNAConv",
+            "DirGNNConv",
+            "ECConv",
+            "EGConv",
+            "EdgeConv",
+            "FAConv",
+            "FAGCNConv",
+            "FeaStConv",
+            "FiLMConv",
+            "GATConv",
+            "GATv2Conv",
+            "GCN2Conv",
+            "GCNConv",
+            "GENConv",
+            "GINConv",
+            "GINEConv",
+            "GMMConv",
+            "GPRGNNConv",
+            "GPSLayer",
+            "GatedGCNConv",
+            "GatedGraphConv",
+            "GeneralConv",
+            "GraphConv",
+            "GraphTransformerEncoder",
+            "GraphTransformerEncoderLayer",
+            "GraphormerEncoder",
+            "GraphormerEncoderLayer",
+            "GroupRevRes",
+            "H2GCNConv",
+            "HANConv",
+            "HEATConv",
+            "HGTConv",
+            "IdentityTemporalMessage",
+            "LEConv",
+            "LGConv",
+            "LastMessageAggregator",
+            "LightGCNConv",
+            "MFConv",
+            "MeanMessageAggregator",
+            "MessagePassing",
+            "MixHopConv",
+            "NAGphormerEncoder",
+            "NNConv",
+            "PDNConv",
+            "PNAConv",
+            "PointNetConv",
+            "PointTransformerConv",
+            "RGATConv",
+            "RGCNConv",
+            "ResGatedGraphConv",
+            "SAGEConv",
+            "SGConv",
+            "SGFormerEncoder",
+            "SGFormerEncoderLayer",
+            "SSGConv",
+            "SimpleConv",
+            "SplineConv",
+            "SuperGATConv",
+            "TAGConv",
+            "TGATEncoder",
+            "TGATLayer",
+            "TGNMemory",
+            "TWIRLSConv",
+            "TimeEncoder",
+            "TransformerConv",
+            "WLConvContinuous",
+            "global_max_pool",
+            "global_mean_pool",
+            "global_sum_pool",
+        ),
+    ),
+    (
+        "vgl.tasks",
+        (
+            "BootstrapTask",
+            "ConfidencePenaltyTask",
+            "FloodingTask",
+            "GeneralizedCrossEntropyTask",
+            "GraphClassificationTask",
+            "LinkPredictionTask",
+            "NodeClassificationTask",
+            "Poly1CrossEntropyTask",
+            "RDropTask",
+            "SymmetricCrossEntropyTask",
+            "Task",
+            "TemporalEventPredictionTask",
+        ),
+    ),
+    (
+        "vgl.version",
+        (
+            "__version__",
+        ),
+    ),
+)
+
+ROOT_STABLE_EXPORTS = tuple(spec.symbol for spec in GOLDEN_PATH_ROOT_EXPORTS)
+ROOT_COMPATIBILITY_EXPORTS = tuple(
+    symbol
+    for symbol in sorted(
+        symbol
+        for module, symbols in ROOT_EXPORT_GROUPS
+        for symbol in symbols
+    )
+    if symbol not in ROOT_STABLE_EXPORTS
 )
 
 DATA_PUBLIC_EXPORTS = (
@@ -582,3 +833,30 @@ SUPPORT_MATRIX = (
 
 def public_surface_specs() -> tuple[ReexportSpec, ...]:
     return GOLDEN_PATH_ROOT_EXPORTS + DATA_PUBLIC_EXPORTS + DATALOADING_PUBLIC_EXPORTS + LEGACY_REEXPORTS
+
+
+def root_export_specs() -> tuple[RootExportSpec, ...]:
+    module_by_symbol = {
+        symbol: module
+        for module, symbols in ROOT_EXPORT_GROUPS
+        for symbol in symbols
+    }
+    stable_specs = tuple(
+        RootExportSpec(
+            module=module_by_symbol[spec.symbol],
+            symbol=spec.symbol,
+            tier="stable",
+        )
+        for spec in GOLDEN_PATH_ROOT_EXPORTS
+    )
+    stable_exports = set(ROOT_STABLE_EXPORTS)
+    compatibility_specs = tuple(
+        RootExportSpec(
+            module=module_by_symbol[symbol],
+            symbol=symbol,
+            tier="compatibility",
+        )
+        for symbol in sorted(module_by_symbol)
+        if symbol not in stable_exports
+    )
+    return stable_specs + compatibility_specs

@@ -189,6 +189,25 @@ trainer = Trainer(
 
 Use the queued torch.compile-based smoke test (see `tests/test_runtime_compile_smoke.py`) when PyTorch 2.4+ is available to verify the same `Graph`/`Trainer` loop supports Dynamo-backed execution without extra hooks. The release profiler already records per-fit and per-epoch timing under the `"profile"` field, so nightly runs that enable `profiler="simple"` can assert these keys remain present across releases.
 
+The benchmark artifact emitted by `scripts/benchmark_hotpaths.py` is now treated as a versioned contract. Downstream consumers can rely on these top-level fields:
+
+```bash
+python scripts/benchmark_hotpaths.py --preset ci --output artifacts/benchmark-hotpaths.json
+```
+
+- `schema_version`
+- `benchmark`
+- `generated_at_utc`
+- `preset`
+- `config`
+- `runner`
+- `metric_unit`
+- `query_ops`
+- `routing`
+- `sampling`
+
+All timing metrics are reported in seconds under `metric_unit`, and the canonical CI artifact path is `artifacts/benchmark-hotpaths.json`. The CI benchmark job also prints the JSON and uploads the artifact directly so schema drift and performance drift can be reviewed together.
+
 ## TrainingHistory
 
 `trainer.fit()` 返回 `TrainingHistory` 对象：

@@ -31,6 +31,7 @@ def test_release_smoke_prefers_repo_contracts_module(monkeypatch, tmp_path):
             """
             REAL_INTEROP_BACKENDS = ("shadow",)
             WHEEL_IMPORT_SYMBOLS = ("ShadowSymbol",)
+            PREFERRED_IMPORT_SMOKES = (("shadow.module", "ShadowPreferred"),)
             """
         ).strip()
         + "\n",
@@ -49,6 +50,7 @@ def test_release_smoke_prefers_repo_contracts_module(monkeypatch, tmp_path):
 
     assert release_smoke.REAL_INTEROP_BACKENDS == contracts.REAL_INTEROP_BACKENDS
     assert release_smoke.WHEEL_IMPORT_SYMBOLS == contracts.WHEEL_IMPORT_SYMBOLS
+    assert release_smoke.PREFERRED_IMPORT_SMOKES == contracts.PREFERRED_IMPORT_SMOKES
     assert release_smoke.INTEROP_BACKENDS == ("none", *contracts.REAL_INTEROP_BACKENDS, "all")
 
 
@@ -60,12 +62,21 @@ def test_parse_args_accepts_optional_interop_backend_flag():
     assert args.interop_backend == "dgl"
 
 
+def test_parse_args_accepts_optional_import_time_threshold():
+    release_smoke = _load_release_smoke_module()
+
+    args = release_smoke._parse_args(["--max-import-seconds", "2.5"])
+
+    assert args.max_import_seconds == 2.5
+
+
 def test_parse_args_defaults_optional_interop_backend_to_none():
     release_smoke = _load_release_smoke_module()
 
     args = release_smoke._parse_args([])
 
     assert args.interop_backend == "none"
+    assert args.max_import_seconds is None
 
 
 def test_parse_args_accepts_all_interop_backend_flag():
@@ -81,6 +92,13 @@ def test_parse_args_rejects_unknown_interop_backend():
 
     with pytest.raises(SystemExit):
         release_smoke._parse_args(["--interop-backend", "networkx"])
+
+
+def test_parse_args_rejects_non_positive_import_time_threshold():
+    release_smoke = _load_release_smoke_module()
+
+    with pytest.raises(SystemExit):
+        release_smoke._parse_args(["--max-import-seconds", "0"])
 
 
 def test_selected_interop_backends_treat_none_as_disabled():
@@ -128,6 +146,37 @@ def test_build_interop_check_script_for_pyg_uses_installed_public_api():
 
     assert "Graph.from_pyg(graph.to_pyg())" in script
     assert "edge_attr" in script
+
+
+def test_build_import_check_script_measures_root_import_time_and_preferred_imports():
+    release_smoke = _load_release_smoke_module()
+
+    script = release_smoke._build_import_check_script(
+        repo_root=Path("/tmp/repo"),
+        dependency_paths=[Path("/opt/site-packages")],
+    )
+
+    assert "IMPORT_TIMING vgl" in script
+    assert "time.perf_counter()" in script
+    assert "from vgl.graph import Graph" in script
+    assert "site.addsitedir('/opt/site-packages')" in script
+
+
+def test_build_import_check_script_uses_root_and_preferred_import_paths():
+    release_smoke = _load_release_smoke_module()
+
+    script = release_smoke._build_import_check_script(
+        repo_root=Path("/tmp/repo"),
+        dependency_paths=[Path("/opt/site-packages")],
+    )
+
+    assert "import vgl" in script
+    assert "from vgl import Graph, Trainer, PlanetoidDataset, NodeClassificationTask" in script
+    assert "from vgl.graph import Graph" in script
+    assert "from vgl.engine import Trainer" in script
+    assert "from vgl.data import PlanetoidDataset" in script
+    assert "from vgl.tasks import NodeClassificationTask" in script
+    assert "repo_root not in module_path.parents" in script
 
 
 def test_backend_import_module_name_returns_expected_names():

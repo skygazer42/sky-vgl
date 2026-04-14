@@ -17,7 +17,7 @@ python -m pytest -q
 python -m build
 python scripts/release_contract_scan.py --artifact-dir dist
 python -m twine check dist/*.whl dist/*.tar.gz
-python scripts/release_smoke.py --artifact-dir dist --kind all
+python scripts/release_smoke.py --artifact-dir dist --kind all --max-import-seconds 30
 ```
 
 5. Confirm the smoke script reports both wheel and sdist installs passing from
@@ -25,7 +25,9 @@ outside the repository root. The script creates isolated virtual environments,
 installs the built artifacts, and verifies `import vgl` plus the golden-path
 symbols from the release contract (`Graph`, `Trainer`, `PlanetoidDataset`,
 `NodeClassificationTask`) resolve from the installed distribution instead of the
-checkout.
+checkout. The smoke output also includes per-module `IMPORT_TIMING` lines and an
+`IMPORT_BUDGET_OK` line for the root `vgl` import when the configured import-time
+budget passes.
 6. Run optional backend interop smoke checks in an environment where the extras
 are installed. The reusable checkout-level script is the same one used by the
 manual/nightly workflow. Artifact-level interop smoke reuses host-installed
@@ -43,7 +45,7 @@ python scripts/interop_smoke.py --backend pyg
 python scripts/interop_smoke.py --backend dgl
 python scripts/interop_smoke.py --backend all  # only when both extras are installed
 # Optional: verify interop through installed wheel artifacts (not checkout imports)
-python scripts/release_smoke.py --artifact-dir dist --kind wheel --interop-backend dgl
+python scripts/release_smoke.py --artifact-dir dist --kind wheel --interop-backend dgl --max-import-seconds 30
 ```
 The manual/nightly `interop-smoke` workflow now also installs both optional
 backends, builds the artifacts, and runs
@@ -98,8 +100,9 @@ when present and falls back to Trusted Publishing otherwise.
 2. Import `vgl` and the golden-path public imports.
 3. If the release touched interop adapters, rerun `python scripts/interop_smoke.py --backend dgl` and/or `python scripts/interop_smoke.py --backend pyg` for the extras you have installed. Use `--backend all` only when both extras are present; the host-assisted release smoke script will abort early when either backend is missing. Artifact interop smoke defaults to host-assisted dependency discovery, so `python scripts/release_smoke.py --artifact-dir dist --kind wheel --interop-backend dgl` (or `pyg`) expects those extras to remain importable from the host environment before invoking `--interop-backend all`.
 4. Packaging tests also cover hermetic fake-backend success paths so CI can validate `--interop-backend pyg` and `--interop-backend all` without requiring real host PyG or DGL installs.
-5. Verify the PyPI project page links for Homepage, Repository, Documentation, and Issues.
-6. Check that the tagged source and published package versions match.
-7. Confirm `refs/tags/vX.Y.Z` matches `vgl.__version__ == "X.Y.Z"` and that README/docs no longer show stale hard-coded version badges.
+5. Inspect the benchmark artifact from `scripts/benchmark_hotpaths.py` when runtime-sensitive code changed. Its JSON schema is versioned and includes timestamp, runner metadata, and per-domain timing maps in seconds.
+6. Verify the PyPI project page links for Homepage, Repository, Documentation, and Issues.
+7. Check that the tagged source and published package versions match.
+8. Confirm `refs/tags/vX.Y.Z` matches `vgl.__version__ == "X.Y.Z"` and that README/docs no longer show stale hard-coded version badges.
 
 The published distribution name is `sky-vgl`, but the Python import surface remains `vgl`.

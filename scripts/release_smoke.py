@@ -3,12 +3,14 @@
 from __future__ import annotations
 
 import argparse
+import importlib
 import os
 import repo_script_imports
 import site
 import subprocess
 import sys
 import tempfile
+import time
 from pathlib import Path
 from typing import Sequence
 
@@ -35,6 +37,14 @@ def _wheel_import_symbols() -> tuple[str, ...]:
     return tuple(_contracts_module().WHEEL_IMPORT_SYMBOLS)
 
 
+def _wheel_import_modules() -> tuple[str, ...]:
+    return tuple(_contracts_module().WHEEL_IMPORT_MODULES)
+
+
+def _preferred_import_smokes() -> tuple[tuple[str, str], ...]:
+    return tuple(_contracts_module().PREFERRED_IMPORT_SMOKES)
+
+
 def _interop_backends() -> tuple[str, ...]:
     return ("none", *_real_interop_backends(), "all")
 
@@ -44,6 +54,10 @@ def __getattr__(name: str):
         return _real_interop_backends()
     if name == "WHEEL_IMPORT_SYMBOLS":
         return _wheel_import_symbols()
+    if name == "WHEEL_IMPORT_MODULES":
+        return _wheel_import_modules()
+    if name == "PREFERRED_IMPORT_SMOKES":
+        return _preferred_import_smokes()
     if name == "INTEROP_BACKENDS":
         return _interop_backends()
     raise AttributeError(name)
@@ -83,9 +97,20 @@ def _parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
             "`python scripts/interop_smoke.py --list-backends`. Defaults to disabled."
         ),
     )
+    parser.add_argument(
+        "--max-import-seconds",
+        type=float,
+        default=None,
+        help=(
+            "Optional upper bound for installed-artifact import smoke. "
+            "When set, the command fails if the root `vgl` import exceeds this limit."
+        ),
+    )
     args = parser.parse_args(argv)
     if args.interop_backend not in _interop_backends():
         parser.error(f"argument --interop-backend: invalid choice: {args.interop_backend!r}")
+    if args.max_import_seconds is not None and args.max_import_seconds <= 0:
+        parser.error("argument --max-import-seconds: must be > 0")
     return args
 
 
@@ -162,27 +187,81 @@ def _import_check(
     cwd: Path,
     repo_root: Path,
     dependency_paths: list[Path],
+    max_import_seconds: float | None = None,
 ) -> None:
+    script = _build_import_check_script(
+        repo_root=repo_root,
+        dependency_paths=dependency_paths,
+    )
+    completed = subprocess.run(
+        [str(python_bin), "-c", script],
+        cwd=cwd,
+        capture_output=True,
+        text=True,
+        check=True,
+    )
+    import_timings = {}
+    for line in completed.stdout.splitlines():
+        if not line.startswith("IMPORT_TIMING "):
+            continue
+        _, module_name, elapsed = line.split()
+        import_timings[module_name] = float(elapsed)
+    root_import_seconds = import_timings.get("vgl")
+    if max_import_seconds is not None and root_import_seconds is not None and root_import_seconds > max_import_seconds:
+        raise SystemExit(
+            f"artifact import smoke exceeded {max_import_seconds:.3f}s for vgl: "
+            f"{root_import_seconds:.3f}s"
+        )
+    sys.stdout.write(completed.stdout)
+    if root_import_seconds is not None:
+        print(f"IMPORT_BUDGET_OK vgl {root_import_seconds:.6f}")
+
+
+def _build_import_check_script(
+    *,
+    repo_root: Path,
+    dependency_paths: list[Path],
+) -> str:
+    wheel_import_modules = _wheel_import_modules()
+    import_module_checks = "".join(
+        "start = time.perf_counter()\n"
+        f"module = importlib.import_module({module_name!r})\n"
+        "elapsed = time.perf_counter() - start\n"
+        "module_path = Path(module.__file__).resolve()\n"
+        "assert repo_root not in module_path.parents, module_path\n"
+        f"print('IMPORT_TIMING {module_name} ' + format(elapsed, '.6f'))\n"
+        for module_name in wheel_import_modules
+    )
     bootstrap = "".join(
         f"site.addsitedir({str(path)!r})\n"
         for path in dependency_paths
     )
     wheel_import_symbols = _wheel_import_symbols()
     root_imports = ", ".join(wheel_import_symbols)
+    preferred_imports = "".join(
+        f"from {module_name} import {symbol}\n"
+        for module_name, symbol in _preferred_import_smokes()
+    )
     symbol_prints = "".join(f"print({symbol})\n" for symbol in wheel_import_symbols)
-    script = (
+    return (
         "import site\n"
+        "import importlib\n"
+        "import time\n"
         "from pathlib import Path\n"
         f"{bootstrap}"
+        "start = time.perf_counter()\n"
         "import vgl\n"
+        "root_elapsed = time.perf_counter() - start\n"
         f"from vgl import {root_imports}\n"
+        f"{preferred_imports}"
         f"repo_root = Path({str(repo_root)!r}).resolve()\n"
         "module_path = Path(vgl.__file__).resolve()\n"
         "assert repo_root not in module_path.parents, module_path\n"
+        "print('IMPORT_TIMING vgl ' + format(root_elapsed, '.6f'))\n"
         "print(vgl.__version__)\n"
+        f"{import_module_checks}"
         f"{symbol_prints}"
     )
-    _run([str(python_bin), "-c", script], cwd=cwd)
 
 
 def _selected_interop_backends(backend: str | None) -> tuple[str, ...]:
@@ -293,7 +372,14 @@ def _interop_check(
         print(f"{selected_backend} interop smoke check passed")
 
 
-def _smoke_install(kind: str, artifact: Path, *, repo_root: Path, interop_backend: str) -> None:
+def _smoke_install(
+    kind: str,
+    artifact: Path,
+    *,
+    repo_root: Path,
+    interop_backend: str,
+    max_import_seconds: float | None = None,
+) -> None:
     with tempfile.TemporaryDirectory(prefix=f"vgl-release-{kind}-") as tmp:
         tmp_dir = Path(tmp)
         venv_dir = tmp_dir / "venv"
@@ -324,6 +410,7 @@ def _smoke_install(kind: str, artifact: Path, *, repo_root: Path, interop_backen
             cwd=tmp_dir,
             repo_root=repo_root,
             dependency_paths=dependency_paths,
+            max_import_seconds=max_import_seconds,
         )
         _interop_check(
             python_bin,
@@ -349,6 +436,7 @@ def main() -> None:
             _find_single(artifact_dir, "*.whl"),
             repo_root=repo_root,
             interop_backend=args.interop_backend,
+            max_import_seconds=args.max_import_seconds,
         )
     if args.kind in {"sdist", "all"}:
         _smoke_install(
@@ -356,6 +444,7 @@ def main() -> None:
             _find_single(artifact_dir, "*.tar.gz"),
             repo_root=repo_root,
             interop_backend=args.interop_backend,
+            max_import_seconds=args.max_import_seconds,
         )
 
 

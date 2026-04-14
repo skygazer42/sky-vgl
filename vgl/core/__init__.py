@@ -3,6 +3,7 @@
 New code should import graph containers from ``vgl.graph``.
 """
 
+from vgl._compat import warn_legacy_namespace
 from vgl.graph import Block as Block
 from vgl.graph import EdgeStore as EdgeStore
 from vgl.graph import GNNError as GNNError
@@ -15,6 +16,8 @@ from vgl.graph import NodeBatch as NodeBatch
 from vgl.graph import NodeStore as NodeStore
 from vgl.graph import SchemaError as SchemaError
 from vgl.graph import TemporalEventBatch as TemporalEventBatch
+
+warn_legacy_namespace("vgl.core", "prefer `vgl.graph` for graph containers and related errors.")
 
 __all__ = [
     "Block",

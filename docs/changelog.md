@@ -6,6 +6,8 @@
 
 - Release and public-surface policy now lives in a shared machine-readable contract used by scans, tests, and smoke tooling.
 - Documentation entry pages now include a verified support matrix and bilingual summary blocks for the highest-traffic entry points.
+- Benchmark hotpath artifacts are now documented as versioned JSON contracts with timestamp and runner metadata.
+- Release smoke now supports an explicit import-time budget and reports import timing evidence for installed artifacts.
 
 ### Fixed
 

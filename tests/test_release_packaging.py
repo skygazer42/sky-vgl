@@ -496,7 +496,33 @@ def test_release_smoke_script_can_install_built_wheel(built_release_artifacts):
     )
 
     assert completed.returncode == 0, completed.stderr
+    assert "IMPORT_TIMING vgl " in completed.stdout
+    assert "IMPORT_BUDGET_OK vgl " in completed.stdout
     assert f"wheel smoke check passed for {wheel_path.name}" in completed.stdout
+
+
+def test_release_smoke_script_accepts_import_time_threshold(built_release_artifacts):
+    wheel_path, _ = built_release_artifacts
+    smoke_script = REPO_ROOT / "scripts" / "release_smoke.py"
+
+    completed = subprocess.run(
+        [
+            sys.executable,
+            str(smoke_script),
+            "--artifact-dir",
+            str(wheel_path.parent),
+            "--kind",
+            "wheel",
+            "--max-import-seconds",
+            "30",
+        ],
+        cwd=REPO_ROOT,
+        capture_output=True,
+        text=True,
+    )
+
+    assert completed.returncode == 0, completed.stderr
+    assert "IMPORT_BUDGET_OK vgl " in completed.stdout
 
 
 def test_release_smoke_resolves_relative_artifact_dir_from_repo_root(
@@ -713,6 +739,7 @@ def test_release_readme_documents_public_install_paths():
     quickstart = (REPO_ROOT / "docs" / "public-surface-contract.md").read_text(encoding="utf-8")
     releasing = (REPO_ROOT / "docs" / "releasing.md").read_text(encoding="utf-8")
     support_matrix = (REPO_ROOT / "docs" / "support-matrix.md").read_text(encoding="utf-8")
+    training = (REPO_ROOT / "docs" / "guide" / "training.md").read_text(encoding="utf-8")
 
     assert README_VERSION_BADGE in readme
     assert DOCS_INDEX_VERSION_BADGE in docs_index
@@ -757,5 +784,9 @@ def test_release_readme_documents_public_install_paths():
     assert "builds the artifacts" in releasing
     assert "python scripts/interop_smoke.py --backend all" in releasing
     assert "providing automated artifact-level verification for the combined backend scenario" in support_matrix
+    assert "python scripts/benchmark_hotpaths.py --preset ci --output artifacts/benchmark-hotpaths.json" in training
+    assert "schema_version" in training
+    assert "metric_unit" in training
+    assert "artifacts/benchmark-hotpaths.json" in training
     for symbol in WHEEL_IMPORT_SYMBOLS:
         assert symbol in releasing

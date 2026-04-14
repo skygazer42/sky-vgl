@@ -20,11 +20,66 @@ import torch
 from torch.optim.lr_scheduler import ReduceLROnPlateau
 
 
+_SUPPORTED_PRECISIONS = {"32", "bf16-mixed", "fp16-mixed"}
+_SUPPORTED_SCHEDULER_INTERVALS = {"epoch", "step"}
+_PROFILE_TOTAL_KEYS = (
+    "batch_materialization_seconds_total",
+    "forward_seconds_total",
+    "backward_seconds_total",
+    "optimizer_step_seconds_total",
+    "train_step_seconds_total",
+    "train_stage_seconds_total",
+    "val_stage_seconds_total",
+    "test_stage_seconds_total",
+    "sanity_val_stage_seconds_total",
+)
+_PROFILE_COUNT_KEYS = ("train_step_count",)
+_PROFILE_DERIVED_KEYS = ("train_step_seconds_avg",)
+
+
+def _validate_init_config(
+    *,
+    accumulate_grad_batches,
+    log_every_n_steps,
+    gradient_clip_val,
+    console_flush_every_n_steps,
+    scheduler_monitor,
+    lr_scheduler,
+    lr_scheduler_interval,
+    precision,
+    non_blocking,
+    num_sanity_val_steps,
+    profiler,
+):
+    if accumulate_grad_batches < 1:
+        raise ValueError("accumulate_grad_batches must be >= 1")
+    if log_every_n_steps < 1:
+        raise ValueError("log_every_n_steps must be >= 1")
+    if gradient_clip_val is not None and gradient_clip_val < 0:
+        raise ValueError("gradient_clip_val must be >= 0")
+    if console_flush_every_n_steps is not None and console_flush_every_n_steps < 1:
+        raise ValueError("console_flush_every_n_steps must be >= 1")
+    if scheduler_monitor is not None and lr_scheduler is None:
+        raise ValueError("scheduler_monitor requires lr_scheduler")
+    if lr_scheduler_interval not in _SUPPORTED_SCHEDULER_INTERVALS:
+        raise ValueError(
+            f"lr_scheduler_interval must be one of {sorted(_SUPPORTED_SCHEDULER_INTERVALS)}"
+        )
+    if precision not in _SUPPORTED_PRECISIONS:
+        raise ValueError(f"precision must be one of {sorted(_SUPPORTED_PRECISIONS)}")
+    if non_blocking is not None and not isinstance(non_blocking, bool):
+        raise TypeError("non_blocking must be None or a bool")
+    if num_sanity_val_steps < 0:
+        raise ValueError("num_sanity_val_steps must be >= 0")
+    if profiler not in {None, "simple"}:
+        raise ValueError("profiler must be None or 'simple'")
+
+
 class Trainer:
     CHECKPOINT_FORMAT = CHECKPOINT_FORMAT
     CHECKPOINT_FORMAT_VERSION = CHECKPOINT_FORMAT_VERSION
-    _SUPPORTED_PRECISIONS = {"32", "bf16-mixed", "fp16-mixed"}
-    _SUPPORTED_SCHEDULER_INTERVALS = {"epoch", "step"}
+    _SUPPORTED_PRECISIONS = _SUPPORTED_PRECISIONS
+    _SUPPORTED_SCHEDULER_INTERVALS = _SUPPORTED_SCHEDULER_INTERVALS
     _SUPPORTED_VGL_TRANSFER_TYPES = (
         Graph,
         GraphView,
@@ -78,28 +133,19 @@ class Trainer:
         num_sanity_val_steps=0,
         profiler=None,
     ):
-        if accumulate_grad_batches < 1:
-            raise ValueError("accumulate_grad_batches must be >= 1")
-        if log_every_n_steps < 1:
-            raise ValueError("log_every_n_steps must be >= 1")
-        if gradient_clip_val is not None and gradient_clip_val < 0:
-            raise ValueError("gradient_clip_val must be >= 0")
-        if console_flush_every_n_steps is not None and console_flush_every_n_steps < 1:
-            raise ValueError("console_flush_every_n_steps must be >= 1")
-        if scheduler_monitor is not None and lr_scheduler is None:
-            raise ValueError("scheduler_monitor requires lr_scheduler")
-        if lr_scheduler_interval not in self._SUPPORTED_SCHEDULER_INTERVALS:
-            raise ValueError(
-                f"lr_scheduler_interval must be one of {sorted(self._SUPPORTED_SCHEDULER_INTERVALS)}"
-            )
-        if precision not in self._SUPPORTED_PRECISIONS:
-            raise ValueError(f"precision must be one of {sorted(self._SUPPORTED_PRECISIONS)}")
-        if non_blocking is not None and not isinstance(non_blocking, bool):
-            raise TypeError("non_blocking must be None or a bool")
-        if num_sanity_val_steps < 0:
-            raise ValueError("num_sanity_val_steps must be >= 0")
-        if profiler not in {None, "simple"}:
-            raise ValueError("profiler must be None or 'simple'")
+        _validate_init_config(
+            accumulate_grad_batches=accumulate_grad_batches,
+            log_every_n_steps=log_every_n_steps,
+            gradient_clip_val=gradient_clip_val,
+            console_flush_every_n_steps=console_flush_every_n_steps,
+            scheduler_monitor=scheduler_monitor,
+            lr_scheduler=lr_scheduler,
+            lr_scheduler_interval=lr_scheduler_interval,
+            precision=precision,
+            non_blocking=non_blocking,
+            num_sanity_val_steps=num_sanity_val_steps,
+            profiler=profiler,
+        )
 
         self.model = model
         self.device = None if device is None else torch.device(device)
@@ -449,18 +495,9 @@ class Trainer:
         return set(range(step, total_batches, step))
 
     def _empty_profile(self):
-        return {
-            "batch_materialization_seconds_total": 0.0,
-            "forward_seconds_total": 0.0,
-            "backward_seconds_total": 0.0,
-            "optimizer_step_seconds_total": 0.0,
-            "train_step_seconds_total": 0.0,
-            "train_stage_seconds_total": 0.0,
-            "val_stage_seconds_total": 0.0,
-            "test_stage_seconds_total": 0.0,
-            "sanity_val_stage_seconds_total": 0.0,
-            "train_step_count": 0,
-        }
+        profile = {key: 0.0 for key in _PROFILE_TOTAL_KEYS}
+        profile.update({key: 0 for key in _PROFILE_COUNT_KEYS})
+        return profile
 
     def _profile_add(self, key, value):
         if self.profiler != "simple":
@@ -472,11 +509,7 @@ class Trainer:
     def _profile_snapshot(self, profile):
         if self.profiler != "simple" or profile is None:
             return None
-        snapshot = {
-            key: float(value)
-            for key, value in profile.items()
-            if key != "train_step_count"
-        }
+        snapshot = {key: float(profile[key]) for key in _PROFILE_TOTAL_KEYS}
         count = int(profile.get("train_step_count", 0))
         snapshot["train_step_count"] = count
         snapshot["train_step_seconds_avg"] = (

@@ -220,6 +220,34 @@ def test_simple_profiler_adds_profile_data_to_history_and_fit_records():
     assert epoch_record["profile"]["train_stage_seconds_total"] >= 0.0
 
 
+def test_simple_profiler_exposes_stable_profile_schema():
+    trainer = Trainer(
+        model=ToyModel(),
+        task=ToyTask(),
+        optimizer=torch.optim.SGD,
+        lr=0.1,
+        max_epochs=1,
+        enable_console_logging=False,
+        profiler="simple",
+    )
+
+    history = trainer.fit([ToyBatch(1.0), ToyBatch(2.0)], val_data=[ToyBatch(1.0)])
+
+    assert tuple(history["profile"]) == (
+        "batch_materialization_seconds_total",
+        "forward_seconds_total",
+        "backward_seconds_total",
+        "optimizer_step_seconds_total",
+        "train_step_seconds_total",
+        "train_stage_seconds_total",
+        "val_stage_seconds_total",
+        "test_stage_seconds_total",
+        "sanity_val_stage_seconds_total",
+        "train_step_count",
+        "train_step_seconds_avg",
+    )
+
+
 def test_val_check_interval_runs_mid_epoch_validation():
     logger = RecordingLogger()
     trainer = Trainer(

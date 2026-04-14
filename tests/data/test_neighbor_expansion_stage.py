@@ -272,6 +272,35 @@ def test_build_stitched_homo_temporal_record_avoids_tensor_int(monkeypatch):
     assert record.label == 1
 
 
+def test_build_stitched_homo_temporal_record_uses_resolved_metadata_ids():
+    graph = Graph.temporal(
+        nodes={"node": {"x": torch.randn(3, 2), "n_id": torch.tensor([10, 11, 12])}},
+        edges={("node", "to", "node"): {"edge_index": torch.tensor([[0, 1], [1, 2]]), "ts": torch.tensor([3, 4])}},
+        time_attr="ts",
+    )
+    stitched_graph = Graph.temporal(
+        nodes={"node": {"x": torch.randn(4, 2), "n_id": torch.tensor([9, 11, 12, 13])}},
+        edges={("node", "to", "node"): {"edge_index": torch.tensor([[1], [2]]), "ts": torch.tensor([4])}},
+        time_attr="ts",
+    )
+
+    record = _build_stitched_homo_temporal_record(
+        graph,
+        TemporalEventRecord(
+            graph=graph,
+            src_index=1,
+            dst_index=2,
+            timestamp=7,
+            label=1,
+            metadata={"sample_id": "evt-7", "query_id": "q-7"},
+        ),
+        stitched_graph,
+    )
+
+    assert record.sample_id == "evt-7"
+    assert record.query_id == "q-7"
+
+
 def test_build_stitched_hetero_temporal_record_avoids_tensor_int(monkeypatch):
     graph = Graph.temporal(
         nodes={
@@ -338,6 +367,42 @@ def test_build_stitched_hetero_temporal_record_avoids_tensor_int(monkeypatch):
     assert record.label == 1
 
 
+def test_build_stitched_hetero_temporal_record_uses_resolved_metadata_ids():
+    graph = Graph.temporal(
+        nodes={
+            "author": {"x": torch.randn(2, 2), "n_id": torch.tensor([10, 11])},
+            "paper": {"x": torch.randn(3, 2), "n_id": torch.tensor([20, 21, 22])},
+        },
+        edges={("author", "writes", "paper"): {"edge_index": torch.tensor([[0, 1], [1, 2]]), "ts": torch.tensor([3, 4])}},
+        time_attr="ts",
+    )
+    stitched_graph = Graph.temporal(
+        nodes={
+            "author": {"x": torch.randn(2, 2), "n_id": torch.tensor([8, 10])},
+            "paper": {"x": torch.randn(3, 2), "n_id": torch.tensor([19, 21, 22])},
+        },
+        edges={("author", "writes", "paper"): {"edge_index": torch.tensor([[1], [1]]), "ts": torch.tensor([4])}},
+        time_attr="ts",
+    )
+
+    record = _build_stitched_hetero_temporal_record(
+        graph,
+        TemporalEventRecord(
+            graph=graph,
+            src_index=0,
+            dst_index=1,
+            timestamp=9,
+            label=1,
+            metadata={"sample_id": "evt-9", "query_id": "q-9"},
+            edge_type=("author", "writes", "paper"),
+        ),
+        stitched_graph,
+    )
+
+    assert record.sample_id == "evt-9"
+    assert record.query_id == "q-9"
+
+
 def test_build_stitched_homo_link_records_avoids_tensor_int(monkeypatch):
     graph = Graph.homo(
         edge_index=torch.tensor([[0, 1], [1, 2]]),
@@ -378,6 +443,36 @@ def test_build_stitched_homo_link_records_avoids_tensor_int(monkeypatch):
     assert [record.src_index for record in records] == [1, 2]
     assert [record.dst_index for record in records] == [2, 1]
     assert [record.label for record in records] == [1, 0]
+
+
+def test_build_stitched_homo_link_records_use_resolved_metadata_ids():
+    graph = Graph.homo(
+        edge_index=torch.tensor([[0, 1], [1, 2]]),
+        x=torch.randn(3, 2),
+    )
+    graph.nodes["node"].data["n_id"] = torch.tensor([10, 11, 12])
+    stitched_graph = Graph.homo(
+        edge_index=torch.tensor([[1], [2]]),
+        x=torch.randn(4, 2),
+    )
+    stitched_graph.nodes["node"].data["n_id"] = torch.tensor([9, 11, 12, 13])
+
+    records = _build_stitched_homo_link_records(
+        graph,
+        [
+            LinkPredictionRecord(
+                graph=graph,
+                src_index=1,
+                dst_index=2,
+                label=1,
+                metadata={"sample_id": "pos-1", "query_id": "query-a"},
+            ),
+        ],
+        stitched_graph,
+    )
+
+    assert records[0].sample_id == "pos-1"
+    assert records[0].query_id == "query-a"
 
 
 def test_build_stitched_hetero_link_records_avoids_tensor_int(monkeypatch):
@@ -450,6 +545,41 @@ def test_build_stitched_hetero_link_records_avoids_tensor_int(monkeypatch):
     assert [record.src_index for record in records] == [1, 1]
     assert [record.dst_index for record in records] == [2, 3]
     assert [record.label for record in records] == [1, 0]
+
+
+def test_build_stitched_hetero_link_records_use_resolved_metadata_ids():
+    graph = Graph.hetero(
+        nodes={
+            "author": {"x": torch.randn(2, 2), "n_id": torch.tensor([10, 11])},
+            "paper": {"x": torch.randn(3, 2), "n_id": torch.tensor([20, 21, 22])},
+        },
+        edges={("author", "writes", "paper"): {"edge_index": torch.tensor([[0, 1], [1, 2]])}},
+    )
+    stitched_graph = Graph.hetero(
+        nodes={
+            "author": {"x": torch.randn(2, 2), "n_id": torch.tensor([8, 10])},
+            "paper": {"x": torch.randn(4, 2), "n_id": torch.tensor([19, 20, 21, 22])},
+        },
+        edges={("author", "writes", "paper"): {"edge_index": torch.tensor([[1, 1], [2, 3]])}},
+    )
+
+    records = _build_stitched_hetero_link_records(
+        graph,
+        [
+            LinkPredictionRecord(
+                graph=graph,
+                src_index=0,
+                dst_index=1,
+                label=1,
+                metadata={"sample_id": "edge-1", "query_id": "query-b"},
+                edge_type=("author", "writes", "paper"),
+            ),
+        ],
+        stitched_graph,
+    )
+
+    assert records[0].sample_id == "edge-1"
+    assert records[0].query_id == "query-b"
 
 
 def test_stitched_hetero_link_seed_global_ids_avoids_tensor_int(monkeypatch):

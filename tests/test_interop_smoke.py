@@ -60,6 +60,13 @@ def test_module_lists_stable_backend_catalog():
     assert interop_smoke.list_backends() == ("pyg", "dgl")
 
 
+def test_backend_install_commands_match_supported_backends():
+    assert interop_smoke.backend_install_extra("pyg") == "pyg"
+    assert interop_smoke.backend_install_extra("dgl") == "dgl"
+    assert interop_smoke.backend_install_command("pyg") == 'pip install "sky-vgl[pyg]"'
+    assert interop_smoke.backend_install_command("dgl") == 'pip install "sky-vgl[dgl]"'
+
+
 def test_interop_smoke_list_catalog_follows_contract_file(tmp_path: Path):
     repo_root = tmp_path / "repo"
     contracts_path = repo_root / "scripts" / "contracts.py"
@@ -206,11 +213,11 @@ def graph(edges, num_nodes=None):
 
 def test_run_backend_round_trip_wraps_import_error(monkeypatch):
     def _missing_backend(_graph=None):
-        raise ImportError('Install it with `pip install "sky-vgl[pyg]"`.')
+        raise ImportError("No module named 'torch_geometric'")
 
     monkeypatch.setattr(interop_smoke, "_smoke_pyg", _missing_backend)
 
-    with pytest.raises(ImportError, match="pyg interoperability smoke failed"):
+    with pytest.raises(ImportError, match='Install it with `pip install "sky-vgl\\[pyg\\]"`'):
         interop_smoke.run_backend_round_trip("pyg")
 
 

@@ -2,6 +2,14 @@
 
 框架互操作模块，提供 VGL 与 DGL、PyG、NetworkX 等框架的双向转换。
 
+## 验证路径
+
+- PyG 互操作验证：`python scripts/interop_smoke.py --backend pyg`
+- DGL 互操作验证：`python scripts/interop_smoke.py --backend dgl`
+- 同时验证两者：`python scripts/interop_smoke.py --backend all`
+- `--backend all` 只适用于同时安装了 `sky-vgl[pyg]` 和 `sky-vgl[dgl]` 的环境
+- 如果后端缺失，`scripts/interop_smoke.py` 会在报错里回显对应的 extras 安装命令
+
 ## DGL 互操作
 
 ### 图级别

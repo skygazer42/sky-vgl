@@ -1,4 +1,5 @@
 from dataclasses import dataclass, field
+from time import perf_counter
 
 import torch
 from typing import Any, Callable, TypeAlias, cast
@@ -1068,7 +1069,8 @@ def _build_stitched_node_samples(
     seed_global_ids: torch.Tensor,
 ):
     metadata = dict(getattr(context.request, "metadata", {}))
-    sample_id = context.metadata.get("sample_id", metadata.get("sample_id"))
+    request_sample_id = getattr(context.request, "resolved_sample_id", None)
+    sample_id = context.metadata.get("sample_id", request_sample_id)
     source_graph_id = context.metadata.get("source_graph_id", metadata.get("source_graph_id"))
     seed_local_ids = torch.as_tensor(seed_local_ids, dtype=torch.long).view(-1)
     seed_global_ids = torch.as_tensor(seed_global_ids, dtype=torch.long).view(-1)
@@ -1138,7 +1140,8 @@ def _build_stitched_hetero_node_samples(
     node_type: str,
 ):
     metadata = dict(getattr(context.request, "metadata", {}))
-    sample_id = context.metadata.get("sample_id", metadata.get("sample_id"))
+    request_sample_id = getattr(context.request, "resolved_sample_id", None)
+    sample_id = context.metadata.get("sample_id", request_sample_id)
     source_graph_id = context.metadata.get("source_graph_id", metadata.get("source_graph_id"))
     seed_local_ids = torch.as_tensor(seed_local_ids, dtype=torch.long).view(-1)
     seed_global_ids = torch.as_tensor(seed_global_ids, dtype=torch.long).view(-1)
@@ -1236,7 +1239,8 @@ def _build_stitched_homo_temporal_record(graph, record, stitched_graph: Graph) -
         label=_as_python_int(record.label),
         event_features=record.event_features,
         metadata=dict(record.metadata),
-        sample_id=record.sample_id,
+        sample_id=record.resolved_sample_id,
+        query_id=record.resolved_query_id,
         edge_type=edge_type,
     )
 
@@ -1272,7 +1276,8 @@ def _build_stitched_hetero_temporal_record(graph, record, stitched_graph: Graph)
         label=_as_python_int(record.label),
         event_features=record.event_features,
         metadata=dict(record.metadata),
-        sample_id=record.sample_id,
+        sample_id=record.resolved_sample_id,
+        query_id=record.resolved_query_id,
         edge_type=edge_type,
     )
 
@@ -1580,13 +1585,13 @@ def _build_stitched_homo_link_records(graph, records, stitched_graph: Graph) -> 
                 dst_index=_as_python_int(dst_positions[index]),
                 label=_as_python_int(record.label),
                 metadata=dict(record.metadata),
-                sample_id=record.sample_id,
+                sample_id=record.resolved_sample_id,
                 exclude_seed_edge=bool(record.exclude_seed_edge),
                 hard_negative_dst=record.hard_negative_dst,
                 candidate_dst=record.candidate_dst,
                 edge_type=record.edge_type,
                 reverse_edge_type=record.reverse_edge_type,
-                query_id=record.query_id,
+                query_id=record.resolved_query_id,
                 filter_ranking=bool(record.filter_ranking),
             )
         )
@@ -1656,13 +1661,13 @@ def _build_stitched_hetero_link_records(graph, records, stitched_graph: Graph) -
                 dst_index=dst_positions[index],
                 label=_as_python_int(record.label),
                 metadata=dict(record.metadata),
-                sample_id=record.sample_id,
+                sample_id=record.resolved_sample_id,
                 exclude_seed_edge=bool(record.exclude_seed_edge),
                 hard_negative_dst=record.hard_negative_dst,
                 candidate_dst=record.candidate_dst,
                 edge_type=edge_type,
                 reverse_edge_type=record.reverse_edge_type,
-                query_id=record.query_id,
+                query_id=record.resolved_query_id,
                 filter_ranking=bool(record.filter_ranking),
             )
         )
@@ -1681,6 +1686,7 @@ class MaterializationContext:
 @dataclass(slots=True)
 class PlanExecutor:
     handlers: dict[str, StageHandler] = field(default_factory=dict)
+    profile_key: str = "stage_profile"
 
     def __post_init__(self) -> None:
         self.handlers.setdefault("expand_neighbors", self._expand_neighbors)
@@ -1707,12 +1713,26 @@ class PlanExecutor:
             graph=graph,
             feature_store=_resolve_feature_store(feature_store, graph),
         )
-        for stage in plan.stages:
+        stage_profile = context.metadata.setdefault(self.profile_key, [])
+        for stage_index, stage in enumerate(plan.stages):
             try:
                 handler = self.handlers[stage.name]
             except KeyError as exc:
                 raise KeyError(f"unknown stage handler: {stage.name}") from exc
+            started_at = perf_counter()
             context = handler(stage, context)
+            duration_seconds = perf_counter() - started_at
+            stage_profile.append(
+                {
+                    "stage_index": stage_index,
+                    "stage_name": stage.name,
+                    "duration_seconds": duration_seconds,
+                }
+            )
+        context.metadata["stage_count"] = len(stage_profile)
+        context.metadata["stage_seconds_total"] = sum(
+            float(entry["duration_seconds"]) for entry in stage_profile
+        )
         return context
 
     def _expand_neighbors(self, stage: PlanStage, context: MaterializationContext) -> MaterializationContext:

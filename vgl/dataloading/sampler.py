@@ -453,6 +453,9 @@ class UniformNegativeLinkSampler(Sampler):
         return _merge_sorted_unique_tensors(excluded, positive_destinations)
 
     def _resolved_query_id(self, item):
+        query_id = getattr(item, "resolved_query_id", None)
+        if query_id is not None:
+            return query_id
         query_id = item.query_id
         if query_id is None:
             query_id = item.metadata.get("query_id")
@@ -463,6 +466,9 @@ class UniformNegativeLinkSampler(Sampler):
         return query_id
 
     def _resolved_sample_id(self, item):
+        sample_id = getattr(item, "resolved_sample_id", None)
+        if sample_id is not None:
+            return sample_id
         sample_id = item.sample_id
         if sample_id is None:
             sample_id = item.metadata.get("sample_id")

@@ -3,6 +3,7 @@
 New code should prefer ``vgl.engine``, ``vgl.tasks``, and ``vgl.metrics``.
 """
 
+from vgl._compat import warn_legacy_namespace
 from vgl.engine import ASAM as ASAM
 from vgl.engine import AdaptiveGradientClipping as AdaptiveGradientClipping
 from vgl.engine import BootstrapBetaScheduler as BootstrapBetaScheduler
@@ -67,6 +68,8 @@ from vgl.tasks import RDropTask as RDropTask
 from vgl.tasks import SymmetricCrossEntropyTask as SymmetricCrossEntropyTask
 from vgl.tasks import Task as Task
 from vgl.tasks import TemporalEventPredictionTask as TemporalEventPredictionTask
+
+warn_legacy_namespace("vgl.train", "prefer `vgl.engine`, `vgl.tasks`, and `vgl.metrics`.")
 
 __all__ = [
     "Accuracy",

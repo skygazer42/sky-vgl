@@ -16,6 +16,16 @@ from vgl.dataloading import (
 from vgl.graph.batch import NodeBatch
 
 
+class _ResolvedLinkPredictionRecord(LinkPredictionRecord):
+    @property
+    def resolved_sample_id(self):
+        return "resolved-sample"
+
+    @property
+    def resolved_query_id(self):
+        return "resolved-query"
+
+
 def test_node_neighbor_sampler_accepts_replace_and_directed_aliases():
     graph = Graph.homo(
         edge_index=torch.tensor([[0, 1, 1, 2], [1, 0, 2, 1]]),
@@ -309,6 +319,64 @@ def test_uniform_negative_link_sampler_normalizes_resolved_query_ids_onto_emitte
 
     assert [item.query_id for item in sampled] == ["edge-sample-0", "edge-sample-0", "edge-sample-0"]
     assert [item.metadata["query_id"] for item in sampled] == ["edge-sample-0", "edge-sample-0", "edge-sample-0"]
+
+
+def test_uniform_negative_link_sampler_prefers_record_resolved_sample_ids():
+    graph = Graph.homo(
+        edge_index=torch.tensor([[0], [1]]),
+        x=torch.randn(4, 2),
+    )
+    record = _ResolvedLinkPredictionRecord(
+        graph=graph,
+        src_index=0,
+        dst_index=1,
+        label=1,
+        sample_id=None,
+        metadata={},
+    )
+    sampler = UniformNegativeLinkSampler(num_negatives=2)
+
+    sampled = sampler.sample(record)
+
+    assert [item.sample_id for item in sampled] == [
+        "resolved-sample",
+        "resolved-sample:neg:0",
+        "resolved-sample:neg:1",
+    ]
+    assert [item.metadata["sample_id"] for item in sampled] == [
+        "resolved-sample",
+        "resolved-sample:neg:0",
+        "resolved-sample:neg:1",
+    ]
+
+
+def test_uniform_negative_link_sampler_prefers_record_resolved_query_ids():
+    graph = Graph.homo(
+        edge_index=torch.tensor([[0], [1]]),
+        x=torch.randn(4, 2),
+    )
+    record = _ResolvedLinkPredictionRecord(
+        graph=graph,
+        src_index=0,
+        dst_index=1,
+        label=1,
+        sample_id=None,
+        metadata={},
+    )
+    sampler = UniformNegativeLinkSampler(num_negatives=2)
+
+    sampled = sampler.sample(record)
+
+    assert [item.query_id for item in sampled] == [
+        "resolved-query",
+        "resolved-query",
+        "resolved-query",
+    ]
+    assert [item.metadata["query_id"] for item in sampled] == [
+        "resolved-query",
+        "resolved-query",
+        "resolved-query",
+    ]
 
 
 def test_uniform_negative_link_sampler_normalizes_resolved_exclude_seed_edge_flags_onto_positive_metadata():

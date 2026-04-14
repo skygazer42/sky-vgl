@@ -5,6 +5,7 @@ Preferred imports:
 - loaders, samplers, plans, and materialization helpers should use ``vgl.dataloading``
 """
 
+from vgl._compat import warn_legacy_namespace
 from vgl.dataloading import CandidateLinkSampler as CandidateLinkSampler
 from vgl.dataloading import ClusterData as ClusterData
 from vgl.dataloading import ClusterLoader as ClusterLoader
@@ -52,6 +53,12 @@ from vgl.data.public import DatasetRegistry as DatasetRegistry
 from vgl.data.public import KarateClubDataset as KarateClubDataset
 from vgl.data.public import PlanetoidDataset as PlanetoidDataset
 from vgl.data.public import TUDataset as TUDataset
+
+warn_legacy_namespace(
+    "vgl.data",
+    "prefer `vgl.dataloading` for loaders, samplers, plans, and materialization helpers; dataset and catalog APIs remain under `vgl.data`.",
+    skip_when_imported_from=("vgl/__init__.py",),
+)
 
 __all__ = [
     "CACHE_ENV_VAR",

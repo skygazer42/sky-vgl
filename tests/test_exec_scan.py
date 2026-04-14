@@ -68,12 +68,15 @@ def test_manual_interop_workflow_covers_pyg_and_dgl():
 
     assert "workflow_dispatch:" in workflow_text
     assert "schedule:" in workflow_text
-    assert 'python -m pip install -e ".[dev,pyg]"' in workflow_text
-    assert 'python -m pip install -e ".[dev,dgl]"' in workflow_text
+    assert "matrix:" in workflow_text
+    assert "backend: pyg" in workflow_text
+    assert "backend: dgl" in workflow_text
+    assert "extras: pyg" in workflow_text
+    assert "extras: dgl" in workflow_text
+    assert 'python -m pip install -e ".[dev,${{ matrix.extras }}]"' in workflow_text
     assert 'python -m pip install -e ".[dev,pyg,dgl]"' in workflow_text
     assert "python -m build" in workflow_text
-    assert "python scripts/interop_smoke.py --backend pyg" in workflow_text
-    assert "python scripts/interop_smoke.py --backend dgl" in workflow_text
+    assert "python scripts/interop_smoke.py --backend ${{ matrix.backend }}" in workflow_text
     assert "python scripts/interop_smoke.py --backend all" in workflow_text
     assert "python scripts/release_smoke.py --artifact-dir dist --kind wheel --interop-backend all" in workflow_text
 

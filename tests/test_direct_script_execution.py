@@ -29,7 +29,8 @@ def test_public_surface_scan_lists_tasks_outside_repo_root(tmp_path):
 
     assert completed.returncode == 0, completed.stderr
     assert "SCAN 001 [root] vgl exports Graph from vgl.graph" in completed.stdout
-    assert "SCAN 082 [imports] tests/integration avoids legacy import paths" in completed.stdout
+    assert "[imports] examples avoids legacy import paths" in completed.stdout
+    assert "[imports] tests/integration avoids legacy import paths" in completed.stdout
 
 
 def test_metadata_consistency_runs_outside_repo_root(tmp_path):

@@ -1,5 +1,22 @@
+_MONITOR_STAGES = {"train", "val"}
+
+
+def _split_monitor_key(monitor):
+    stage, separator, key = str(monitor).partition("_")
+    if separator == "" or stage not in _MONITOR_STAGES or key == "":
+        raise ValueError("Trainer monitor must use 'train_<metric>' or 'val_<metric>'")
+    return stage, key
+
+
+def _default_monitor_mode_for_key(key):
+    if key == "loss" or key.endswith("_loss"):
+        return "min"
+    return "max"
+
+
 def resolve_monitor_mode(monitor, mode=None, *, invalid_mode_message="monitor_mode must be 'min' or 'max'"):
-    resolved_mode = mode or ("min" if monitor.endswith("_loss") else "max")
+    _, key = _split_monitor_key(monitor)
+    resolved_mode = mode or _default_monitor_mode_for_key(key)
     if resolved_mode not in {"min", "max"}:
         raise ValueError(invalid_mode_message)
     return resolved_mode
@@ -7,7 +24,8 @@ def resolve_monitor_mode(monitor, mode=None, *, invalid_mode_message="monitor_mo
 
 def resolve_monitor(monitor, *, has_val_data, mode=None):
     resolved_monitor = monitor or ("val_loss" if has_val_data else "train_loss")
-    if resolved_monitor.startswith("val_") and not has_val_data:
+    stage, _ = _split_monitor_key(resolved_monitor)
+    if stage == "val" and not has_val_data:
         raise ValueError("Trainer monitor requires val_data for val_* keys")
     return resolved_monitor, resolve_monitor_mode(resolved_monitor, mode=mode)
 
@@ -19,7 +37,7 @@ def extract_monitor_value(
     val_summary,
     error_subject="Monitor key",
 ):
-    stage, _, key = monitor.partition("_")
+    stage, key = _split_monitor_key(monitor)
     source = {"train": train_summary, "val": val_summary}.get(stage)
     if source is None or key not in source:
         raise ValueError(f"{error_subject} {monitor} was not produced by the trainer")

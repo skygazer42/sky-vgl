@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 import argparse
+from datetime import datetime, timezone
 import json
+import platform
 from pathlib import Path
 from tempfile import TemporaryDirectory
 from time import perf_counter
@@ -13,6 +15,7 @@ ensure_repo_root_on_path = repo_script_imports.ensure_repo_root_on_path
 ensure_repo_root_on_path()
 
 BENCHMARK_SCHEMA_VERSION = 1
+BENCHMARK_METRIC_UNIT = "seconds"
 PRESETS = {
     "smoke": {
         "num_nodes": 100,
@@ -39,6 +42,38 @@ PRESETS = {
         "repeats": 10,
     },
 }
+
+
+def build_benchmark_document(
+    *,
+    preset: str,
+    config: dict[str, int],
+    query_ops: dict[str, float],
+    routing: dict[str, float],
+    sampling: dict[str, float],
+    generated_at_utc: str | None = None,
+    runner: dict[str, str] | None = None,
+) -> dict[str, object]:
+    if generated_at_utc is None:
+        generated_at_utc = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
+    if runner is None:
+        runner = {
+            "python_version": platform.python_version(),
+            "python_implementation": platform.python_implementation(),
+            "platform": platform.platform(),
+        }
+    return {
+        "schema_version": BENCHMARK_SCHEMA_VERSION,
+        "benchmark": "vgl_hotpaths",
+        "generated_at_utc": generated_at_utc,
+        "preset": preset,
+        "config": dict(config),
+        "runner": dict(runner),
+        "metric_unit": BENCHMARK_METRIC_UNIT,
+        "query_ops": dict(query_ops),
+        "routing": dict(routing),
+        "sampling": dict(sampling),
+    }
 
 
 def _time_call(fn, *, warmup: int, repeats: int) -> float:
@@ -203,20 +238,19 @@ def main() -> None:
     }
     config.update({key: value for key, value in overrides.items() if value is not None})
 
-    results = {
-        "schema_version": BENCHMARK_SCHEMA_VERSION,
-        "benchmark": "vgl_hotpaths",
-        "preset": args.preset,
-        "config": {
-            "num_nodes": config["num_nodes"],
-            "num_edges": config["num_edges"],
-            "num_queries": config["num_queries"],
-            "num_partitions": config["num_partitions"],
-            "warmup": config["warmup"],
-            "repeats": config["repeats"],
-            "seed": config["seed"],
-        },
-        "query_ops": benchmark_query_ops(
+    benchmark_config = {
+        "num_nodes": config["num_nodes"],
+        "num_edges": config["num_edges"],
+        "num_queries": config["num_queries"],
+        "num_partitions": config["num_partitions"],
+        "warmup": config["warmup"],
+        "repeats": config["repeats"],
+        "seed": config["seed"],
+    }
+    results = build_benchmark_document(
+        preset=args.preset,
+        config=benchmark_config,
+        query_ops=benchmark_query_ops(
             num_nodes=config["num_nodes"],
             num_edges=config["num_edges"],
             num_queries=config["num_queries"],
@@ -224,7 +258,7 @@ def main() -> None:
             repeats=config["repeats"],
             seed=config["seed"],
         ),
-        "routing": benchmark_routing(
+        routing=benchmark_routing(
             num_nodes=config["num_nodes"],
             num_edges=config["num_edges"],
             num_partitions=config["num_partitions"],
@@ -233,14 +267,14 @@ def main() -> None:
             repeats=config["repeats"],
             seed=config["seed"],
         ),
-        "sampling": benchmark_sampling(
+        sampling=benchmark_sampling(
             num_nodes=config["num_nodes"],
             num_edges=config["num_edges"],
             warmup=config["warmup"],
             repeats=config["repeats"],
             seed=config["seed"],
         ),
-    }
+    )
     _dump_results(results, output=args.output, emit_stdout=args.emit_stdout)
 
 

@@ -364,4 +364,8 @@ def test_benchmark_hotpaths_writes_json_outside_repo_root(tmp_path):
     assert completed.returncode == 0, completed.stderr
     payload = json.loads(output.read_text(encoding="utf-8"))
     assert payload["benchmark"] == "vgl_hotpaths"
+    assert payload["schema_version"] == 1
+    assert payload["metric_unit"] == "seconds"
+    assert payload["generated_at_utc"].endswith("Z")
     assert payload["config"]["num_nodes"] == 100
+    assert payload["runner"]["python_version"]

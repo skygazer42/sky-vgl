@@ -13,6 +13,10 @@ load_repo_module = repo_script_imports.load_repo_module
 
 
 _CONTRACTS = None
+INTEROP_INSTALL_EXTRAS = {
+    "pyg": "pyg",
+    "dgl": "dgl",
+}
 
 
 def _contracts_module():
@@ -95,6 +99,18 @@ def __getattr__(name: str):
     if name == "REAL_INTEROP_BACKENDS":
         return _real_interop_backends()
     raise AttributeError(name)
+
+
+def backend_install_extra(backend: str) -> str:
+    try:
+        return INTEROP_INSTALL_EXTRAS[backend]
+    except KeyError as exc:
+        real_interop_backends = ", ".join(_real_interop_backends())
+        raise ValueError(f"unsupported backend {backend!r}; expected one of {real_interop_backends}") from exc
+
+
+def backend_install_command(backend: str) -> str:
+    return f'pip install "sky-vgl[{backend_install_extra(backend)}]"'
 
 
 def _parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
@@ -192,7 +208,11 @@ def run_backend_round_trip(backend: str, *, graph=None) -> None:
     try:
         smoke_fns[backend](graph)
     except ImportError as exc:
-        raise ImportError(f"{backend} interoperability smoke failed: {exc}") from exc
+        message = f"{backend} interoperability smoke failed: {exc}"
+        install_hint = backend_install_command(backend)
+        if install_hint not in str(exc):
+            message = f'{message}. Install it with `{install_hint}`.'
+        raise ImportError(message) from exc
 
 
 def main(argv: Sequence[str] | None = None) -> int:
