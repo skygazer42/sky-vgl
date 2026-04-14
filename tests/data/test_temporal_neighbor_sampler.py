@@ -1209,6 +1209,77 @@ def test_temporal_neighbor_sampler_stitched_temporal_sampling_crosses_partition_
     assert torch.equal(batch.dst_index, torch.tensor([1]))
 
 
+def test_temporal_neighbor_sampler_stitched_temporal_sampling_matches_local_and_store_backed_coordinators(
+    tmp_path,
+):
+    graph = Graph.temporal(
+        nodes={"node": {"x": torch.arange(4, dtype=torch.float32).view(4, 1)}},
+        edges={
+            EDGE_TYPE: {
+                "edge_index": torch.tensor([[0, 1, 2], [1, 2, 3]]),
+                "timestamp": torch.tensor([1, 3, 5]),
+                "edge_weight": torch.tensor([10.0, 20.0, 30.0]),
+            }
+        },
+        time_attr="timestamp",
+    )
+    write_partitioned_graph(graph, tmp_path, num_partitions=2)
+    shards = {
+        0: LocalGraphShard.from_partition_dir(tmp_path, partition_id=0),
+        1: LocalGraphShard.from_partition_dir(tmp_path, partition_id=1),
+    }
+    dataset = ListDataset(
+        [
+            TemporalEventRecord(
+                graph=shards[0].graph,
+                src_index=0,
+                dst_index=1,
+                timestamp=4,
+                label=1,
+            )
+        ]
+    )
+    local_loader = Loader(
+        dataset=dataset,
+        sampler=TemporalNeighborSampler(
+            num_neighbors=[-1],
+            node_feature_names=("x",),
+            edge_feature_names=("edge_weight",),
+        ),
+        batch_size=1,
+        feature_store=LocalSamplingCoordinator(shards),
+    )
+    store_backed_loader = Loader(
+        dataset=dataset,
+        sampler=TemporalNeighborSampler(
+            num_neighbors=[-1],
+            node_feature_names=("x",),
+            edge_feature_names=("edge_weight",),
+        ),
+        batch_size=1,
+        feature_store=_store_backed_coordinator(shards),
+    )
+
+    local_batch = next(iter(local_loader))
+    store_backed_batch = next(iter(store_backed_loader))
+
+    assert torch.equal(local_batch.timestamp, store_backed_batch.timestamp)
+    assert torch.equal(local_batch.graph.n_id, store_backed_batch.graph.n_id)
+    assert torch.equal(local_batch.graph.edge_index, store_backed_batch.graph.edge_index)
+    assert torch.equal(local_batch.graph.edges[EDGE_TYPE].e_id, store_backed_batch.graph.edges[EDGE_TYPE].e_id)
+    assert torch.equal(
+        local_batch.graph.edges[EDGE_TYPE].timestamp,
+        store_backed_batch.graph.edges[EDGE_TYPE].timestamp,
+    )
+    assert torch.equal(local_batch.graph.x, store_backed_batch.graph.x)
+    assert torch.equal(
+        local_batch.graph.edges[EDGE_TYPE].edge_weight,
+        store_backed_batch.graph.edges[EDGE_TYPE].edge_weight,
+    )
+    assert torch.equal(local_batch.src_index, store_backed_batch.src_index)
+    assert torch.equal(local_batch.dst_index, store_backed_batch.dst_index)
+
+
 
 def test_temporal_neighbor_sampler_prefetch_option_keeps_sampled_shard_global_ids_aligned_through_coordinator(tmp_path):
     graph = Graph.temporal(
@@ -1302,6 +1373,69 @@ def test_temporal_neighbor_sampler_prefetch_option_keeps_sampled_shard_global_id
     assert torch.equal(batch.graph.n_id, torch.tensor([2, 3]))
     assert torch.equal(batch.graph.x, torch.tensor([[2.0], [3.0]]))
     assert torch.equal(batch.graph.edges[EDGE_TYPE].edge_weight, torch.tensor([20.0]))
+
+
+def test_temporal_neighbor_sampler_prefetch_option_matches_local_and_store_backed_coordinators(tmp_path):
+    graph = Graph.temporal(
+        nodes={"node": {"x": torch.arange(4, dtype=torch.float32).view(4, 1)}},
+        edges={
+            EDGE_TYPE: {
+                "edge_index": torch.tensor([[0, 2], [1, 3]]),
+                "timestamp": torch.tensor([1, 3]),
+                "edge_weight": torch.tensor([10.0, 20.0]),
+            }
+        },
+        time_attr="timestamp",
+    )
+    write_partitioned_graph(graph, tmp_path, num_partitions=2)
+    shards = {
+        0: LocalGraphShard.from_partition_dir(tmp_path, partition_id=0),
+        1: LocalGraphShard.from_partition_dir(tmp_path, partition_id=1),
+    }
+    dataset = ListDataset(
+        [
+            TemporalEventRecord(
+                graph=shards[1].graph,
+                src_index=0,
+                dst_index=1,
+                timestamp=4,
+                label=1,
+            )
+        ]
+    )
+    local_loader = Loader(
+        dataset=dataset,
+        sampler=TemporalNeighborSampler(
+            num_neighbors=[-1],
+            node_feature_names=("x",),
+            edge_feature_names=("edge_weight",),
+        ),
+        batch_size=1,
+        feature_store=LocalSamplingCoordinator(shards),
+    )
+    store_backed_loader = Loader(
+        dataset=dataset,
+        sampler=TemporalNeighborSampler(
+            num_neighbors=[-1],
+            node_feature_names=("x",),
+            edge_feature_names=("edge_weight",),
+        ),
+        batch_size=1,
+        feature_store=_store_backed_coordinator(shards),
+    )
+
+    local_batch = next(iter(local_loader))
+    store_backed_batch = next(iter(store_backed_loader))
+
+    assert torch.equal(local_batch.graph.n_id, store_backed_batch.graph.n_id)
+    assert torch.equal(local_batch.graph.x, store_backed_batch.graph.x)
+    assert torch.equal(
+        local_batch.graph.edges[EDGE_TYPE].edge_weight,
+        store_backed_batch.graph.edges[EDGE_TYPE].edge_weight,
+    )
+    assert torch.equal(local_batch.timestamp, store_backed_batch.timestamp)
+    assert torch.equal(local_batch.src_index, store_backed_batch.src_index)
+    assert torch.equal(local_batch.dst_index, store_backed_batch.dst_index)
 
 
 
@@ -1555,3 +1689,89 @@ def test_temporal_neighbor_sampler_stitched_hetero_temporal_sampling_crosses_par
     assert torch.equal(batch.graph.edges[HETERO_EDGE_TYPE].edge_weight, torch.tensor([10.0, 20.0]))
     assert torch.equal(batch.src_index, torch.tensor([0]))
     assert torch.equal(batch.dst_index, torch.tensor([0]))
+
+
+def test_temporal_neighbor_sampler_stitched_hetero_temporal_sampling_matches_local_and_store_backed_coordinators(
+    tmp_path,
+):
+    graph = Graph.temporal(
+        nodes={
+            "author": {"x": torch.tensor([[10.0], [20.0], [30.0]])},
+            "paper": {"x": torch.tensor([[1.0], [2.0]])},
+        },
+        edges={
+            HETERO_EDGE_TYPE: {
+                "edge_index": torch.tensor([[0, 2, 1], [0, 0, 1]]),
+                "timestamp": torch.tensor([1, 3, 6]),
+                "edge_weight": torch.tensor([10.0, 20.0, 30.0]),
+            }
+        },
+        time_attr="timestamp",
+    )
+    write_partitioned_graph(graph, tmp_path, num_partitions=2)
+    shards = {
+        0: LocalGraphShard.from_partition_dir(tmp_path, partition_id=0),
+        1: LocalGraphShard.from_partition_dir(tmp_path, partition_id=1),
+    }
+    dataset = ListDataset(
+        [
+            TemporalEventRecord(
+                graph=shards[0].graph,
+                src_index=0,
+                dst_index=0,
+                timestamp=4,
+                label=1,
+                edge_type=HETERO_EDGE_TYPE,
+            )
+        ]
+    )
+    local_loader = Loader(
+        dataset=dataset,
+        sampler=TemporalNeighborSampler(
+            num_neighbors=[-1],
+            node_feature_names={"author": ("x",), "paper": ("x",)},
+            edge_feature_names={HETERO_EDGE_TYPE: ("edge_weight",)},
+        ),
+        batch_size=1,
+        feature_store=LocalSamplingCoordinator(shards),
+    )
+    store_backed_loader = Loader(
+        dataset=dataset,
+        sampler=TemporalNeighborSampler(
+            num_neighbors=[-1],
+            node_feature_names={"author": ("x",), "paper": ("x",)},
+            edge_feature_names={HETERO_EDGE_TYPE: ("edge_weight",)},
+        ),
+        batch_size=1,
+        feature_store=_store_backed_coordinator(shards),
+    )
+
+    local_batch = next(iter(local_loader))
+    store_backed_batch = next(iter(store_backed_loader))
+
+    assert local_batch.edge_type == store_backed_batch.edge_type
+    assert local_batch.src_node_type == store_backed_batch.src_node_type
+    assert local_batch.dst_node_type == store_backed_batch.dst_node_type
+    assert torch.equal(local_batch.timestamp, store_backed_batch.timestamp)
+    assert torch.equal(local_batch.graph.nodes["author"].n_id, store_backed_batch.graph.nodes["author"].n_id)
+    assert torch.equal(local_batch.graph.nodes["paper"].n_id, store_backed_batch.graph.nodes["paper"].n_id)
+    assert torch.equal(local_batch.graph.nodes["author"].x, store_backed_batch.graph.nodes["author"].x)
+    assert torch.equal(local_batch.graph.nodes["paper"].x, store_backed_batch.graph.nodes["paper"].x)
+    assert torch.equal(
+        local_batch.graph.edges[HETERO_EDGE_TYPE].edge_index,
+        store_backed_batch.graph.edges[HETERO_EDGE_TYPE].edge_index,
+    )
+    assert torch.equal(
+        local_batch.graph.edges[HETERO_EDGE_TYPE].e_id,
+        store_backed_batch.graph.edges[HETERO_EDGE_TYPE].e_id,
+    )
+    assert torch.equal(
+        local_batch.graph.edges[HETERO_EDGE_TYPE].timestamp,
+        store_backed_batch.graph.edges[HETERO_EDGE_TYPE].timestamp,
+    )
+    assert torch.equal(
+        local_batch.graph.edges[HETERO_EDGE_TYPE].edge_weight,
+        store_backed_batch.graph.edges[HETERO_EDGE_TYPE].edge_weight,
+    )
+    assert torch.equal(local_batch.src_index, store_backed_batch.src_index)
+    assert torch.equal(local_batch.dst_index, store_backed_batch.dst_index)

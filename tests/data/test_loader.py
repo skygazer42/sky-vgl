@@ -5,10 +5,11 @@ from tests.pinning import assert_tensor_pin_state
 from vgl import Graph
 from vgl.data.dataset import ListDataset
 from vgl.data.loader import Loader
+import vgl.dataloading.materialize as materialize_module
 from vgl.data.sampler import FullGraphSampler
 from vgl.dataloading.executor import MaterializationContext
 from vgl.dataloading.plan import SamplingPlan
-from vgl.dataloading.requests import GraphSeedRequest
+from vgl.dataloading.requests import GraphSeedRequest, NodeSeedRequest
 from vgl.graph import GraphSchema
 from vgl.storage import FeatureStore, InMemoryGraphStore, InMemoryTensorStore
 
@@ -182,6 +183,19 @@ class PlanBackedGraphSampler:
         )
 
 
+class PlanBackedNodeSampler:
+    def build_plan(self, item):
+        graph, metadata = item
+        return SamplingPlan(
+            request=NodeSeedRequest(
+                node_ids=torch.tensor([metadata["seed"]]),
+                node_type="node",
+                metadata=metadata,
+            ),
+            graph=graph,
+        )
+
+
 class RecordingPlanExecutor:
     def __init__(self):
         self.feature_sources = []
@@ -189,6 +203,17 @@ class RecordingPlanExecutor:
     def execute(self, plan, *, graph=None, feature_store=None, state=None):
         self.feature_sources.append(feature_store)
         return MaterializationContext(request=plan.request, graph=graph, feature_store=feature_store)
+
+
+class NodePlanExecutor:
+    def execute(self, plan, *, graph=None, feature_store=None, state=None):
+        return MaterializationContext(
+            request=plan.request,
+            graph=graph,
+            state={"node_ids": torch.tensor([0, 1, 2]).clone()},
+            metadata={"sample_id": plan.request.metadata.get("sample_id")},
+            feature_store=feature_store,
+        )
 
 
 def test_loader_forwards_feature_store_to_plan_executor():
@@ -247,3 +272,38 @@ def test_loader_forwards_storage_context_feature_store_to_plan_executor():
 
     assert batch.num_graphs == 1
     assert executor.feature_sources == [graph.feature_store]
+
+
+def test_loader_batches_plan_backed_node_contexts_before_materialization(monkeypatch):
+    graph = Graph.homo(
+        edge_index=torch.tensor([[0, 1], [1, 2]]),
+        x=torch.arange(3, dtype=torch.float32).view(3, 1),
+        y=torch.tensor([0, 1, 0]),
+    )
+    dataset = ListDataset(
+        [
+            (graph, {"seed": 0, "sample_id": "n0"}),
+            (graph, {"seed": 1, "sample_id": "n1"}),
+        ]
+    )
+    loader = Loader(
+        dataset=dataset,
+        sampler=PlanBackedNodeSampler(),
+        batch_size=2,
+        executor=NodePlanExecutor(),
+    )
+    real_subgraph = materialize_module._subgraph
+    calls = 0
+
+    def counting_subgraph(*args, **kwargs):
+        nonlocal calls
+        calls += 1
+        return real_subgraph(*args, **kwargs)
+
+    monkeypatch.setattr(materialize_module, "_subgraph", counting_subgraph)
+
+    batch = next(iter(loader))
+
+    assert calls == 1
+    assert torch.equal(batch.graph.n_id, torch.tensor([0, 1, 2]))
+    assert torch.equal(batch.seed_index, torch.tensor([0, 1]))

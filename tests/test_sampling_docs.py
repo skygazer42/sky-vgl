@@ -22,7 +22,7 @@ def test_dataloading_api_documents_prefetch_and_worker_boundaries():
     assert "不要在 `num_workers>0` 时设置 `prefetch`" in api_docs
 
 
-def test_dataloading_api_documents_prefetch_and_worker_boundaries():
+def test_dataloading_api_documents_prefetch_and_worker_prefetch_details():
     dataloading_api = (REPO_ROOT / "docs" / "api" / "dataloading.md").read_text(encoding="utf-8")
 
     assert "`prefetch` 只用于 `num_workers == 0` 的单线程路径" in dataloading_api

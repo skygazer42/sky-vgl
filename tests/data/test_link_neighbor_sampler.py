@@ -1037,6 +1037,59 @@ def test_link_neighbor_sampler_prefetch_option_keeps_sampled_shard_global_ids_al
 
 
 
+def test_link_neighbor_sampler_prefetch_option_matches_local_and_store_backed_coordinators(tmp_path):
+    graph = Graph.homo(
+        edge_index=torch.tensor([[0, 2], [1, 3]]),
+        x=torch.arange(4, dtype=torch.float32).view(4, 1),
+        edge_data={"edge_weight": torch.tensor([10.0, 20.0])},
+    )
+    write_partitioned_graph(graph, tmp_path, num_partitions=2)
+    shards = {
+        0: LocalGraphShard.from_partition_dir(tmp_path, partition_id=0),
+        1: LocalGraphShard.from_partition_dir(tmp_path, partition_id=1),
+    }
+    dataset = ListDataset(
+        [
+            LinkPredictionRecord(
+                graph=shards[1].graph,
+                src_index=0,
+                dst_index=1,
+                label=1,
+            )
+        ]
+    )
+    local_loader = Loader(
+        dataset=dataset,
+        sampler=LinkNeighborSampler(
+            num_neighbors=[-1],
+            node_feature_names=("x",),
+            edge_feature_names=("edge_weight",),
+        ),
+        batch_size=1,
+        feature_store=LocalSamplingCoordinator(shards),
+    )
+    store_backed_loader = Loader(
+        dataset=dataset,
+        sampler=LinkNeighborSampler(
+            num_neighbors=[-1],
+            node_feature_names=("x",),
+            edge_feature_names=("edge_weight",),
+        ),
+        batch_size=1,
+        feature_store=_store_backed_coordinator(shards),
+    )
+
+    local_batch = next(iter(local_loader))
+    store_backed_batch = next(iter(store_backed_loader))
+
+    assert torch.equal(local_batch.graph.n_id, store_backed_batch.graph.n_id)
+    assert torch.equal(local_batch.graph.x, store_backed_batch.graph.x)
+    assert torch.equal(local_batch.graph.edata["edge_weight"], store_backed_batch.graph.edata["edge_weight"])
+    assert torch.equal(local_batch.src_index, store_backed_batch.src_index)
+    assert torch.equal(local_batch.dst_index, store_backed_batch.dst_index)
+    assert torch.equal(local_batch.labels, store_backed_batch.labels)
+
+
 def test_link_neighbor_sampler_stitched_link_sampling_crosses_partition_boundaries_through_coordinator(monkeypatch, tmp_path):
     graph = Graph.homo(
         edge_index=torch.tensor([[0, 1, 2], [1, 2, 3]]),
@@ -1219,6 +1272,61 @@ def test_link_neighbor_sampler_stitched_link_sampling_crosses_partition_boundari
 
 
 
+def test_link_neighbor_sampler_stitched_link_sampling_matches_local_and_store_backed_coordinators(tmp_path):
+    graph = Graph.homo(
+        edge_index=torch.tensor([[0, 1, 2], [1, 2, 3]]),
+        x=torch.arange(4, dtype=torch.float32).view(4, 1),
+        edge_data={"edge_weight": torch.tensor([10.0, 20.0, 30.0])},
+    )
+    write_partitioned_graph(graph, tmp_path, num_partitions=2)
+    shards = {
+        0: LocalGraphShard.from_partition_dir(tmp_path, partition_id=0),
+        1: LocalGraphShard.from_partition_dir(tmp_path, partition_id=1),
+    }
+    dataset = ListDataset(
+        [
+            LinkPredictionRecord(
+                graph=shards[0].graph,
+                src_index=0,
+                dst_index=1,
+                label=1,
+            )
+        ]
+    )
+    local_loader = Loader(
+        dataset=dataset,
+        sampler=LinkNeighborSampler(
+            num_neighbors=[-1],
+            node_feature_names=("x",),
+            edge_feature_names=("edge_weight",),
+        ),
+        batch_size=1,
+        feature_store=LocalSamplingCoordinator(shards),
+    )
+    store_backed_loader = Loader(
+        dataset=dataset,
+        sampler=LinkNeighborSampler(
+            num_neighbors=[-1],
+            node_feature_names=("x",),
+            edge_feature_names=("edge_weight",),
+        ),
+        batch_size=1,
+        feature_store=_store_backed_coordinator(shards),
+    )
+
+    local_batch = next(iter(local_loader))
+    store_backed_batch = next(iter(store_backed_loader))
+
+    assert torch.equal(local_batch.graph.n_id, store_backed_batch.graph.n_id)
+    assert torch.equal(local_batch.graph.edge_index, store_backed_batch.graph.edge_index)
+    assert torch.equal(local_batch.graph.edata["e_id"], store_backed_batch.graph.edata["e_id"])
+    assert torch.equal(local_batch.graph.x, store_backed_batch.graph.x)
+    assert torch.equal(local_batch.graph.edata["edge_weight"], store_backed_batch.graph.edata["edge_weight"])
+    assert torch.equal(local_batch.src_index, store_backed_batch.src_index)
+    assert torch.equal(local_batch.dst_index, store_backed_batch.dst_index)
+    assert torch.equal(local_batch.labels, store_backed_batch.labels)
+
+
 def test_link_neighbor_sampler_stitched_output_blocks_materialize_blocks_through_coordinator(tmp_path):
     graph = Graph.homo(
         edge_index=torch.tensor([[0, 1], [1, 2]], dtype=torch.long),
@@ -1330,6 +1438,68 @@ def test_link_neighbor_sampler_stitched_output_blocks_materialize_blocks_through
 
 
 
+def test_link_neighbor_sampler_stitched_output_blocks_match_local_and_store_backed_coordinators(tmp_path):
+    graph = Graph.homo(
+        edge_index=torch.tensor([[0, 1], [1, 2]], dtype=torch.long),
+        x=torch.arange(4, dtype=torch.float32).view(4, 1),
+        edge_data={"edge_weight": torch.tensor([10.0, 20.0], dtype=torch.float32)},
+    )
+    write_partitioned_graph(graph, tmp_path, num_partitions=2)
+    shards = {
+        0: LocalGraphShard.from_partition_dir(tmp_path, partition_id=0),
+        1: LocalGraphShard.from_partition_dir(tmp_path, partition_id=1),
+    }
+    dataset = ListDataset(
+        [
+            LinkPredictionRecord(
+                graph=shards[0].graph,
+                src_index=0,
+                dst_index=1,
+                label=1,
+            )
+        ]
+    )
+    local_loader = Loader(
+        dataset=dataset,
+        sampler=LinkNeighborSampler(
+            num_neighbors=[-1, -1],
+            node_feature_names=("x",),
+            edge_feature_names=("edge_weight",),
+            output_blocks=True,
+        ),
+        batch_size=1,
+        feature_store=LocalSamplingCoordinator(shards),
+    )
+    store_backed_loader = Loader(
+        dataset=dataset,
+        sampler=LinkNeighborSampler(
+            num_neighbors=[-1, -1],
+            node_feature_names=("x",),
+            edge_feature_names=("edge_weight",),
+            output_blocks=True,
+        ),
+        batch_size=1,
+        feature_store=_store_backed_coordinator(shards),
+    )
+
+    local_batch = next(iter(local_loader))
+    store_backed_batch = next(iter(store_backed_loader))
+
+    assert local_batch.blocks is not None
+    assert store_backed_batch.blocks is not None
+    assert len(local_batch.blocks) == len(store_backed_batch.blocks) == 2
+    assert torch.equal(local_batch.graph.n_id, store_backed_batch.graph.n_id)
+    assert torch.equal(local_batch.graph.edge_index, store_backed_batch.graph.edge_index)
+    assert torch.equal(local_batch.graph.edata["e_id"], store_backed_batch.graph.edata["e_id"])
+    assert torch.equal(local_batch.graph.x, store_backed_batch.graph.x)
+    assert torch.equal(local_batch.graph.edata["edge_weight"], store_backed_batch.graph.edata["edge_weight"])
+    for local_block, store_block in zip(local_batch.blocks, store_backed_batch.blocks):
+        assert torch.equal(local_block.dst_n_id, store_block.dst_n_id)
+        assert torch.equal(local_block.src_n_id, store_block.src_n_id)
+        assert torch.equal(local_block.edata["e_id"], store_block.edata["e_id"])
+        assert torch.equal(local_block.edata["edge_weight"], store_block.edata["edge_weight"])
+
+
 def test_link_neighbor_sampler_stitched_output_blocks_exclude_seed_edges_from_message_passing_blocks(tmp_path):
     graph = Graph.homo(
         edge_index=torch.tensor([[2, 0, 1], [0, 1, 2]], dtype=torch.long),
@@ -1404,6 +1574,58 @@ def test_link_neighbor_sampler_stitched_output_blocks_exclude_seed_edges_from_me
     assert torch.equal(batch.graph.edata["e_id"], torch.tensor([0, 2], dtype=torch.long))
     assert 1 not in set(batch.blocks[0].edata["e_id"].tolist())
     assert torch.equal(batch.blocks[0].edata["e_id"], torch.tensor([0], dtype=torch.long))
+
+
+def test_link_neighbor_sampler_stitched_output_blocks_exclude_seed_edges_match_local_and_store_backed_coordinators(
+    tmp_path,
+):
+    graph = Graph.homo(
+        edge_index=torch.tensor([[2, 0, 1], [0, 1, 2]], dtype=torch.long),
+        x=torch.arange(4, dtype=torch.float32).view(4, 1),
+    )
+    write_partitioned_graph(graph, tmp_path, num_partitions=2)
+    shards = {
+        0: LocalGraphShard.from_partition_dir(tmp_path, partition_id=0),
+        1: LocalGraphShard.from_partition_dir(tmp_path, partition_id=1),
+    }
+    dataset = ListDataset(
+        [
+            LinkPredictionRecord(
+                graph=shards[0].graph,
+                src_index=0,
+                dst_index=1,
+                label=1,
+                metadata={"exclude_seed_edges": True},
+            )
+        ]
+    )
+    local_loader = Loader(
+        dataset=dataset,
+        sampler=LinkNeighborSampler(num_neighbors=[-1], output_blocks=True),
+        batch_size=1,
+        feature_store=LocalSamplingCoordinator(shards),
+    )
+    store_backed_loader = Loader(
+        dataset=dataset,
+        sampler=LinkNeighborSampler(num_neighbors=[-1], output_blocks=True),
+        batch_size=1,
+        feature_store=_store_backed_coordinator(shards),
+    )
+
+    local_batch = next(iter(local_loader))
+    store_backed_batch = next(iter(store_backed_loader))
+
+    assert local_batch.blocks is not None
+    assert store_backed_batch.blocks is not None
+    assert len(local_batch.blocks) == len(store_backed_batch.blocks) == 1
+    assert torch.equal(local_batch.graph.n_id, store_backed_batch.graph.n_id)
+    assert torch.equal(local_batch.graph.edge_index, store_backed_batch.graph.edge_index)
+    assert torch.equal(local_batch.graph.edata["e_id"], store_backed_batch.graph.edata["e_id"])
+    assert 1 not in set(local_batch.blocks[0].edata["e_id"].tolist())
+    assert 1 not in set(store_backed_batch.blocks[0].edata["e_id"].tolist())
+    assert torch.equal(local_batch.blocks[0].dst_n_id, store_backed_batch.blocks[0].dst_n_id)
+    assert torch.equal(local_batch.blocks[0].src_n_id, store_backed_batch.blocks[0].src_n_id)
+    assert torch.equal(local_batch.blocks[0].edata["e_id"], store_backed_batch.blocks[0].edata["e_id"])
 
 
 
@@ -1664,6 +1886,92 @@ def test_link_neighbor_sampler_stitched_hetero_link_sampling_crosses_partition_b
     assert torch.equal(batch.labels, torch.tensor([1.0]))
 
 
+def test_link_neighbor_sampler_stitched_hetero_link_sampling_matches_local_and_store_backed_coordinators(
+    tmp_path,
+):
+    graph = Graph.hetero(
+        nodes={
+            "author": {"x": torch.tensor([[10.0], [20.0], [30.0]])},
+            "paper": {"x": torch.tensor([[1.0], [2.0]])},
+        },
+        edges={
+            WRITES: {
+                "edge_index": torch.tensor([[0, 2], [0, 0]]),
+                "edge_weight": torch.tensor([10.0, 20.0]),
+            },
+            WRITTEN_BY: {
+                "edge_index": torch.tensor([[0, 0], [0, 2]]),
+                "edge_weight": torch.tensor([100.0, 200.0]),
+            },
+        },
+    )
+    write_partitioned_graph(graph, tmp_path, num_partitions=2)
+    shards = {
+        0: LocalGraphShard.from_partition_dir(tmp_path, partition_id=0),
+        1: LocalGraphShard.from_partition_dir(tmp_path, partition_id=1),
+    }
+    dataset = ListDataset(
+        [
+            LinkPredictionRecord(
+                graph=shards[0].graph,
+                src_index=0,
+                dst_index=0,
+                label=1,
+                edge_type=WRITES,
+            )
+        ]
+    )
+    local_loader = Loader(
+        dataset=dataset,
+        sampler=LinkNeighborSampler(
+            num_neighbors=[-1],
+            node_feature_names={"author": ("x",), "paper": ("x",)},
+            edge_feature_names={WRITES: ("edge_weight",), WRITTEN_BY: ("edge_weight",)},
+        ),
+        batch_size=1,
+        feature_store=LocalSamplingCoordinator(shards),
+    )
+    store_backed_loader = Loader(
+        dataset=dataset,
+        sampler=LinkNeighborSampler(
+            num_neighbors=[-1],
+            node_feature_names={"author": ("x",), "paper": ("x",)},
+            edge_feature_names={WRITES: ("edge_weight",), WRITTEN_BY: ("edge_weight",)},
+        ),
+        batch_size=1,
+        feature_store=_store_backed_coordinator(shards),
+    )
+
+    local_batch = next(iter(local_loader))
+    store_backed_batch = next(iter(store_backed_loader))
+
+    assert local_batch.edge_type == store_backed_batch.edge_type
+    assert local_batch.src_node_type == store_backed_batch.src_node_type
+    assert local_batch.dst_node_type == store_backed_batch.dst_node_type
+    assert torch.equal(local_batch.graph.nodes["author"].n_id, store_backed_batch.graph.nodes["author"].n_id)
+    assert torch.equal(local_batch.graph.nodes["paper"].n_id, store_backed_batch.graph.nodes["paper"].n_id)
+    assert torch.equal(local_batch.graph.nodes["author"].x, store_backed_batch.graph.nodes["author"].x)
+    assert torch.equal(local_batch.graph.nodes["paper"].x, store_backed_batch.graph.nodes["paper"].x)
+    assert torch.equal(local_batch.graph.edges[WRITES].edge_index, store_backed_batch.graph.edges[WRITES].edge_index)
+    assert torch.equal(local_batch.graph.edges[WRITES].e_id, store_backed_batch.graph.edges[WRITES].e_id)
+    assert torch.equal(
+        local_batch.graph.edges[WRITES].edge_weight,
+        store_backed_batch.graph.edges[WRITES].edge_weight,
+    )
+    assert torch.equal(
+        local_batch.graph.edges[WRITTEN_BY].edge_index,
+        store_backed_batch.graph.edges[WRITTEN_BY].edge_index,
+    )
+    assert torch.equal(local_batch.graph.edges[WRITTEN_BY].e_id, store_backed_batch.graph.edges[WRITTEN_BY].e_id)
+    assert torch.equal(
+        local_batch.graph.edges[WRITTEN_BY].edge_weight,
+        store_backed_batch.graph.edges[WRITTEN_BY].edge_weight,
+    )
+    assert torch.equal(local_batch.src_index, store_backed_batch.src_index)
+    assert torch.equal(local_batch.dst_index, store_backed_batch.dst_index)
+    assert torch.equal(local_batch.labels, store_backed_batch.labels)
+
+
 def test_link_neighbor_sampler_stitched_hetero_output_blocks_materialize_relation_local_blocks_through_coordinator(
     monkeypatch,
     tmp_path,
@@ -1814,6 +2122,85 @@ def test_link_neighbor_sampler_stitched_hetero_output_blocks_materialize_relatio
     assert torch.equal(inner_block.edata["edge_weight"], torch.tensor([10.0, 12.0]))
 
 
+def test_link_neighbor_sampler_stitched_hetero_output_blocks_relation_local_match_local_and_store_backed_coordinators(
+    tmp_path,
+):
+    graph = Graph.hetero(
+        nodes={
+            "author": {"x": torch.tensor([[10.0], [20.0], [30.0]])},
+            "paper": {"x": torch.tensor([[1.0], [2.0]])},
+        },
+        edges={
+            WRITES: {
+                "edge_index": torch.tensor([[0, 0, 2], [0, 1, 0]], dtype=torch.long),
+                "edge_weight": torch.tensor([10.0, 11.0, 12.0]),
+            },
+            WRITTEN_BY: {
+                "edge_index": torch.tensor([[0, 1, 0], [0, 0, 2]], dtype=torch.long),
+                "edge_weight": torch.tensor([100.0, 110.0, 120.0]),
+            },
+        },
+    )
+    write_partitioned_graph(graph, tmp_path, num_partitions=2)
+    shards = {
+        0: LocalGraphShard.from_partition_dir(tmp_path, partition_id=0),
+        1: LocalGraphShard.from_partition_dir(tmp_path, partition_id=1),
+    }
+    dataset = ListDataset(
+        [
+            LinkPredictionRecord(
+                graph=shards[0].graph,
+                src_index=0,
+                dst_index=0,
+                label=1,
+                edge_type=WRITES,
+            )
+        ]
+    )
+    local_loader = Loader(
+        dataset=dataset,
+        sampler=LinkNeighborSampler(
+            num_neighbors=[-1, -1],
+            node_feature_names={"author": ("x",), "paper": ("x",)},
+            edge_feature_names={WRITES: ("edge_weight",), WRITTEN_BY: ("edge_weight",)},
+            output_blocks=True,
+        ),
+        batch_size=1,
+        feature_store=LocalSamplingCoordinator(shards),
+    )
+    store_backed_loader = Loader(
+        dataset=dataset,
+        sampler=LinkNeighborSampler(
+            num_neighbors=[-1, -1],
+            node_feature_names={"author": ("x",), "paper": ("x",)},
+            edge_feature_names={WRITES: ("edge_weight",), WRITTEN_BY: ("edge_weight",)},
+            output_blocks=True,
+        ),
+        batch_size=1,
+        feature_store=_store_backed_coordinator(shards),
+    )
+
+    local_batch = next(iter(local_loader))
+    store_backed_batch = next(iter(store_backed_loader))
+
+    assert local_batch.blocks is not None
+    assert store_backed_batch.blocks is not None
+    assert len(local_batch.blocks) == len(store_backed_batch.blocks) == 2
+    assert local_batch.edge_type == store_backed_batch.edge_type
+    assert local_batch.src_node_type == store_backed_batch.src_node_type
+    assert local_batch.dst_node_type == store_backed_batch.dst_node_type
+    assert torch.equal(local_batch.graph.nodes["author"].n_id, store_backed_batch.graph.nodes["author"].n_id)
+    assert torch.equal(local_batch.graph.nodes["paper"].n_id, store_backed_batch.graph.nodes["paper"].n_id)
+    assert torch.equal(local_batch.graph.nodes["author"].x, store_backed_batch.graph.nodes["author"].x)
+    assert torch.equal(local_batch.graph.nodes["paper"].x, store_backed_batch.graph.nodes["paper"].x)
+    for local_block, store_block in zip(local_batch.blocks, store_backed_batch.blocks):
+        assert local_block.edge_type == store_block.edge_type
+        assert torch.equal(local_block.dst_n_id, store_block.dst_n_id)
+        assert torch.equal(local_block.src_n_id, store_block.src_n_id)
+        assert torch.equal(local_block.edata["e_id"], store_block.edata["e_id"])
+        assert torch.equal(local_block.edata["edge_weight"], store_block.edata["edge_weight"])
+
+
 def test_link_neighbor_sampler_stitched_hetero_output_blocks_materialize_multi_relation_blocks_through_coordinator(
     monkeypatch,
     tmp_path,
@@ -1900,6 +2287,111 @@ def test_link_neighbor_sampler_stitched_hetero_output_blocks_materialize_multi_r
     assert torch.equal(block.edata(WRITES)["edge_weight"], torch.tensor([10.0, 20.0]))
     assert torch.equal(block.edata(WRITTEN_BY)["edge_weight"], torch.tensor([100.0]))
     assert torch.equal(block.edata(cites)["edge_weight"], torch.tensor([1000.0, 2000.0]))
+
+
+def test_link_neighbor_sampler_stitched_hetero_output_blocks_multi_relation_match_local_and_store_backed_coordinators(
+    tmp_path,
+):
+    cites = ("paper", "cites", "paper")
+    graph = Graph.hetero(
+        nodes={
+            "author": {"x": torch.tensor([[10.0], [20.0]])},
+            "paper": {"x": torch.tensor([[1.0], [2.0], [3.0], [4.0]])},
+        },
+        edges={
+            WRITES: {
+                "edge_index": torch.tensor([[0, 1], [1, 2]], dtype=torch.long),
+                "edge_weight": torch.tensor([10.0, 20.0]),
+            },
+            WRITTEN_BY: {
+                "edge_index": torch.tensor([[1, 2], [0, 1]], dtype=torch.long),
+                "edge_weight": torch.tensor([100.0, 200.0]),
+            },
+            cites: {
+                "edge_index": torch.tensor([[0, 2], [2, 3]], dtype=torch.long),
+                "edge_weight": torch.tensor([1000.0, 2000.0]),
+            },
+        },
+    )
+    write_partitioned_graph(graph, tmp_path, num_partitions=1)
+    shards = {
+        0: LocalGraphShard.from_partition_dir(tmp_path, partition_id=0),
+    }
+
+    class MixedEdgeTypeBaseSampler:
+        def sample(self, item):
+            return [
+                LinkPredictionRecord(
+                    graph=item.graph,
+                    src_index=0,
+                    dst_index=1,
+                    label=1,
+                    edge_type=WRITES,
+                ),
+                LinkPredictionRecord(
+                    graph=item.graph,
+                    src_index=2,
+                    dst_index=3,
+                    label=0,
+                    edge_type=cites,
+                ),
+            ]
+
+    dataset = ListDataset(
+        [LinkPredictionRecord(graph=shards[0].graph, src_index=0, dst_index=1, label=1, edge_type=WRITES)]
+    )
+    local_loader = Loader(
+        dataset=dataset,
+        sampler=LinkNeighborSampler(
+            num_neighbors=[-1],
+            base_sampler=MixedEdgeTypeBaseSampler(),
+            node_feature_names={"author": ("x",), "paper": ("x",)},
+            edge_feature_names={
+                WRITES: ("edge_weight",),
+                WRITTEN_BY: ("edge_weight",),
+                cites: ("edge_weight",),
+            },
+            output_blocks=True,
+        ),
+        batch_size=1,
+        feature_store=LocalSamplingCoordinator(shards),
+    )
+    store_backed_loader = Loader(
+        dataset=dataset,
+        sampler=LinkNeighborSampler(
+            num_neighbors=[-1],
+            base_sampler=MixedEdgeTypeBaseSampler(),
+            node_feature_names={"author": ("x",), "paper": ("x",)},
+            edge_feature_names={
+                WRITES: ("edge_weight",),
+                WRITTEN_BY: ("edge_weight",),
+                cites: ("edge_weight",),
+            },
+            output_blocks=True,
+        ),
+        batch_size=1,
+        feature_store=_store_backed_coordinator(shards),
+    )
+
+    local_batch = next(iter(local_loader))
+    store_backed_batch = next(iter(store_backed_loader))
+
+    assert local_batch.blocks is not None
+    assert store_backed_batch.blocks is not None
+    assert len(local_batch.blocks) == len(store_backed_batch.blocks) == 1
+    local_block = local_batch.blocks[0]
+    store_block = store_backed_batch.blocks[0]
+    assert isinstance(local_block, HeteroBlock)
+    assert isinstance(store_block, HeteroBlock)
+    assert local_block.edge_types == store_block.edge_types
+    assert torch.equal(local_block.dst_n_id["author"], store_block.dst_n_id["author"])
+    assert torch.equal(local_block.dst_n_id["paper"], store_block.dst_n_id["paper"])
+    assert torch.equal(local_block.edata(WRITES)["edge_weight"], store_block.edata(WRITES)["edge_weight"])
+    assert torch.equal(
+        local_block.edata(WRITTEN_BY)["edge_weight"],
+        store_block.edata(WRITTEN_BY)["edge_weight"],
+    )
+    assert torch.equal(local_block.edata(cites)["edge_weight"], store_block.edata(cites)["edge_weight"])
 
 
 def test_link_neighbor_sampler_stitched_hetero_output_blocks_materialize_multi_relation_blocks_through_store_backed_coordinator(

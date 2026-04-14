@@ -4,8 +4,6 @@ from pathlib import Path
 import torch
 
 from vgl._artifact import (
-    ARTIFACT_FORMAT_KEY,
-    ARTIFACT_FORMAT_VERSION_KEY,
     build_artifact_metadata,
     read_artifact_metadata,
 )

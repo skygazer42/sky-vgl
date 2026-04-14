@@ -1,4 +1,5 @@
 from dataclasses import replace
+from typing import cast
 
 import torch
 
@@ -10,12 +11,35 @@ from vgl.graph.batch import (
     LinkPredictionBatch,
     NodeBatch,
     TemporalEventBatch,
+    _resolve_link_edge_type,
+    _resolve_link_reverse_edge_type,
     _without_supervision_edges,
     _without_supervision_edges_for_type,
 )
 from vgl.graph.graph import Graph
 from vgl.ops.block import to_block, to_hetero_block
 from vgl.ops.subgraph import _membership_mask, _positions_for_endpoint_values, _relabel_bipartite_edge_index
+
+
+def _cache_key(value):
+    if value is None or isinstance(value, (bool, int, float, str)):
+        return value
+    if isinstance(value, torch.Tensor):
+        tensor = value.detach().cpu().contiguous()
+        return ("tensor", str(tensor.dtype), tuple(tensor.shape), tensor.numpy().tobytes())
+    if isinstance(value, dict):
+        return (
+            "dict",
+            tuple(
+                (key, _cache_key(inner_value))
+                for key, inner_value in sorted(value.items(), key=lambda item: repr(item[0]))
+            ),
+        )
+    if isinstance(value, (list, tuple)):
+        return (type(value).__name__, tuple(_cache_key(item) for item in value))
+    if hasattr(value, "index") and hasattr(value, "values"):
+        return ("slice", _cache_key(value.index), _cache_key(value.values))
+    return ("object", id(value))
 
 
 def _align_tensor_slice(index: torch.Tensor, tensor_slice) -> torch.Tensor:
@@ -326,7 +350,14 @@ def _link_message_passing_graph(graph: Graph, records: list[LinkPredictionRecord
     return message_passing_graph
 
 
-def _materialize_record_payload(context: MaterializationContext, payload):
+def _materialize_record_payload(
+    context: MaterializationContext,
+    payload,
+    *,
+    graph_cache: dict[object, Graph] | None = None,
+    node_blocks_cache: dict[object, list[object]] | None = None,
+    link_blocks_cache: dict[object, list[object]] | None = None,
+):
     fetched_node_features = context.state.get("_materialized_node_features")
     fetched_edge_features = context.state.get("_materialized_edge_features")
     needs_homo_node_blocks = "node_hops" in context.state
@@ -338,12 +369,16 @@ def _materialize_record_payload(context: MaterializationContext, payload):
     if not fetched_node_features and not fetched_edge_features and not needs_node_blocks and not needs_link_blocks:
         return payload
 
-    graph_cache: dict[int, Graph] = {}
-    node_blocks_cache: dict[tuple[int, object | None], list[object]] = {}
-    link_blocks_cache: dict[tuple[int, object | None], list[object]] = {}
+    graph_cache = {} if graph_cache is None else graph_cache
+    node_blocks_cache = {} if node_blocks_cache is None else node_blocks_cache
+    link_blocks_cache = {} if link_blocks_cache is None else link_blocks_cache
 
     def _materialized_graph(graph):
-        graph_id = id(graph)
+        graph_id = (
+            id(graph),
+            _cache_key(fetched_node_features),
+            _cache_key(fetched_edge_features),
+        )
         materialized = graph_cache.get(graph_id)
         if materialized is None:
             materialized = _graph_with_materialized_features(
@@ -355,7 +390,12 @@ def _materialize_record_payload(context: MaterializationContext, payload):
         return materialized
 
     def _materialized_node_blocks(graph: Graph):
-        cache_key = (id(graph), context.state.get("node_block_edge_type"))
+        cache_key = (
+            id(graph),
+            context.state.get("node_block_edge_type"),
+            _cache_key(context.state.get("node_hops")),
+            _cache_key(context.state.get("node_hops_by_type")),
+        )
         blocks = node_blocks_cache.get(cache_key)
         if blocks is None:
             if needs_homo_node_blocks:
@@ -375,7 +415,31 @@ def _materialize_record_payload(context: MaterializationContext, payload):
         return blocks
 
     def _materialized_link_blocks(records: list[LinkPredictionRecord], graph: Graph):
-        cache_key = (id(graph), context.state.get("link_block_edge_type"))
+        supervision_signature = []
+        for record in records:
+            if _as_python_int(record.label) != 1:
+                continue
+            if not (
+                bool(getattr(record, "exclude_seed_edge", False))
+                or bool(record.metadata.get("exclude_seed_edges", False))
+            ):
+                continue
+            supervision_signature.append(
+                (
+                    _resolve_link_edge_type(record),
+                    _as_python_int(record.src_index),
+                    _as_python_int(record.dst_index),
+                    _resolve_link_reverse_edge_type(record),
+                )
+            )
+        cache_key = (
+            id(graph),
+            context.state.get("link_block_edge_type"),
+            tuple(supervision_signature),
+            _cache_key(context.state.get("link_node_ids_local")),
+            _cache_key(context.state.get("link_node_hops")),
+            _cache_key(context.state.get("link_node_hops_by_type")),
+        )
         blocks = link_blocks_cache.get(cache_key)
         if blocks is None:
             message_passing_graph = _link_message_passing_graph(graph, records)
@@ -422,11 +486,24 @@ def _materialize_record_payload(context: MaterializationContext, payload):
     return replace(payload, graph=_materialized_graph(payload.graph))
 
 
-def _node_context_to_sample(context: MaterializationContext) -> SampleRecord | list[SampleRecord]:
+def _node_context_to_sample(
+    context: MaterializationContext,
+    *,
+    graph_cache: dict[object, Graph] | None = None,
+    subgraph_cache: dict[object, tuple[Graph, object]] | None = None,
+    node_blocks_cache: dict[object, list[object]] | None = None,
+) -> SampleRecord | list[SampleRecord]:
     if "sample" in context.state:
-        return _materialize_record_payload(context, context.state["sample"])
+        return _materialize_record_payload(
+            context,
+            context.state["sample"],
+            graph_cache=graph_cache,
+            node_blocks_cache=node_blocks_cache,
+        )
     if context.graph is None:
         raise ValueError("node context requires graph for materialization")
+    subgraph_cache = {} if subgraph_cache is None else subgraph_cache
+    node_blocks_cache = {} if node_blocks_cache is None else node_blocks_cache
     request = context.request
     metadata = dict(getattr(request, "metadata", {}))
     sample_id = context.metadata.get("sample_id", metadata.get("sample_id"))
@@ -439,12 +516,24 @@ def _node_context_to_sample(context: MaterializationContext) -> SampleRecord | l
     fetched_edge_features = context.state.get("_materialized_edge_features")
 
     if "node_ids" in context.state:
-        subgraph, node_mapping = _subgraph(
-            context.graph,
-            context.state["node_ids"],
-            fetched_node_features=fetched_node_features,
-            fetched_edge_features=fetched_edge_features,
+        cache_key: object = (
+            "homo",
+            id(context.graph),
+            _cache_key(context.state["node_ids"]),
+            _cache_key(fetched_node_features),
+            _cache_key(fetched_edge_features),
         )
+        cached = subgraph_cache.get(cache_key)
+        if cached is None:
+            cached = _subgraph(
+                context.graph,
+                context.state["node_ids"],
+                fetched_node_features=fetched_node_features,
+                fetched_edge_features=fetched_edge_features,
+            )
+            subgraph_cache[cache_key] = cached
+        subgraph, node_mapping_obj = cached
+        node_mapping = cast(torch.Tensor, node_mapping_obj)
         subgraph_seeds = _lookup_positions(
             node_mapping,
             seeds.to(device=node_mapping.device),
@@ -453,12 +542,24 @@ def _node_context_to_sample(context: MaterializationContext) -> SampleRecord | l
         node_type = "node"
     elif "node_ids_by_type" in context.state:
         node_type = request.node_type
-        subgraph, node_mapping = _hetero_subgraph(
-            context.graph,
-            context.state["node_ids_by_type"],
-            fetched_node_features=fetched_node_features,
-            fetched_edge_features=fetched_edge_features,
+        cache_key = (
+            "hetero",
+            id(context.graph),
+            _cache_key(context.state["node_ids_by_type"]),
+            _cache_key(fetched_node_features),
+            _cache_key(fetched_edge_features),
         )
+        cached = subgraph_cache.get(cache_key)
+        if cached is None:
+            cached = _hetero_subgraph(
+                context.graph,
+                context.state["node_ids_by_type"],
+                fetched_node_features=fetched_node_features,
+                fetched_edge_features=fetched_edge_features,
+            )
+            subgraph_cache[cache_key] = cached
+        subgraph, node_mapping_obj = cached
+        node_mapping = cast(dict[str, torch.Tensor], node_mapping_obj)
         subgraph_seeds = _lookup_positions(
             node_mapping[node_type],
             seeds.to(device=node_mapping[node_type].device),
@@ -471,19 +572,36 @@ def _node_context_to_sample(context: MaterializationContext) -> SampleRecord | l
     if "node_hops" in context.state:
         if node_type != "node":
             raise ValueError("node block materialization currently supports homogeneous graphs only")
-        blocks = _build_homo_blocks_from_local_ids(subgraph, node_mapping, context.state["node_hops"])
+        node_blocks_cache_key: object = ("homo", id(subgraph), _cache_key(context.state["node_hops"]))
+        blocks = node_blocks_cache.get(node_blocks_cache_key)
+        if blocks is None:
+            blocks = _build_homo_blocks_from_local_ids(subgraph, node_mapping, context.state["node_hops"])
+            node_blocks_cache[node_blocks_cache_key] = blocks
     elif "node_hops_by_type" in context.state:
         if context.state.get("node_block_edge_type") is not None:
-            blocks = _build_hetero_blocks_from_local_ids(
-                subgraph,
-                context.state["node_hops_by_type"],
-                edge_type=context.state["node_block_edge_type"],
+            cache_key = (
+                "hetero-rel",
+                id(subgraph),
+                _cache_key(context.state["node_hops_by_type"]),
+                context.state["node_block_edge_type"],
             )
+            blocks = node_blocks_cache.get(cache_key)
+            if blocks is None:
+                blocks = _build_hetero_blocks_from_local_ids(
+                    subgraph,
+                    context.state["node_hops_by_type"],
+                    edge_type=context.state["node_block_edge_type"],
+                )
+                node_blocks_cache[cache_key] = blocks
         else:
-            blocks = _build_full_hetero_blocks_from_local_ids(
-                subgraph,
-                context.state["node_hops_by_type"],
-            )
+            cache_key = ("hetero-full", id(subgraph), _cache_key(context.state["node_hops_by_type"]))
+            blocks = node_blocks_cache.get(cache_key)
+            if blocks is None:
+                blocks = _build_full_hetero_blocks_from_local_ids(
+                    subgraph,
+                    context.state["node_hops_by_type"],
+                )
+                node_blocks_cache[cache_key] = blocks
 
     samples = []
     for index in range(seeds.numel()):
@@ -550,8 +668,16 @@ def materialize_batch(items, *, label_source=None, label_key=None):
         kind = getattr(first.request, "kind", None)
         if kind == "node":
             samples = []
+            graph_cache: dict[object, Graph] = {}
+            subgraph_cache: dict[object, tuple[Graph, object]] = {}
+            node_blocks_cache: dict[object, list[object]] = {}
             for context in items:
-                sample = _node_context_to_sample(context)
+                sample = _node_context_to_sample(
+                    context,
+                    graph_cache=graph_cache,
+                    subgraph_cache=subgraph_cache,
+                    node_blocks_cache=node_blocks_cache,
+                )
                 if isinstance(sample, list):
                     samples.extend(sample)
                 else:
@@ -564,8 +690,17 @@ def materialize_batch(items, *, label_source=None, label_key=None):
             return GraphBatch.from_graphs([sample.graph for sample in samples])
         if kind == "link":
             records = []
+            graph_cache: dict[object, Graph] = {}
+            node_blocks_cache: dict[object, list[object]] = {}
+            link_blocks_cache: dict[object, list[object]] = {}
             for context in items:
-                record = _materialize_record_payload(context, _record_from_context(context))
+                record = _materialize_record_payload(
+                    context,
+                    _record_from_context(context),
+                    graph_cache=graph_cache,
+                    node_blocks_cache=node_blocks_cache,
+                    link_blocks_cache=link_blocks_cache,
+                )
                 if isinstance(record, list):
                     records.extend(record)
                 else:
@@ -573,8 +708,17 @@ def materialize_batch(items, *, label_source=None, label_key=None):
             return LinkPredictionBatch.from_records(records)
         if kind == "temporal":
             records = []
+            graph_cache: dict[object, Graph] = {}
+            node_blocks_cache: dict[object, list[object]] = {}
+            link_blocks_cache: dict[object, list[object]] = {}
             for context in items:
-                record = _materialize_record_payload(context, _record_from_context(context))
+                record = _materialize_record_payload(
+                    context,
+                    _record_from_context(context),
+                    graph_cache=graph_cache,
+                    node_blocks_cache=node_blocks_cache,
+                    link_blocks_cache=link_blocks_cache,
+                )
                 if isinstance(record, list):
                     records.extend(record)
                 else:

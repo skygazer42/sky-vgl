@@ -632,6 +632,49 @@ def test_store_backed_partition_sampled_training_uses_public_loader_path_for_coo
     assert history["completed_epochs"] == 1
 
 
+def test_partition_public_loader_path_matches_local_and_store_backed_coordinator_feature_fetch(tmp_path):
+    graph = Graph.homo(
+        edge_index=torch.tensor([[0, 2], [1, 3]]),
+        x=torch.arange(4, dtype=torch.float32).view(4, 1),
+        y=torch.tensor([0, 1, 0, 1]),
+        train_mask=torch.tensor([True, True, True, True]),
+        val_mask=torch.tensor([True, True, True, True]),
+        test_mask=torch.tensor([True, True, True, True]),
+    )
+    write_partitioned_graph(graph, tmp_path, num_partitions=2)
+    shards = {
+        0: LocalGraphShard.from_partition_dir(tmp_path, partition_id=0),
+        1: LocalGraphShard.from_partition_dir(tmp_path, partition_id=1),
+    }
+    dataset = ListDataset(
+        [
+            (shards[0].graph, {"seed": 0, "sample_id": "part0_parity"}),
+            (shards[1].graph, {"seed": 1, "sample_id": "part1_parity"}),
+        ]
+    )
+    local_loader = DataLoader(
+        dataset=dataset,
+        sampler=NodeNeighborSampler(num_neighbors=[-1], node_feature_names=("x",)),
+        batch_size=2,
+        feature_store=LocalSamplingCoordinator(shards),
+    )
+    store_backed_loader = DataLoader(
+        dataset=dataset,
+        sampler=NodeNeighborSampler(num_neighbors=[-1], node_feature_names=("x",)),
+        batch_size=2,
+        feature_store=StoreBackedSamplingCoordinator.from_partition_dir(tmp_path),
+    )
+
+    local_batch = next(iter(local_loader))
+    store_backed_batch = next(iter(store_backed_loader))
+
+    assert torch.equal(local_batch.graph.n_id, store_backed_batch.graph.n_id)
+    assert torch.equal(local_batch.graph.edge_index, store_backed_batch.graph.edge_index)
+    assert torch.equal(local_batch.graph.x, store_backed_batch.graph.x)
+    assert torch.equal(local_batch.seed_index, store_backed_batch.seed_index)
+    assert local_batch.metadata == store_backed_batch.metadata
+
+
 
 class TinyStitchedPartitionHeteroNodeClassifier(nn.Module):
     def __init__(self):
@@ -1029,6 +1072,44 @@ def test_store_backed_partition_sampled_training_stitched_sampling_crosses_parti
     assert history["completed_epochs"] == 1
 
 
+def test_partition_sampled_node_loader_stitched_sampling_matches_local_and_store_backed(tmp_path):
+    graph = Graph.homo(
+        edge_index=torch.tensor([[0, 1, 2, 3], [1, 2, 3, 0]]),
+        x=torch.arange(4, dtype=torch.float32).view(4, 1),
+        y=torch.tensor([0, 1, 0, 1]),
+        train_mask=torch.tensor([True, True, True, True]),
+        val_mask=torch.tensor([True, True, True, True]),
+        test_mask=torch.tensor([True, True, True, True]),
+    )
+    write_partitioned_graph(graph, tmp_path, num_partitions=2)
+    shards = {
+        0: LocalGraphShard.from_partition_dir(tmp_path, partition_id=0),
+        1: LocalGraphShard.from_partition_dir(tmp_path, partition_id=1),
+    }
+    dataset = ListDataset([(shards[0].graph, {"seed": 1, "sample_id": "stitched_parity"})])
+    local_loader = DataLoader(
+        dataset=dataset,
+        sampler=NodeNeighborSampler(num_neighbors=[-1]),
+        batch_size=1,
+        feature_store=LocalSamplingCoordinator(shards),
+    )
+    store_backed_loader = DataLoader(
+        dataset=dataset,
+        sampler=NodeNeighborSampler(num_neighbors=[-1]),
+        batch_size=1,
+        feature_store=StoreBackedSamplingCoordinator.from_partition_dir(tmp_path),
+    )
+
+    local_batch = next(iter(local_loader))
+    store_backed_batch = next(iter(store_backed_loader))
+
+    assert torch.equal(local_batch.graph.n_id, store_backed_batch.graph.n_id)
+    assert torch.equal(local_batch.graph.edge_index, store_backed_batch.graph.edge_index)
+    assert torch.equal(local_batch.graph.x, store_backed_batch.graph.x)
+    assert torch.equal(local_batch.seed_index, store_backed_batch.seed_index)
+    assert local_batch.metadata == store_backed_batch.metadata
+
+
 
 class TinyStitchedPartitionNodeBlockClassifier(nn.Module):
     def __init__(self):
@@ -1126,6 +1207,62 @@ def test_store_backed_partition_sampled_training_stitched_sampling_materializes_
     history = trainer.fit(loader)
 
     assert history["completed_epochs"] == 1
+
+
+def test_partition_sampled_node_loader_stitched_blocks_match_local_and_store_backed(tmp_path):
+    graph = Graph.homo(
+        edge_index=torch.tensor([[0, 1, 2, 3], [1, 2, 3, 0]]),
+        x=torch.arange(4, dtype=torch.float32).view(4, 1),
+        y=torch.tensor([0, 1, 0, 1]),
+        train_mask=torch.tensor([True, True, True, True]),
+        val_mask=torch.tensor([True, True, True, True]),
+        test_mask=torch.tensor([True, True, True, True]),
+        edge_data={"edge_weight": torch.tensor([10.0, 20.0, 30.0, 40.0])},
+    )
+    write_partitioned_graph(graph, tmp_path, num_partitions=2)
+    shards = {
+        0: LocalGraphShard.from_partition_dir(tmp_path, partition_id=0),
+        1: LocalGraphShard.from_partition_dir(tmp_path, partition_id=1),
+    }
+    dataset = ListDataset([(shards[0].graph, {"seed": 1, "sample_id": "stitched_blocks_parity"})])
+    local_loader = DataLoader(
+        dataset=dataset,
+        sampler=NodeNeighborSampler(
+            num_neighbors=[-1, -1],
+            node_feature_names=("x",),
+            edge_feature_names=("edge_weight",),
+            output_blocks=True,
+        ),
+        batch_size=1,
+        feature_store=LocalSamplingCoordinator(shards),
+    )
+    store_backed_loader = DataLoader(
+        dataset=dataset,
+        sampler=NodeNeighborSampler(
+            num_neighbors=[-1, -1],
+            node_feature_names=("x",),
+            edge_feature_names=("edge_weight",),
+            output_blocks=True,
+        ),
+        batch_size=1,
+        feature_store=StoreBackedSamplingCoordinator.from_partition_dir(tmp_path),
+    )
+
+    local_batch = next(iter(local_loader))
+    store_backed_batch = next(iter(store_backed_loader))
+
+    assert local_batch.blocks is not None
+    assert store_backed_batch.blocks is not None
+    assert len(local_batch.blocks) == len(store_backed_batch.blocks) == 2
+    assert torch.equal(local_batch.graph.n_id, store_backed_batch.graph.n_id)
+    assert torch.equal(local_batch.graph.edge_index, store_backed_batch.graph.edge_index)
+    assert torch.equal(local_batch.graph.x, store_backed_batch.graph.x)
+    assert torch.equal(local_batch.graph.edata["edge_weight"], store_backed_batch.graph.edata["edge_weight"])
+    assert torch.equal(local_batch.seed_index, store_backed_batch.seed_index)
+    for local_block, store_block in zip(local_batch.blocks, store_backed_batch.blocks):
+        assert torch.equal(local_block.dst_n_id, store_block.dst_n_id)
+        assert torch.equal(local_block.src_n_id, store_block.src_n_id)
+        assert torch.equal(local_block.edata["edge_weight"], store_block.edata["edge_weight"])
 
 
 
@@ -1246,6 +1383,61 @@ def test_store_backed_partition_sampled_temporal_training_stitched_temporal_samp
     assert history["completed_epochs"] == 1
 
 
+def test_partition_sampled_temporal_loader_stitched_sampling_matches_local_and_store_backed(tmp_path):
+    edge_type = ("node", "interacts", "node")
+    graph = Graph.temporal(
+        nodes={"node": {"x": torch.arange(4, dtype=torch.float32).view(4, 1)}},
+        edges={
+            edge_type: {
+                "edge_index": torch.tensor([[0, 1, 2], [1, 2, 3]]),
+                "timestamp": torch.tensor([1, 3, 5]),
+            }
+        },
+        time_attr="timestamp",
+    )
+    write_partitioned_graph(graph, tmp_path, num_partitions=2)
+    shards = {
+        0: LocalGraphShard.from_partition_dir(tmp_path, partition_id=0),
+        1: LocalGraphShard.from_partition_dir(tmp_path, partition_id=1),
+    }
+    dataset = ListDataset(
+        [
+            TemporalEventRecord(
+                graph=shards[0].graph,
+                src_index=0,
+                dst_index=1,
+                timestamp=4,
+                label=1,
+            )
+        ]
+    )
+    local_loader = DataLoader(
+        dataset=dataset,
+        sampler=TemporalNeighborSampler(num_neighbors=[-1], node_feature_names=("x",)),
+        batch_size=1,
+        feature_store=LocalSamplingCoordinator(shards),
+    )
+    store_backed_loader = DataLoader(
+        dataset=dataset,
+        sampler=TemporalNeighborSampler(num_neighbors=[-1], node_feature_names=("x",)),
+        batch_size=1,
+        feature_store=StoreBackedSamplingCoordinator.from_partition_dir(tmp_path),
+    )
+
+    local_batch = next(iter(local_loader))
+    store_backed_batch = next(iter(store_backed_loader))
+    local_history = local_batch.history_graph(0)
+    store_backed_history = store_backed_batch.history_graph(0)
+
+    assert torch.equal(local_batch.timestamp, store_backed_batch.timestamp)
+    assert torch.equal(local_history.n_id, store_backed_history.n_id)
+    assert torch.equal(local_history.edge_index, store_backed_history.edge_index)
+    assert torch.equal(local_history.edges[edge_type].timestamp, store_backed_history.edges[edge_type].timestamp)
+    assert torch.equal(local_history.x, store_backed_history.x)
+    assert torch.equal(local_batch.src_index, store_backed_batch.src_index)
+    assert torch.equal(local_batch.dst_index, store_backed_batch.dst_index)
+
+
 
 class TinyStitchedPartitionLinkPredictor(nn.Module):
     def __init__(self):
@@ -1341,6 +1533,52 @@ def test_store_backed_partition_sampled_link_training_stitched_link_sampling_cro
     history = trainer.fit(loader)
 
     assert history["completed_epochs"] == 1
+
+
+def test_partition_sampled_link_loader_stitched_link_sampling_matches_local_and_store_backed(
+    tmp_path,
+):
+    graph = Graph.homo(
+        edge_index=torch.tensor([[0, 1, 2], [1, 2, 3]]),
+        x=torch.arange(4, dtype=torch.float32).view(4, 1),
+    )
+    write_partitioned_graph(graph, tmp_path, num_partitions=2)
+    shards = {
+        0: LocalGraphShard.from_partition_dir(tmp_path, partition_id=0),
+        1: LocalGraphShard.from_partition_dir(tmp_path, partition_id=1),
+    }
+    dataset = ListDataset(
+        [
+            LinkPredictionRecord(
+                graph=shards[0].graph,
+                src_index=0,
+                dst_index=1,
+                label=1,
+            )
+        ]
+    )
+    local_loader = DataLoader(
+        dataset=dataset,
+        sampler=LinkNeighborSampler(num_neighbors=[-1], node_feature_names=("x",)),
+        batch_size=1,
+        feature_store=LocalSamplingCoordinator(shards),
+    )
+    store_backed_loader = DataLoader(
+        dataset=dataset,
+        sampler=LinkNeighborSampler(num_neighbors=[-1], node_feature_names=("x",)),
+        batch_size=1,
+        feature_store=StoreBackedSamplingCoordinator.from_partition_dir(tmp_path),
+    )
+
+    local_batch = next(iter(local_loader))
+    store_backed_batch = next(iter(store_backed_loader))
+
+    assert torch.equal(local_batch.graph.n_id, store_backed_batch.graph.n_id)
+    assert torch.equal(local_batch.graph.edge_index, store_backed_batch.graph.edge_index)
+    assert torch.equal(local_batch.graph.x, store_backed_batch.graph.x)
+    assert torch.equal(local_batch.src_index, store_backed_batch.src_index)
+    assert torch.equal(local_batch.dst_index, store_backed_batch.dst_index)
+    assert torch.equal(local_batch.labels, store_backed_batch.labels)
 
 
 
@@ -1460,6 +1698,69 @@ def test_store_backed_partition_sampled_link_training_stitched_sampling_material
     history = trainer.fit(loader)
 
     assert history["completed_epochs"] == 1
+
+
+def test_partition_sampled_link_loader_stitched_blocks_match_local_and_store_backed(tmp_path):
+    graph = Graph.homo(
+        edge_index=torch.tensor([[0, 1, 2], [1, 2, 3]]),
+        x=torch.arange(4, dtype=torch.float32).view(4, 1),
+        edge_data={"edge_weight": torch.tensor([10.0, 20.0, 30.0])},
+    )
+    write_partitioned_graph(graph, tmp_path, num_partitions=2)
+    shards = {
+        0: LocalGraphShard.from_partition_dir(tmp_path, partition_id=0),
+        1: LocalGraphShard.from_partition_dir(tmp_path, partition_id=1),
+    }
+    dataset = ListDataset(
+        [
+            LinkPredictionRecord(
+                graph=shards[0].graph,
+                src_index=0,
+                dst_index=1,
+                label=1,
+            )
+        ]
+    )
+    local_loader = DataLoader(
+        dataset=dataset,
+        sampler=LinkNeighborSampler(
+            num_neighbors=[-1, -1],
+            node_feature_names=("x",),
+            edge_feature_names=("edge_weight",),
+            output_blocks=True,
+        ),
+        batch_size=1,
+        feature_store=LocalSamplingCoordinator(shards),
+    )
+    store_backed_loader = DataLoader(
+        dataset=dataset,
+        sampler=LinkNeighborSampler(
+            num_neighbors=[-1, -1],
+            node_feature_names=("x",),
+            edge_feature_names=("edge_weight",),
+            output_blocks=True,
+        ),
+        batch_size=1,
+        feature_store=StoreBackedSamplingCoordinator.from_partition_dir(tmp_path),
+    )
+
+    local_batch = next(iter(local_loader))
+    store_backed_batch = next(iter(store_backed_loader))
+
+    assert local_batch.blocks is not None
+    assert store_backed_batch.blocks is not None
+    assert len(local_batch.blocks) == len(store_backed_batch.blocks) == 2
+    assert torch.equal(local_batch.graph.n_id, store_backed_batch.graph.n_id)
+    assert torch.equal(local_batch.graph.edge_index, store_backed_batch.graph.edge_index)
+    assert torch.equal(local_batch.graph.x, store_backed_batch.graph.x)
+    assert torch.equal(local_batch.graph.edata["edge_weight"], store_backed_batch.graph.edata["edge_weight"])
+    assert torch.equal(local_batch.src_index, store_backed_batch.src_index)
+    assert torch.equal(local_batch.dst_index, store_backed_batch.dst_index)
+    assert torch.equal(local_batch.labels, store_backed_batch.labels)
+    for local_block, store_block in zip(local_batch.blocks, store_backed_batch.blocks):
+        assert torch.equal(local_block.dst_n_id, store_block.dst_n_id)
+        assert torch.equal(local_block.src_n_id, store_block.src_n_id)
+        assert torch.equal(local_block.edata["edge_weight"], store_block.edata["edge_weight"])
 
 
 
@@ -1589,6 +1890,76 @@ def test_store_backed_partition_sampled_link_training_stitched_hetero_link_sampl
     history = trainer.fit(loader)
 
     assert history["completed_epochs"] == 1
+
+
+def test_partition_sampled_link_loader_stitched_hetero_link_sampling_matches_local_and_store_backed(
+    tmp_path,
+):
+    writes = ("author", "writes", "paper")
+    written_by = ("paper", "written_by", "author")
+    graph = Graph.hetero(
+        nodes={
+            "author": {"x": torch.tensor([[10.0], [20.0], [30.0]])},
+            "paper": {"x": torch.tensor([[1.0], [2.0]])},
+        },
+        edges={
+            writes: {"edge_index": torch.tensor([[0, 2], [0, 0]])},
+            written_by: {"edge_index": torch.tensor([[0, 0], [0, 2]])},
+        },
+    )
+    write_partitioned_graph(graph, tmp_path, num_partitions=2)
+    shards = {
+        0: LocalGraphShard.from_partition_dir(tmp_path, partition_id=0),
+        1: LocalGraphShard.from_partition_dir(tmp_path, partition_id=1),
+    }
+    dataset = ListDataset(
+        [
+            LinkPredictionRecord(
+                graph=shards[0].graph,
+                src_index=0,
+                dst_index=0,
+                label=1,
+                edge_type=writes,
+            )
+        ]
+    )
+    local_loader = DataLoader(
+        dataset=dataset,
+        sampler=LinkNeighborSampler(
+            num_neighbors=[-1],
+            node_feature_names={"author": ("x",), "paper": ("x",)},
+        ),
+        batch_size=1,
+        feature_store=LocalSamplingCoordinator(shards),
+    )
+    store_backed_loader = DataLoader(
+        dataset=dataset,
+        sampler=LinkNeighborSampler(
+            num_neighbors=[-1],
+            node_feature_names={"author": ("x",), "paper": ("x",)},
+        ),
+        batch_size=1,
+        feature_store=StoreBackedSamplingCoordinator.from_partition_dir(tmp_path),
+    )
+
+    local_batch = next(iter(local_loader))
+    store_backed_batch = next(iter(store_backed_loader))
+
+    assert local_batch.edge_type == store_backed_batch.edge_type
+    assert local_batch.src_node_type == store_backed_batch.src_node_type
+    assert local_batch.dst_node_type == store_backed_batch.dst_node_type
+    assert torch.equal(local_batch.graph.nodes["author"].n_id, store_backed_batch.graph.nodes["author"].n_id)
+    assert torch.equal(local_batch.graph.nodes["paper"].n_id, store_backed_batch.graph.nodes["paper"].n_id)
+    assert torch.equal(local_batch.graph.nodes["author"].x, store_backed_batch.graph.nodes["author"].x)
+    assert torch.equal(local_batch.graph.nodes["paper"].x, store_backed_batch.graph.nodes["paper"].x)
+    assert torch.equal(local_batch.graph.edges[writes].edge_index, store_backed_batch.graph.edges[writes].edge_index)
+    assert torch.equal(
+        local_batch.graph.edges[written_by].edge_index,
+        store_backed_batch.graph.edges[written_by].edge_index,
+    )
+    assert torch.equal(local_batch.src_index, store_backed_batch.src_index)
+    assert torch.equal(local_batch.dst_index, store_backed_batch.dst_index)
+    assert torch.equal(local_batch.labels, store_backed_batch.labels)
 
 
 class TinyStitchedPartitionHeteroLinkBlockPredictor(nn.Module):
@@ -1739,6 +2110,85 @@ def test_store_backed_partition_sampled_link_training_stitched_hetero_sampling_m
     history = trainer.fit(loader)
 
     assert history["completed_epochs"] == 1
+
+
+def test_partition_sampled_link_loader_stitched_hetero_blocks_match_local_and_store_backed(tmp_path):
+    writes = ("author", "writes", "paper")
+    written_by = ("paper", "written_by", "author")
+    graph = Graph.hetero(
+        nodes={
+            "author": {"x": torch.tensor([[10.0], [20.0], [30.0]])},
+            "paper": {"x": torch.tensor([[1.0], [2.0]])},
+        },
+        edges={
+            writes: {
+                "edge_index": torch.tensor([[0, 0, 2], [0, 1, 0]]),
+                "edge_weight": torch.tensor([10.0, 11.0, 12.0]),
+            },
+            written_by: {
+                "edge_index": torch.tensor([[0, 1, 0], [0, 0, 2]]),
+                "edge_weight": torch.tensor([100.0, 110.0, 120.0]),
+            },
+        },
+    )
+    write_partitioned_graph(graph, tmp_path, num_partitions=2)
+    shards = {
+        0: LocalGraphShard.from_partition_dir(tmp_path, partition_id=0),
+        1: LocalGraphShard.from_partition_dir(tmp_path, partition_id=1),
+    }
+    dataset = ListDataset(
+        [
+            LinkPredictionRecord(
+                graph=shards[0].graph,
+                src_index=0,
+                dst_index=0,
+                label=1,
+                edge_type=writes,
+            )
+        ]
+    )
+    local_loader = DataLoader(
+        dataset=dataset,
+        sampler=LinkNeighborSampler(
+            num_neighbors=[-1, -1],
+            node_feature_names={"author": ("x",), "paper": ("x",)},
+            edge_feature_names={writes: ("edge_weight",), written_by: ("edge_weight",)},
+            output_blocks=True,
+        ),
+        batch_size=1,
+        feature_store=LocalSamplingCoordinator(shards),
+    )
+    store_backed_loader = DataLoader(
+        dataset=dataset,
+        sampler=LinkNeighborSampler(
+            num_neighbors=[-1, -1],
+            node_feature_names={"author": ("x",), "paper": ("x",)},
+            edge_feature_names={writes: ("edge_weight",), written_by: ("edge_weight",)},
+            output_blocks=True,
+        ),
+        batch_size=1,
+        feature_store=StoreBackedSamplingCoordinator.from_partition_dir(tmp_path),
+    )
+
+    local_batch = next(iter(local_loader))
+    store_backed_batch = next(iter(store_backed_loader))
+
+    assert local_batch.blocks is not None
+    assert store_backed_batch.blocks is not None
+    assert len(local_batch.blocks) == len(store_backed_batch.blocks) == 2
+    assert local_batch.edge_type == store_backed_batch.edge_type
+    assert torch.equal(local_batch.graph.nodes["author"].n_id, store_backed_batch.graph.nodes["author"].n_id)
+    assert torch.equal(local_batch.graph.nodes["paper"].n_id, store_backed_batch.graph.nodes["paper"].n_id)
+    assert torch.equal(local_batch.graph.nodes["author"].x, store_backed_batch.graph.nodes["author"].x)
+    assert torch.equal(local_batch.graph.nodes["paper"].x, store_backed_batch.graph.nodes["paper"].x)
+    assert torch.equal(local_batch.src_index, store_backed_batch.src_index)
+    assert torch.equal(local_batch.dst_index, store_backed_batch.dst_index)
+    assert torch.equal(local_batch.labels, store_backed_batch.labels)
+    for local_block, store_block in zip(local_batch.blocks, store_backed_batch.blocks):
+        assert torch.equal(local_block.dst_n_id, store_block.dst_n_id)
+        assert torch.equal(local_block.src_n_id, store_block.src_n_id)
+        assert torch.equal(local_block.edata["e_id"], store_block.edata["e_id"])
+        assert torch.equal(local_block.edata["edge_weight"], store_block.edata["edge_weight"])
 
 
 

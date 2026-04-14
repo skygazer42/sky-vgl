@@ -1,9 +1,11 @@
 import torch
 import inspect
+from types import SimpleNamespace
 
 from vgl import Graph
 from vgl.core.batch import GraphBatch, LinkPredictionBatch, NodeBatch, TemporalEventBatch
 from vgl.data.sample import LinkPredictionRecord, TemporalEventRecord
+import vgl.dataloading.materialize as materialize_module
 from vgl.dataloading.executor import (
     MaterializationContext,
     _build_stitched_hetero_node_samples,
@@ -147,6 +149,226 @@ def test_materialize_batch_builds_temporal_event_batch_from_temporal_contexts():
     assert isinstance(batch, TemporalEventBatch)
     assert torch.equal(batch.timestamp, torch.tensor([1, 4]))
     assert torch.equal(batch.labels, torch.tensor([1, 0]))
+
+
+def test_materialize_batch_reuses_graph_materialization_across_link_contexts(monkeypatch):
+    graph = Graph.homo(
+        edge_index=torch.tensor([[0, 1], [1, 2]]),
+        x=torch.zeros(3, 1),
+    )
+    contexts = [
+        MaterializationContext(
+            request=LinkSeedRequest(
+                src_ids=torch.tensor([0]),
+                dst_ids=torch.tensor([1]),
+                labels=torch.tensor([1]),
+            ),
+            state={
+                "record": LinkPredictionRecord(graph=graph, src_index=0, dst_index=1, label=1),
+                "_materialized_node_features": {
+                    "node": {
+                        "x": SimpleNamespace(
+                            index=torch.tensor([0, 1, 2]),
+                            values=torch.tensor([[1.0], [2.0], [3.0]]),
+                        )
+                    }
+                },
+            },
+        ),
+        MaterializationContext(
+            request=LinkSeedRequest(
+                src_ids=torch.tensor([2]),
+                dst_ids=torch.tensor([0]),
+                labels=torch.tensor([0]),
+            ),
+            state={
+                "record": LinkPredictionRecord(graph=graph, src_index=2, dst_index=0, label=0),
+                "_materialized_node_features": {
+                    "node": {
+                        "x": SimpleNamespace(
+                            index=torch.tensor([0, 1, 2]).clone(),
+                            values=torch.tensor([[1.0], [2.0], [3.0]]).clone(),
+                        )
+                    }
+                },
+            },
+        ),
+    ]
+    real_materialize_graph = materialize_module._graph_with_materialized_features
+    calls = 0
+
+    def counting_materialize_graph(*args, **kwargs):
+        nonlocal calls
+        calls += 1
+        return real_materialize_graph(*args, **kwargs)
+
+    monkeypatch.setattr(materialize_module, "_graph_with_materialized_features", counting_materialize_graph)
+
+    batch = materialize_batch(contexts)
+
+    assert isinstance(batch, LinkPredictionBatch)
+    assert calls == 1
+    assert torch.equal(batch.graph.x, torch.tensor([[1.0], [2.0], [3.0]]))
+
+
+def test_materialize_batch_reuses_link_message_passing_graph_across_block_contexts(monkeypatch):
+    graph = Graph.homo(
+        edge_index=torch.tensor([[0, 1, 2], [1, 2, 0]]),
+        x=torch.arange(3, dtype=torch.float32).view(3, 1),
+        edge_data={"edge_weight": torch.tensor([10.0, 20.0, 30.0])},
+    )
+    contexts = [
+        MaterializationContext(
+            request=LinkSeedRequest(
+                src_ids=torch.tensor([0]),
+                dst_ids=torch.tensor([1]),
+                labels=torch.tensor([1]),
+            ),
+            state={
+                "record": LinkPredictionRecord(
+                    graph=graph,
+                    src_index=0,
+                    dst_index=1,
+                    label=1,
+                    metadata={"exclude_seed_edges": True},
+                ),
+                "link_node_ids_local": torch.tensor([0, 1, 2]),
+                "link_node_hops": [torch.tensor([0, 1]), torch.tensor([0, 1, 2])],
+            },
+        ),
+        MaterializationContext(
+            request=LinkSeedRequest(
+                src_ids=torch.tensor([1]),
+                dst_ids=torch.tensor([1]),
+                labels=torch.tensor([1]),
+            ),
+            state={
+                "record": LinkPredictionRecord(
+                    graph=graph,
+                    src_index=0,
+                    dst_index=1,
+                    label=1,
+                    metadata={"exclude_seed_edges": True},
+                ),
+                "link_node_ids_local": torch.tensor([0, 1, 2]).clone(),
+                "link_node_hops": [torch.tensor([0, 1]).clone(), torch.tensor([0, 1, 2]).clone()],
+            },
+        ),
+    ]
+    real_message_passing_graph = materialize_module._link_message_passing_graph
+    calls = 0
+
+    def counting_message_passing_graph(*args, **kwargs):
+        nonlocal calls
+        calls += 1
+        return real_message_passing_graph(*args, **kwargs)
+
+    monkeypatch.setattr(materialize_module, "_link_message_passing_graph", counting_message_passing_graph)
+
+    batch = materialize_batch(contexts)
+
+    assert isinstance(batch, LinkPredictionBatch)
+    assert calls == 1
+    assert batch.blocks is not None
+    assert len(batch.blocks) == 1
+
+
+def test_materialize_batch_reuses_homo_subgraph_across_node_contexts(monkeypatch):
+    graph = Graph.homo(
+        edge_index=torch.tensor([[0, 1], [1, 2]]),
+        x=torch.arange(3, dtype=torch.float32).view(3, 1),
+        y=torch.tensor([0, 1, 0]),
+    )
+    contexts = [
+        MaterializationContext(
+            request=NodeSeedRequest(
+                node_ids=torch.tensor([0]),
+                node_type="node",
+                metadata={"seed": 0, "sample_id": "n0"},
+            ),
+            state={"node_ids": torch.tensor([0, 1, 2])},
+            metadata={"sample_id": "n0"},
+            graph=graph,
+        ),
+        MaterializationContext(
+            request=NodeSeedRequest(
+                node_ids=torch.tensor([1]),
+                node_type="node",
+                metadata={"seed": 1, "sample_id": "n1"},
+            ),
+            state={"node_ids": torch.tensor([0, 1, 2]).clone()},
+            metadata={"sample_id": "n1"},
+            graph=graph,
+        ),
+    ]
+    real_subgraph = materialize_module._subgraph
+    calls = 0
+
+    def counting_subgraph(*args, **kwargs):
+        nonlocal calls
+        calls += 1
+        return real_subgraph(*args, **kwargs)
+
+    monkeypatch.setattr(materialize_module, "_subgraph", counting_subgraph)
+
+    batch = materialize_batch(contexts)
+
+    assert isinstance(batch, NodeBatch)
+    assert calls == 1
+    assert torch.equal(batch.graph.n_id, torch.tensor([0, 1, 2]))
+    assert torch.equal(batch.seed_index, torch.tensor([0, 1]))
+
+
+def test_materialize_batch_reuses_homo_node_blocks_across_node_contexts(monkeypatch):
+    graph = Graph.homo(
+        edge_index=torch.tensor([[0, 1, 2], [1, 2, 0]]),
+        x=torch.arange(3, dtype=torch.float32).view(3, 1),
+        y=torch.tensor([0, 1, 0]),
+    )
+    contexts = [
+        MaterializationContext(
+            request=NodeSeedRequest(
+                node_ids=torch.tensor([0]),
+                node_type="node",
+                metadata={"seed": 0, "sample_id": "n0"},
+            ),
+            state={
+                "node_ids": torch.tensor([0, 1, 2]),
+                "node_hops": [torch.tensor([0, 1]), torch.tensor([0, 1, 2])],
+            },
+            metadata={"sample_id": "n0"},
+            graph=graph,
+        ),
+        MaterializationContext(
+            request=NodeSeedRequest(
+                node_ids=torch.tensor([1]),
+                node_type="node",
+                metadata={"seed": 1, "sample_id": "n1"},
+            ),
+            state={
+                "node_ids": torch.tensor([0, 1, 2]).clone(),
+                "node_hops": [torch.tensor([0, 1]).clone(), torch.tensor([0, 1, 2]).clone()],
+            },
+            metadata={"sample_id": "n1"},
+            graph=graph,
+        ),
+    ]
+    real_build_blocks = materialize_module._build_homo_blocks_from_local_ids
+    calls = 0
+
+    def counting_build_blocks(*args, **kwargs):
+        nonlocal calls
+        calls += 1
+        return real_build_blocks(*args, **kwargs)
+
+    monkeypatch.setattr(materialize_module, "_build_homo_blocks_from_local_ids", counting_build_blocks)
+
+    batch = materialize_batch(contexts)
+
+    assert isinstance(batch, NodeBatch)
+    assert calls == 1
+    assert batch.blocks is not None
+    assert len(batch.blocks) == 1
 
 
 

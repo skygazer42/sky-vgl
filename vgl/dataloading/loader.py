@@ -5,7 +5,7 @@ import torch
 
 from vgl._memory import pin_tensor
 from vgl.dataloading.executor import PlanExecutor
-from vgl.dataloading.materialize import materialize_batch, materialize_context
+from vgl.dataloading.materialize import materialize_batch
 from vgl.dataloading.plan import SamplingPlan
 
 
@@ -24,8 +24,7 @@ def _resolve_feature_store(feature_store, graph):
 def _resolve_sampled(sampled, executor, feature_store=None):
     if isinstance(sampled, SamplingPlan):
         resolved_feature_store = _resolve_feature_store(feature_store, sampled.graph)
-        context = executor.execute(sampled, graph=sampled.graph, feature_store=resolved_feature_store)
-        return materialize_context(context)
+        return executor.execute(sampled, graph=sampled.graph, feature_store=resolved_feature_store)
     if isinstance(sampled, (list, tuple)):
         resolved = []
         for value in sampled:

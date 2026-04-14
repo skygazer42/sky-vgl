@@ -427,7 +427,7 @@ class UniformNegativeLinkSampler(Sampler):
         self.exclude_seed_edges = bool(exclude_seed_edges)
         self.skip_negative_seed_records = bool(skip_negative_seed_records)
         self.seed = None if seed is None else _as_python_int(seed)
-        self._generator = None
+        self._generator: torch.Generator | None = None
 
     def _resolved_generator(self, *, device: torch.device) -> torch.Generator | None:
         if self.seed is None:

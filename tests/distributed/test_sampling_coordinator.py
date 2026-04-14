@@ -66,6 +66,35 @@ def test_store_backed_sampling_coordinator_routes_seeds_and_fetches_features(tmp
     assert torch.equal(fetched.values, torch.tensor([[6.0, 7.0], [0.0, 1.0], [4.0, 5.0]]))
 
 
+def test_sampling_coordinator_routes_seeds_and_fetches_features_match_local_and_store_backed(tmp_path):
+    graph = Graph.homo(
+        edge_index=torch.tensor([[0, 1, 2, 3], [1, 2, 3, 0]]),
+        x=torch.arange(8, dtype=torch.float32).view(4, 2),
+    )
+    write_partitioned_graph(graph, tmp_path, num_partitions=2)
+    shards = {
+        0: LocalGraphShard.from_partition_dir(tmp_path, partition_id=0),
+        1: LocalGraphShard.from_partition_dir(tmp_path, partition_id=1),
+    }
+    node_ids = torch.tensor([3, 0, 2])
+    local = LocalSamplingCoordinator(shards)
+    store_backed = StoreBackedSamplingCoordinator.from_partition_dir(tmp_path)
+
+    local_routes = local.route_node_ids(node_ids)
+    store_backed_routes = store_backed.route_node_ids(node_ids)
+    local_fetched = local.fetch_node_features(NODE_KEY, node_ids)
+    store_backed_fetched = store_backed.fetch_node_features(NODE_KEY, node_ids)
+
+    assert local.partition_ids() == store_backed.partition_ids()
+    assert len(local_routes) == len(store_backed_routes) == 2
+    for local_route, store_backed_route in zip(local_routes, store_backed_routes):
+        assert local_route.partition_id == store_backed_route.partition_id
+        assert torch.equal(local_route.global_ids, store_backed_route.global_ids)
+        assert torch.equal(local_route.local_ids, store_backed_route.local_ids)
+    assert torch.equal(local_fetched.index, store_backed_fetched.index)
+    assert torch.equal(local_fetched.values, store_backed_fetched.values)
+
+
 def test_local_sampling_coordinator_routes_nodes_without_per_node_owner_lookup(monkeypatch, tmp_path):
     graph = Graph.homo(
         edge_index=torch.tensor([[0, 1, 2, 3], [1, 2, 3, 0]]),
@@ -677,6 +706,60 @@ def test_store_backed_sampling_coordinator_routes_relation_edge_ids_and_fetches_
     assert torch.equal(partition_edges, torch.tensor([2, 3]))
     assert torch.equal(cites_scores.index, torch.tensor([3, 0]))
     assert torch.equal(cites_scores.values, torch.tensor([0.4, 0.1]))
+
+
+def test_sampling_coordinator_routes_relation_edge_ids_and_fetches_edge_features_match_local_and_store_backed(
+    tmp_path,
+):
+    writes = ("author", "writes", "paper")
+    cites = ("paper", "cites", "paper")
+    graph = Graph.hetero(
+        nodes={
+            "author": {"x": torch.arange(8, dtype=torch.float32).view(4, 2)},
+            "paper": {"x": torch.arange(10, 18, dtype=torch.float32).view(4, 2)},
+        },
+        edges={
+            writes: {
+                "edge_index": torch.tensor([[0, 1, 2, 3, 0], [1, 0, 3, 2, 2]]),
+                "weight": torch.tensor([1.0, 2.0, 3.0, 4.0, 9.0]),
+            },
+            cites: {
+                "edge_index": torch.tensor([[0, 1, 2, 3, 1], [1, 0, 3, 2, 2]]),
+                "score": torch.tensor([0.1, 0.2, 0.3, 0.4, 0.9]),
+            },
+        },
+    )
+    write_partitioned_graph(graph, tmp_path, num_partitions=2)
+    shards = {
+        0: LocalGraphShard.from_partition_dir(tmp_path, partition_id=0),
+        1: LocalGraphShard.from_partition_dir(tmp_path, partition_id=1),
+    }
+    edge_ids = torch.tensor([3, 0, 2])
+    edge_ids_with_boundary = torch.tensor([4, 3, 0])
+    local = LocalSamplingCoordinator(shards)
+    store_backed = StoreBackedSamplingCoordinator.from_partition_dir(tmp_path)
+
+    local_routes = local.route_edge_ids(edge_ids, edge_type=writes)
+    store_backed_routes = store_backed.route_edge_ids(edge_ids, edge_type=writes)
+    local_fetched = local.fetch_edge_features(WRITES_WEIGHT_KEY, edge_ids)
+    store_backed_fetched = store_backed.fetch_edge_features(WRITES_WEIGHT_KEY, edge_ids)
+    local_boundary_fetched = local.fetch_edge_features(WRITES_WEIGHT_KEY, edge_ids_with_boundary)
+    store_backed_boundary_fetched = store_backed.fetch_edge_features(WRITES_WEIGHT_KEY, edge_ids_with_boundary)
+    local_cites_scores = local.fetch_edge_features(CITES_SCORE_KEY, torch.tensor([3, 0]))
+    store_backed_cites_scores = store_backed.fetch_edge_features(CITES_SCORE_KEY, torch.tensor([3, 0]))
+
+    assert len(local_routes) == len(store_backed_routes) == 2
+    for local_route, store_backed_route in zip(local_routes, store_backed_routes):
+        assert local_route.partition_id == store_backed_route.partition_id
+        assert torch.equal(local_route.global_ids, store_backed_route.global_ids)
+        assert torch.equal(local_route.local_ids, store_backed_route.local_ids)
+    assert torch.equal(local_fetched.index, store_backed_fetched.index)
+    assert torch.equal(local_fetched.values, store_backed_fetched.values)
+    assert torch.equal(local_boundary_fetched.index, store_backed_boundary_fetched.index)
+    assert torch.equal(local_boundary_fetched.values, store_backed_boundary_fetched.values)
+    assert torch.equal(local.partition_edge_ids(1, edge_type=writes), store_backed.partition_edge_ids(1, edge_type=writes))
+    assert torch.equal(local_cites_scores.index, store_backed_cites_scores.index)
+    assert torch.equal(local_cites_scores.values, store_backed_cites_scores.values)
 
 
 def test_local_sampling_coordinator_routes_typed_node_ids_and_features(tmp_path):
