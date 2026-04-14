@@ -85,6 +85,46 @@ def test_loader_can_expand_positive_link_records_with_uniform_negative_sampler()
     assert all(edge not in {(0, 1), (1, 2)} for edge in negatives)
 
 
+def test_loader_uniform_negative_sampler_seed_is_reproducible_independent_of_global_rng():
+    graph = Graph.homo(
+        edge_index=torch.tensor([[0, 1], [1, 2]]),
+        x=torch.randn(4, 4),
+    )
+    dataset = ListDataset(
+        [
+            LinkPredictionRecord(graph=graph, src_index=0, dst_index=1, label=1),
+            LinkPredictionRecord(graph=graph, src_index=1, dst_index=2, label=1),
+        ]
+    )
+
+    torch.manual_seed(0)
+    first_batch = next(
+        iter(
+            Loader(
+                dataset=dataset,
+                sampler=UniformNegativeLinkSampler(num_negatives=2, seed=7),
+                batch_size=2,
+            )
+        )
+    )
+
+    torch.manual_seed(999)
+    second_batch = next(
+        iter(
+            Loader(
+                dataset=dataset,
+                sampler=UniformNegativeLinkSampler(num_negatives=2, seed=7),
+                batch_size=2,
+            )
+        )
+    )
+
+    assert torch.equal(first_batch.src_index, second_batch.src_index)
+    assert torch.equal(first_batch.dst_index, second_batch.dst_index)
+    assert torch.equal(first_batch.labels, second_batch.labels)
+    assert torch.equal(first_batch.query_index, second_batch.query_index)
+
+
 def test_uniform_negative_link_sampler_avoids_tensor_tolist(monkeypatch):
     graph = Graph.homo(
         edge_index=torch.tensor([[0, 1], [1, 2]]),
@@ -357,6 +397,51 @@ def test_loader_can_expand_positive_link_records_with_hard_negative_sampler():
     assert {(0, 3), (0, 4)}.issubset(set(negatives))
     assert len(negatives) == 3
     assert all(edge not in {(0, 1), (0, 2)} for edge in negatives)
+
+
+def test_loader_hard_negative_sampler_seed_is_reproducible_independent_of_global_rng():
+    graph = Graph.homo(
+        edge_index=torch.tensor([[0, 0, 1], [1, 2, 2]]),
+        x=torch.randn(5, 4),
+    )
+    dataset = ListDataset(
+        [
+            LinkPredictionRecord(
+                graph=graph,
+                src_index=0,
+                dst_index=1,
+                label=1,
+                hard_negative_dst=[3, 4],
+            ),
+        ]
+    )
+
+    torch.manual_seed(0)
+    first_batch = next(
+        iter(
+            Loader(
+                dataset=dataset,
+                sampler=HardNegativeLinkSampler(num_negatives=3, num_hard_negatives=2, seed=11),
+                batch_size=1,
+            )
+        )
+    )
+
+    torch.manual_seed(999)
+    second_batch = next(
+        iter(
+            Loader(
+                dataset=dataset,
+                sampler=HardNegativeLinkSampler(num_negatives=3, num_hard_negatives=2, seed=11),
+                batch_size=1,
+            )
+        )
+    )
+
+    assert torch.equal(first_batch.src_index, second_batch.src_index)
+    assert torch.equal(first_batch.dst_index, second_batch.dst_index)
+    assert torch.equal(first_batch.labels, second_batch.labels)
+    assert torch.equal(first_batch.query_index, second_batch.query_index)
 
 
 def test_hard_negative_link_sampler_avoids_tensor_tolist(monkeypatch):
