@@ -116,6 +116,15 @@ _EVENT_CORE_RECORD_FIELDS = {
         "exception_type",
         "exception_message",
     ),
+    "fit_end": (
+        "best_epoch",
+        "best_metric",
+        "elapsed_seconds",
+        "average_epoch_seconds",
+        "average_steps_per_second",
+        "stopped_early",
+        "stop_reason",
+    ),
 }
 
 

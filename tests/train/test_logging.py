@@ -468,7 +468,68 @@ def test_json_lines_logger_can_filter_metrics_and_drop_context(tmp_path):
     }
     assert set(records[0]["metrics"]) == {"train_loss", "val_loss"}
     assert "lr" not in records[0]["metrics"]
-    assert records[1].keys() == records[0].keys()
+    assert records[1].keys() == {
+        "event",
+        "stage",
+        "epoch",
+        "epochs",
+        "global_step",
+        "batch_idx",
+        "metrics",
+        "best_epoch",
+        "best_metric",
+        "elapsed_seconds",
+        "average_epoch_seconds",
+        "average_steps_per_second",
+        "stopped_early",
+        "stop_reason",
+    }
+
+
+def test_json_lines_logger_preserves_fit_end_core_fields_without_context(tmp_path):
+    path = tmp_path / "fit_end.jsonl"
+    trainer = Trainer(
+        model=ToyModel(),
+        task=ToyTask(),
+        optimizer=torch.optim.SGD,
+        lr=0.1,
+        max_epochs=1,
+        loggers=[
+            JSONLinesLogger(
+                path,
+                flush=True,
+                events={"fit_end"},
+                include_context=False,
+            )
+        ],
+        enable_console_logging=False,
+    )
+
+    trainer.fit([ToyBatch(1.0)], val_data=[ToyBatch(1.0)])
+
+    records = [json.loads(line) for line in path.read_text().splitlines()]
+
+    assert len(records) == 1
+    assert records[0].keys() == {
+        "average_epoch_seconds",
+        "average_steps_per_second",
+        "batch_idx",
+        "best_epoch",
+        "best_metric",
+        "elapsed_seconds",
+        "epoch",
+        "epochs",
+        "event",
+        "global_step",
+        "metrics",
+        "stage",
+        "stop_reason",
+        "stopped_early",
+    }
+    assert records[0]["event"] == "fit_end"
+    assert records[0]["best_epoch"] == 1
+    assert records[0]["stop_reason"] is None
+    assert records[0]["stopped_early"] is False
 
 
 def test_json_lines_logger_preserves_fit_start_core_fields_without_context(tmp_path):
