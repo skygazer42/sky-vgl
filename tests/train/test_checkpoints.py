@@ -1,6 +1,7 @@
 import torch
 from torch import nn
 
+from vgl._artifact import ARTIFACT_FORMAT_KEY, ARTIFACT_FORMAT_VERSION_KEY
 from vgl.engine.checkpoints import (
     CHECKPOINT_FORMAT,
     CHECKPOINT_FORMAT_VERSION,
@@ -59,8 +60,8 @@ def test_save_and_load_checkpoint_round_trip(tmp_path):
     payload = load_checkpoint(checkpoint)
 
     assert payload == {
-        "format": CHECKPOINT_FORMAT,
-        "format_version": CHECKPOINT_FORMAT_VERSION,
+        ARTIFACT_FORMAT_KEY: CHECKPOINT_FORMAT,
+        ARTIFACT_FORMAT_VERSION_KEY: CHECKPOINT_FORMAT_VERSION,
         "model_state_dict": {"weight": torch.tensor([4.0])},
         "metadata": {"epoch": 5},
     }
@@ -75,8 +76,8 @@ def test_restore_checkpoint_loads_legacy_state_dict_into_model(tmp_path):
 
     assert torch.equal(model.weight.detach(), torch.tensor([6.0]))
     assert payload == {
-        "format": "legacy.state_dict",
-        "format_version": 0,
+        ARTIFACT_FORMAT_KEY: "legacy.state_dict",
+        ARTIFACT_FORMAT_VERSION_KEY: 0,
         "model_state_dict": {"weight": torch.tensor([6.0])},
         "metadata": {},
     }
@@ -99,8 +100,8 @@ def test_save_and_load_checkpoint_round_trip_with_training_state_sections(tmp_pa
     payload = load_checkpoint(checkpoint)
 
     assert payload == {
-        "format": CHECKPOINT_FORMAT,
-        "format_version": CHECKPOINT_FORMAT_VERSION,
+        ARTIFACT_FORMAT_KEY: CHECKPOINT_FORMAT,
+        ARTIFACT_FORMAT_VERSION_KEY: CHECKPOINT_FORMAT_VERSION,
         "model_state_dict": {"weight": torch.tensor([4.0])},
         "metadata": {"epoch": 5},
         "optimizer_state_dict": {"state": {}, "param_groups": [{"lr": 0.1}]},
@@ -118,8 +119,8 @@ def test_checkpoint_event_fields_include_checkpoint_artifact_metadata(tmp_path):
 
     event_fields = checkpoint_event_fields(checkpoint, save_seconds=0.25)
 
-    assert event_fields["format"] == CHECKPOINT_FORMAT
-    assert event_fields["format_version"] == CHECKPOINT_FORMAT_VERSION
+    assert event_fields[ARTIFACT_FORMAT_KEY] == CHECKPOINT_FORMAT
+    assert event_fields[ARTIFACT_FORMAT_VERSION_KEY] == CHECKPOINT_FORMAT_VERSION
     assert event_fields["path"] == str(checkpoint)
     assert event_fields["size_bytes"] > 0
     assert event_fields["save_seconds"] == 0.25

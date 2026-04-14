@@ -354,6 +354,7 @@ def _sample_non_excluded_destinations(
     count: int,
     *,
     device: torch.device | None = None,
+    generator: torch.Generator | None = None,
 ) -> torch.Tensor:
     device = torch.device(device) if device is not None else None
     excluded = torch.as_tensor(excluded_destinations, dtype=torch.long, device=device).view(-1)
@@ -368,11 +369,11 @@ def _sample_non_excluded_destinations(
     if count <= 0:
         return torch.empty((0,), dtype=torch.long, device=excluded.device)
     if excluded.numel() == 0:
-        return torch.randint(int(num_nodes), (int(count),), device=excluded.device)
+        return torch.randint(int(num_nodes), (int(count),), device=excluded.device, generator=generator)
 
     if available_count <= max(64, int(count) * 4):
         available = _available_destinations_from_excluded(int(num_nodes), excluded)
-        indices = torch.randint(available.numel(), (int(count),), device=excluded.device)
+        indices = torch.randint(available.numel(), (int(count),), device=excluded.device, generator=generator)
         return available[indices]
 
     samples = torch.empty((int(count),), dtype=torch.long, device=excluded.device)
@@ -382,12 +383,12 @@ def _sample_non_excluded_destinations(
     attempts = 0
     while filled < int(count):
         attempts += 1
-        proposed = torch.randint(int(num_nodes), (proposal_size,), device=excluded.device)
+        proposed = torch.randint(int(num_nodes), (proposal_size,), device=excluded.device, generator=generator)
         accepted = proposed[~_membership_mask(proposed, excluded)]
         if accepted.numel() == 0:
             if attempts >= max_attempts:
                 available = _available_destinations_from_excluded(int(num_nodes), excluded)
-                indices = torch.randint(available.numel(), (int(count),), device=excluded.device)
+                indices = torch.randint(available.numel(), (int(count),), device=excluded.device, generator=generator)
                 return available[indices]
             proposal_size = max(proposal_size * 2, int(count) - filled)
             continue
@@ -416,6 +417,7 @@ class UniformNegativeLinkSampler(Sampler):
         exclude_positive_edges=True,
         exclude_seed_edges=False,
         skip_negative_seed_records: bool = False,
+        seed=None,
     ):
         resolved_num_negatives = _as_python_int(num_negatives)
         if resolved_num_negatives < 1:
@@ -424,6 +426,17 @@ class UniformNegativeLinkSampler(Sampler):
         self.exclude_positive_edges = bool(exclude_positive_edges)
         self.exclude_seed_edges = bool(exclude_seed_edges)
         self.skip_negative_seed_records = bool(skip_negative_seed_records)
+        self.seed = None if seed is None else _as_python_int(seed)
+        self._generator = None
+
+    def _resolved_generator(self, *, device: torch.device) -> torch.Generator | None:
+        if self.seed is None:
+            return None
+        generator_device = "cpu" if device.type == "cpu" else device.type
+        if self._generator is None or self._generator.device != torch.device(generator_device):
+            self._generator = torch.Generator(device=generator_device)
+            self._generator.manual_seed(self.seed)
+        return self._generator
 
     def _candidate_destinations(self, item):
         edge_type, _, dst_type = _link_endpoint_types(item)
@@ -573,7 +586,13 @@ class UniformNegativeLinkSampler(Sampler):
         additional_excluded = torch.as_tensor(excluded_destinations, dtype=torch.long, device=device).view(-1)
         if additional_excluded.numel() > 0:
             excluded = torch.cat((excluded, additional_excluded))
-        return _sample_non_excluded_destinations(num_nodes, excluded, int(count), device=device)
+        return _sample_non_excluded_destinations(
+            num_nodes,
+            excluded,
+            int(count),
+            device=device,
+            generator=self._resolved_generator(device=device),
+        )
 
     def sample(self, item):
         if not isinstance(item, LinkPredictionRecord):
@@ -601,12 +620,14 @@ class HardNegativeLinkSampler(UniformNegativeLinkSampler):
         exclude_seed_edges=False,
         skip_negative_seed_records: bool = False,
         hard_negative_dst_metadata_key: str | None = None,
+        seed=None,
     ):
         super().__init__(
             num_negatives=num_negatives,
             exclude_positive_edges=exclude_positive_edges,
             exclude_seed_edges=exclude_seed_edges,
             skip_negative_seed_records=skip_negative_seed_records,
+            seed=seed,
         )
         resolved_num_hard_negatives = _as_python_int(num_hard_negatives)
         if resolved_num_hard_negatives < 0:
@@ -652,7 +673,11 @@ class HardNegativeLinkSampler(UniformNegativeLinkSampler):
         hard_count = min(self.num_negatives, self.num_hard_negatives, int(hard_candidates.numel()))
         selected_hard = torch.empty((0,), dtype=torch.long, device=hard_candidates.device)
         if hard_count > 0:
-            permutation = torch.randperm(hard_candidates.numel(), device=hard_candidates.device)[:hard_count]
+            permutation = torch.randperm(
+                hard_candidates.numel(),
+                device=hard_candidates.device,
+                generator=self._resolved_generator(device=hard_candidates.device),
+            )[:hard_count]
             selected_hard = hard_candidates[permutation]
             for offset, dst_index in enumerate(selected_hard.view(-1)):
                 sampled.append(

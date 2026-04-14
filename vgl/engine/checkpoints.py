@@ -3,7 +3,11 @@ from copy import deepcopy
 
 import torch
 
-from vgl._artifact import build_artifact_metadata
+from vgl._artifact import (
+    ARTIFACT_FORMAT_KEY,
+    ARTIFACT_FORMAT_VERSION_KEY,
+    build_artifact_metadata,
+)
 
 
 CHECKPOINT_FORMAT = "vgl.trainer_checkpoint"
@@ -85,12 +89,12 @@ def checkpoint_event_fields(path, *, save_seconds):
 def normalize_checkpoint_payload(payload):
     if (
         isinstance(payload, dict)
-        and payload.get("format") == CHECKPOINT_FORMAT
+        and payload.get(ARTIFACT_FORMAT_KEY) == CHECKPOINT_FORMAT
         and "model_state_dict" in payload
     ):
         normalized = {
-            "format": payload["format"],
-            "format_version": payload.get("format_version", CHECKPOINT_FORMAT_VERSION),
+            ARTIFACT_FORMAT_KEY: payload[ARTIFACT_FORMAT_KEY],
+            ARTIFACT_FORMAT_VERSION_KEY: payload.get(ARTIFACT_FORMAT_VERSION_KEY, CHECKPOINT_FORMAT_VERSION),
             "model_state_dict": payload["model_state_dict"],
             "metadata": dict(payload.get("metadata") or {}),
         }

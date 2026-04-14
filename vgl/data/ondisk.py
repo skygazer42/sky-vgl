@@ -3,6 +3,11 @@ from pathlib import Path
 
 import torch
 
+from vgl._artifact import (
+    ARTIFACT_FORMAT_KEY,
+    ARTIFACT_FORMAT_VERSION_KEY,
+    build_artifact_metadata,
+)
 from vgl.data.catalog import DatasetManifest, DatasetSplit
 from vgl.graph.graph import Graph
 
@@ -12,8 +17,7 @@ GRAPH_PAYLOAD_FORMAT_VERSION = 1
 
 def serialize_graph(graph: Graph) -> dict:
     return {
-        "format": GRAPH_PAYLOAD_FORMAT,
-        "format_version": GRAPH_PAYLOAD_FORMAT_VERSION,
+        **build_artifact_metadata(GRAPH_PAYLOAD_FORMAT, GRAPH_PAYLOAD_FORMAT_VERSION),
         "nodes": {
             node_type: dict(store.data)
             for node_type, store in graph.nodes.items()
@@ -29,7 +33,7 @@ def serialize_graph(graph: Graph) -> dict:
 def deserialize_graph(payload: dict) -> Graph:
     if not isinstance(payload, dict):
         raise ValueError("graph payload must be a mapping")
-    payload_format = payload.get("format")
+    payload_format = payload.get(ARTIFACT_FORMAT_KEY)
     if payload_format is not None and payload_format != GRAPH_PAYLOAD_FORMAT:
         raise ValueError(f"Unsupported graph payload format: {payload_format!r}")
     if "nodes" not in payload or "edges" not in payload:

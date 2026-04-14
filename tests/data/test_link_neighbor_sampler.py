@@ -359,6 +359,51 @@ def test_hard_negative_link_sampler_accepts_tensor_num_hard_negatives_without_te
         assert sorted(record.dst_index for record in records[1:]) == [3, 4]
 
 
+def test_uniform_negative_link_sampler_seed_is_reproducible_independent_of_global_rng():
+    graph = Graph.homo(
+        edge_index=torch.tensor([[0, 0, 1], [1, 2, 2]]),
+        x=torch.randn(6, 4),
+    )
+    record = LinkPredictionRecord(
+        graph=graph,
+        src_index=0,
+        dst_index=1,
+        label=1,
+    )
+
+    torch.manual_seed(0)
+    first = UniformNegativeLinkSampler(num_negatives=4, seed=7).sample(record)
+
+    torch.manual_seed(999)
+    second = UniformNegativeLinkSampler(num_negatives=4, seed=7).sample(record)
+
+    assert [int(item.dst_index) for item in first[1:]] == [int(item.dst_index) for item in second[1:]]
+
+
+def test_hard_negative_link_sampler_seed_is_reproducible_for_hard_candidate_selection():
+    graph = Graph.homo(
+        edge_index=torch.tensor([[0, 1, 2], [1, 2, 3]]),
+        x=torch.randn(8, 4),
+    )
+    record = LinkPredictionRecord(
+        graph=graph,
+        src_index=0,
+        dst_index=1,
+        label=1,
+        hard_negative_dst=torch.tensor([3, 4, 5, 6]),
+    )
+
+    torch.manual_seed(0)
+    first = HardNegativeLinkSampler(num_negatives=3, num_hard_negatives=2, seed=11).sample(record)
+
+    torch.manual_seed(1234)
+    second = HardNegativeLinkSampler(num_negatives=3, num_hard_negatives=2, seed=11).sample(record)
+
+    assert [(int(item.dst_index), bool(item.metadata.get("hard_negative_sampled", False))) for item in first[1:]] == [
+        (int(item.dst_index), bool(item.metadata.get("hard_negative_sampled", False))) for item in second[1:]
+    ]
+
+
 def test_link_neighbor_sampler_accepts_tensor_ctor_scalars_without_tensor_int(monkeypatch):
     with torch.random.fork_rng(devices=[]):
         torch.manual_seed(0)

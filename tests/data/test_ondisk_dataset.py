@@ -2,6 +2,7 @@ import json
 
 import torch
 
+from vgl._artifact import ARTIFACT_FORMAT_KEY, ARTIFACT_FORMAT_VERSION_KEY
 from vgl import Graph
 from vgl.data.catalog import DatasetManifest, DatasetSplit
 from vgl.data.ondisk import (
@@ -53,8 +54,8 @@ def test_ondisk_graph_dataset_round_trips_manifest_and_graphs(tmp_path):
 def test_serialize_graph_emits_explicit_format_metadata():
     payload = serialize_graph(_graphs()[0])
 
-    assert payload["format"] == GRAPH_PAYLOAD_FORMAT
-    assert payload["format_version"] == GRAPH_PAYLOAD_FORMAT_VERSION
+    assert payload[ARTIFACT_FORMAT_KEY] == GRAPH_PAYLOAD_FORMAT
+    assert payload[ARTIFACT_FORMAT_VERSION_KEY] == GRAPH_PAYLOAD_FORMAT_VERSION
     assert "nodes" in payload
     assert "edges" in payload
 
