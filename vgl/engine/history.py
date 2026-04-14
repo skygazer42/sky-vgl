@@ -1,3 +1,33 @@
+PROFILE_TOTAL_KEYS = (
+    "batch_materialization_seconds_total",
+    "forward_seconds_total",
+    "backward_seconds_total",
+    "optimizer_step_seconds_total",
+    "train_step_seconds_total",
+    "train_stage_seconds_total",
+    "val_stage_seconds_total",
+    "test_stage_seconds_total",
+    "sanity_val_stage_seconds_total",
+)
+PROFILE_COUNT_KEYS = ("train_step_count",)
+PROFILE_DERIVED_KEYS = ("train_step_seconds_avg",)
+
+
+def normalize_profile(profile, *, profiler):
+    if profiler != "simple" or profile is None:
+        return None
+    if not isinstance(profile, dict):
+        raise ValueError("profile must be a mapping")
+    normalized = {key: float(profile.get(key, 0.0)) for key in PROFILE_TOTAL_KEYS}
+    for key in PROFILE_COUNT_KEYS:
+        normalized[key] = int(profile.get(key, 0))
+    count = normalized["train_step_count"]
+    normalized["train_step_seconds_avg"] = (
+        0.0 if count == 0 else float(normalized["train_step_seconds_total"]) / count
+    )
+    return normalized
+
+
 class TrainingHistory(dict):
     def __init__(
         self,
@@ -55,6 +85,10 @@ class TrainingHistory(dict):
             profiler=state.get("profiler"),
         )
         history.update(dict(state))
+        history["profile"] = normalize_profile(
+            state.get("profile"),
+            profiler=history["profiler"],
+        )
         return history
 
     def record_epoch(
@@ -98,4 +132,4 @@ class TrainingHistory(dict):
         self["fit_elapsed_seconds"] = (
             None if fit_elapsed_seconds is None else float(fit_elapsed_seconds)
         )
-        self["profile"] = None if profile is None else dict(profile)
+        self["profile"] = normalize_profile(profile, profiler=self["profiler"])

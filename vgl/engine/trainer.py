@@ -11,7 +11,12 @@ from vgl.engine.checkpoints import checkpoint_event_fields
 from vgl.engine.checkpoints import load_checkpoint as load_trainer_checkpoint
 from vgl.engine.checkpoints import restore_checkpoint as restore_trainer_checkpoint
 from vgl.engine.checkpoints import save_checkpoint as save_trainer_checkpoint
-from vgl.engine.history import TrainingHistory
+from vgl.engine.history import (
+    PROFILE_COUNT_KEYS,
+    PROFILE_TOTAL_KEYS,
+    TrainingHistory,
+    normalize_profile,
+)
 from vgl.engine.logging import ConsoleLogger
 from vgl.engine.monitoring import extract_monitor_value, is_improvement, resolve_monitor
 from vgl.graph import Graph, GraphBatch, GraphView, LinkPredictionBatch, NodeBatch, TemporalEventBatch
@@ -22,19 +27,6 @@ from torch.optim.lr_scheduler import ReduceLROnPlateau
 
 _SUPPORTED_PRECISIONS = {"32", "bf16-mixed", "fp16-mixed"}
 _SUPPORTED_SCHEDULER_INTERVALS = {"epoch", "step"}
-_PROFILE_TOTAL_KEYS = (
-    "batch_materialization_seconds_total",
-    "forward_seconds_total",
-    "backward_seconds_total",
-    "optimizer_step_seconds_total",
-    "train_step_seconds_total",
-    "train_stage_seconds_total",
-    "val_stage_seconds_total",
-    "test_stage_seconds_total",
-    "sanity_val_stage_seconds_total",
-)
-_PROFILE_COUNT_KEYS = ("train_step_count",)
-_PROFILE_DERIVED_KEYS = ("train_step_seconds_avg",)
 
 
 def _validate_init_config(
@@ -495,8 +487,8 @@ class Trainer:
         return set(range(step, total_batches, step))
 
     def _empty_profile(self):
-        profile = {key: 0.0 for key in _PROFILE_TOTAL_KEYS}
-        profile.update({key: 0 for key in _PROFILE_COUNT_KEYS})
+        profile = {key: 0.0 for key in PROFILE_TOTAL_KEYS}
+        profile.update({key: 0 for key in PROFILE_COUNT_KEYS})
         return profile
 
     def _profile_add(self, key, value):
@@ -507,15 +499,7 @@ class Trainer:
             self._epoch_profile[key] += value
 
     def _profile_snapshot(self, profile):
-        if self.profiler != "simple" or profile is None:
-            return None
-        snapshot = {key: float(profile[key]) for key in _PROFILE_TOTAL_KEYS}
-        count = int(profile.get("train_step_count", 0))
-        snapshot["train_step_count"] = count
-        snapshot["train_step_seconds_avg"] = (
-            0.0 if count == 0 else float(profile["train_step_seconds_total"]) / count
-        )
-        return snapshot
+        return normalize_profile(profile, profiler=self.profiler)
 
     def _record_with_run_context(self, record):
         record["run_name"] = self.run_name

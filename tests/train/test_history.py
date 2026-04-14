@@ -73,3 +73,48 @@ def test_training_history_records_epochs_and_stop_state():
 def test_training_history_from_state_dict_rejects_missing_required_keys():
     with pytest.raises(ValueError, match="missing required keys"):
         TrainingHistory.from_state_dict({"epochs": 3})
+
+
+def test_training_history_from_state_dict_normalizes_simple_profiler_profile_schema():
+    history = TrainingHistory.from_state_dict(
+        {
+            "epochs": 3,
+            "monitor": "val_loss",
+            "profiler": "simple",
+            "profile": {
+                "forward_seconds_total": 1.5,
+                "train_step_count": 3,
+                "unknown_extra": 99.0,
+            },
+        }
+    )
+
+    assert tuple(history["profile"]) == (
+        "batch_materialization_seconds_total",
+        "forward_seconds_total",
+        "backward_seconds_total",
+        "optimizer_step_seconds_total",
+        "train_step_seconds_total",
+        "train_stage_seconds_total",
+        "val_stage_seconds_total",
+        "test_stage_seconds_total",
+        "sanity_val_stage_seconds_total",
+        "train_step_count",
+        "train_step_seconds_avg",
+    )
+    assert history["profile"]["forward_seconds_total"] == 1.5
+    assert history["profile"]["train_step_count"] == 3
+    assert history["profile"]["train_step_seconds_avg"] == 0.0
+    assert "unknown_extra" not in history["profile"]
+
+
+def test_training_history_from_state_dict_rejects_non_mapping_profile():
+    with pytest.raises(ValueError, match="profile must be a mapping"):
+        TrainingHistory.from_state_dict(
+            {
+                "epochs": 3,
+                "monitor": "val_loss",
+                "profiler": "simple",
+                "profile": ["bad"],
+            }
+        )
