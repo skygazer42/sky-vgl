@@ -45,6 +45,14 @@ def _preferred_import_smokes() -> tuple[tuple[str, str], ...]:
     return tuple(_contracts_module().PREFERRED_IMPORT_SMOKES)
 
 
+def _legacy_import_smokes() -> tuple[tuple[str, str, str], ...]:
+    return (
+        ("vgl.core", "Graph", "LegacyCoreGraph"),
+        ("vgl.train", "Trainer", "LegacyTrainer"),
+        ("vgl.data", "Loader", "LegacyLoader"),
+    )
+
+
 def _interop_backends() -> tuple[str, ...]:
     return ("none", *_real_interop_backends(), "all")
 
@@ -242,6 +250,10 @@ def _build_import_check_script(
         f"from {module_name} import {symbol}\n"
         for module_name, symbol in _preferred_import_smokes()
     )
+    legacy_imports = "".join(
+        f"from {module_name} import {symbol} as {alias}\n"
+        for module_name, symbol, alias in _legacy_import_smokes()
+    )
     symbol_prints = "".join(f"print({symbol})\n" for symbol in wheel_import_symbols)
     return (
         "import site\n"
@@ -254,6 +266,7 @@ def _build_import_check_script(
         "root_elapsed = time.perf_counter() - start\n"
         f"from vgl import {root_imports}\n"
         f"{preferred_imports}"
+        f"{legacy_imports}"
         f"repo_root = Path({str(repo_root)!r}).resolve()\n"
         "module_path = Path(vgl.__file__).resolve()\n"
         "assert repo_root not in module_path.parents, module_path\n"

@@ -179,6 +179,19 @@ def test_build_import_check_script_uses_root_and_preferred_import_paths():
     assert "repo_root not in module_path.parents" in script
 
 
+def test_build_import_check_script_also_uses_legacy_compat_import_paths():
+    release_smoke = _load_release_smoke_module()
+
+    script = release_smoke._build_import_check_script(
+        repo_root=Path("/tmp/repo"),
+        dependency_paths=[],
+    )
+
+    assert "from vgl.core import Graph as LegacyCoreGraph" in script
+    assert "from vgl.train import Trainer as LegacyTrainer" in script
+    assert "from vgl.data import Loader as LegacyLoader" in script
+
+
 def test_backend_import_module_name_returns_expected_names():
     release_smoke = _load_release_smoke_module()
 

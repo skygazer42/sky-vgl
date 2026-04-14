@@ -113,6 +113,16 @@ VGL is a PyTorch-first graph framework that bundles Graph, Task, Trainer, sparse
 
 ---
 
+## 运行与发布入口
+
+如果你不是第一次打开文档，下面这三个页面最适合直接定位运行、发布和支持边界：
+
+- [Support Matrix](support-matrix.md) — 查看当前 CI / release 实际验证过的 Python、PyTorch、extras、interop 组合
+- [发布指南](releasing.md) — 查看 release smoke、artifact interop、失败分流和 issue intake 入口
+- [FAQ](faq.md) — 查看安装、Graph、采样、训练和迁移的高频问题
+
+---
+
 ## 核心特性
 
 | 特性 | 说明 |

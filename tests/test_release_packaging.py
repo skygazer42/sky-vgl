@@ -180,6 +180,18 @@ def test_changelog_unreleased_reserves_api_performance_interop_and_migration_sec
     assert "### Migration" in changelog
 
 
+def test_index_and_faq_link_to_support_and_release_guidance():
+    index_text = (REPO_ROOT / "docs" / "index.md").read_text(encoding="utf-8")
+    faq_text = (REPO_ROOT / "docs" / "faq.md").read_text(encoding="utf-8")
+
+    assert "[Support Matrix](support-matrix.md)" in index_text
+    assert "[发布指南](releasing.md)" in index_text
+    assert "[FAQ](faq.md)" in index_text
+    assert "[Support Matrix](support-matrix.md)" in faq_text
+    assert "[发布指南](releasing.md)" in faq_text
+    assert "Release failure triage" in faq_text
+
+
 def test_shared_repo_script_import_helper_loads_repo_local_modules():
     from scripts.repo_script_imports import load_repo_module
 

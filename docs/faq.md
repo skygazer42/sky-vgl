@@ -16,11 +16,19 @@ Python 3.10 及以上版本。
 pip install "sky-vgl[full]"
 ```
 
-### 去哪里确认受支持的环境组合和发布验证流程？
+### 去哪里看当前真正验证过的环境组合？
 
-- 日常安装与 extras 组合，先看 [Support Matrix](support-matrix.md)
-- 具体安装命令与本地校验，查看 [安装指南](getting-started/installation.md)
-- 如果你在做发布、回归排查或 artifact smoke，查看 [发布指南](releasing.md)
+先看 [Support Matrix](support-matrix.md)。这里列的是 CI 和 release smoke 实际跑过的 Python、PyTorch、extras、interop 组合，而不是宽泛的理论支持范围。具体安装命令和本地验证步骤见 [安装指南](getting-started/installation.md)。
+
+### 发布失败或互操作失败时应该先看哪里？
+
+先看 [发布指南](releasing.md) 里的 `Release failure triage` 和 `Issue intake`。那里把：
+
+- `ci.yml -> package-check`
+- `interop-smoke.yml -> backend-smoke`
+- `publish.yml -> build`
+
+这些失败路径和本地复现命令对应起来了。
 
 ## Graph
 
