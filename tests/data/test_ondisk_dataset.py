@@ -4,7 +4,13 @@ import torch
 
 from vgl import Graph
 from vgl.data.catalog import DatasetManifest, DatasetSplit
-from vgl.data.ondisk import OnDiskGraphDataset, serialize_graph
+from vgl.data.ondisk import (
+    GRAPH_PAYLOAD_FORMAT,
+    GRAPH_PAYLOAD_FORMAT_VERSION,
+    OnDiskGraphDataset,
+    deserialize_graph,
+    serialize_graph,
+)
 
 
 def _graphs():
@@ -42,6 +48,33 @@ def test_ondisk_graph_dataset_round_trips_manifest_and_graphs(tmp_path):
     assert len(dataset) == 2
     assert torch.equal(dataset[0].edge_index, torch.tensor([[0], [1]]))
     assert torch.equal(dataset[1].x, torch.tensor([[0.0], [1.0], [0.0]]))
+
+
+def test_serialize_graph_emits_explicit_format_metadata():
+    payload = serialize_graph(_graphs()[0])
+
+    assert payload["format"] == GRAPH_PAYLOAD_FORMAT
+    assert payload["format_version"] == GRAPH_PAYLOAD_FORMAT_VERSION
+    assert "nodes" in payload
+    assert "edges" in payload
+
+
+def test_deserialize_graph_accepts_legacy_payload_without_format_metadata():
+    legacy_payload = {
+        "nodes": {"node": {"x": torch.tensor([[1.0], [0.0]])}},
+        "edges": {
+            ("node", "to", "node"): {
+                "edge_index": torch.tensor([[0], [1]]),
+                "weight": torch.tensor([1.0]),
+            }
+        },
+        "time_attr": None,
+    }
+
+    restored = deserialize_graph(legacy_payload)
+
+    assert torch.equal(restored.edge_index, torch.tensor([[0], [1]]))
+    assert torch.equal(restored.edata["weight"], torch.tensor([1.0]))
 
 
 def test_ondisk_graph_dataset_round_trips_heterogeneous_graphs(tmp_path):

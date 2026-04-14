@@ -99,12 +99,18 @@ class Loader:
 
         if self.prefetch < 0:
             raise ValueError("prefetch must be >= 0")
+        if self.prefetch > 0 and self.num_workers > 0:
+            raise ValueError("prefetch is only supported with num_workers == 0; use prefetch_factor for worker prefetch")
         if self.prefetch_factor is not None and self.num_workers <= 0:
             raise ValueError("prefetch_factor requires num_workers > 0")
         if self.persistent_workers and self.num_workers <= 0:
             raise ValueError("persistent_workers requires num_workers > 0")
         if self.num_workers > 0 and not self._is_map_style_dataset():
             raise TypeError("Loader with workers requires a map-style dataset with __len__ and __getitem__")
+
+    @property
+    def prefetch_limit(self) -> int:
+        return self.batch_size + self.prefetch
 
     def _is_map_style_dataset(self):
         return hasattr(self.dataset, "__len__") and hasattr(self.dataset, "__getitem__")
@@ -205,16 +211,16 @@ class Loader:
                     break
                 pending.append(self._sample_item(item))
 
-        fill_pending(self.batch_size + self.prefetch)
+        fill_pending(self.prefetch_limit)
         while pending:
             batch = []
             for _ in range(min(self.batch_size, len(pending))):
                 self._append_sampled(batch, pending.popleft())
             if not batch:
-                fill_pending(self.batch_size + self.prefetch)
+                fill_pending(self.prefetch_limit)
                 continue
             yield self._finalize_batch(batch)
-            fill_pending(self.batch_size + self.prefetch)
+            fill_pending(self.prefetch_limit)
 
 
 DataLoader = Loader

@@ -1,7 +1,7 @@
 import torch
 
 from vgl import Graph
-from vgl.data.ondisk import deserialize_graph
+from vgl.data.ondisk import GRAPH_PAYLOAD_FORMAT, GRAPH_PAYLOAD_FORMAT_VERSION, deserialize_graph
 from vgl.distributed.partition import load_partition_manifest
 from vgl.distributed.writer import write_partitioned_graph
 
@@ -20,6 +20,10 @@ def test_partition_writer_splits_graph_into_local_files(tmp_path):
     assert manifest.num_partitions == 2
     assert loaded.owner(0).partition_id == 0
     assert loaded.owner(3).partition_id == 1
+    assert part0["graph"]["format"] == GRAPH_PAYLOAD_FORMAT
+    assert part0["graph"]["format_version"] == GRAPH_PAYLOAD_FORMAT_VERSION
+    assert part1["graph"]["format"] == GRAPH_PAYLOAD_FORMAT
+    assert part1["graph"]["format_version"] == GRAPH_PAYLOAD_FORMAT_VERSION
     part0_graph = deserialize_graph(part0["graph"])
     part1_graph = deserialize_graph(part1["graph"])
 

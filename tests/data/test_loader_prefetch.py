@@ -73,6 +73,41 @@ def test_loader_prefetch_is_bounded_before_first_yield():
     assert sampler.calls == ["a", "b", "c"]
 
 
+def test_loader_prefetch_limit_equals_batch_plus_prefetch():
+    loader = Loader(
+        dataset=ListDataset([_sample("a", 1)]),
+        sampler=FullGraphSampler(),
+        batch_size=2,
+        prefetch=3,
+    )
+
+    assert loader.prefetch_limit == 5
+
+
+def test_loader_zero_prefetch_samples_only_current_batch_before_first_yield():
+    dataset = ListDataset([
+        _sample("a", 1),
+        _sample("b", 0),
+        _sample("c", 1),
+    ])
+    sampler = CountingSampler()
+    loader = Loader(
+        dataset=dataset,
+        sampler=sampler,
+        batch_size=2,
+        label_source="metadata",
+        label_key="label",
+        prefetch=0,
+    )
+
+    iterator = iter(loader)
+    first_batch = next(iterator)
+
+    assert torch.equal(first_batch.labels, torch.tensor([1, 0]))
+    assert loader.prefetch_limit == 2
+    assert sampler.calls == ["a", "b"]
+
+
 def test_loader_prefetch_accepts_tensor_scalar_without_tensor_int(monkeypatch):
     dataset = ListDataset([
         _sample("a", 1),

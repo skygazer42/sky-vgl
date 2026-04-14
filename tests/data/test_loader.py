@@ -95,6 +95,19 @@ def test_loader_rejects_prefetch_factor_without_workers():
         )
 
 
+def test_loader_rejects_prefetch_with_workers():
+    dataset = SequenceDataset([1])
+
+    with pytest.raises(ValueError, match="prefetch is only supported with num_workers == 0"):
+        Loader(
+            dataset=dataset,
+            sampler=FullGraphSampler(),
+            batch_size=1,
+            prefetch=1,
+            num_workers=1,
+        )
+
+
 def test_loader_rejects_persistent_workers_without_workers():
     dataset = SequenceDataset([1])
 
