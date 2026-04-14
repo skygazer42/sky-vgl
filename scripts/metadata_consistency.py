@@ -76,7 +76,13 @@ def _changelog(repo_root: Path) -> tuple[bool, str]:
     release_version = _contracts_module().RELEASE_VERSION
     changelog = (repo_root / "docs" / "changelog.md").read_text(encoding="utf-8")
     has_current_section = f"## v{release_version}" in changelog
-    has_structured_headings = all(label in changelog for label in ("### Added", "### Changed", "### Fixed"))
+    has_structured_headings = (
+        "## Unreleased" in changelog
+        and all(
+            heading in changelog
+            for heading in ("### API", "### Performance", "### Interop", "### Migration")
+        )
+    )
     return _check(has_current_section and has_structured_headings, "changelog contains versioned structured sections")
 
 

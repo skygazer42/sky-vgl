@@ -101,6 +101,23 @@ _CORE_RECORD_FIELDS = (
     "metrics",
 )
 
+_EVENT_CORE_RECORD_FIELDS = {
+    "fit_start": (
+        "monitor",
+        "model_name",
+        "task_name",
+        "optimizer_name",
+        "lr_scheduler_name",
+        "precision",
+        "total_parameters",
+        "trainable_parameters",
+    ),
+    "exception": (
+        "exception_type",
+        "exception_message",
+    ),
+}
+
 
 def _filter_metrics(metrics, *, metric_names, show_learning_rate):
     filtered = {}
@@ -115,6 +132,8 @@ def _filter_metrics(metrics, *, metric_names, show_learning_rate):
 
 def _filter_record(record, *, metric_names, include_context, show_learning_rate):
     filtered = {}
+    core_fields = set(_CORE_RECORD_FIELDS)
+    core_fields.update(_EVENT_CORE_RECORD_FIELDS.get(record.get("event"), ()))
     for key, value in record.items():
         if key == "metrics":
             filtered["metrics"] = _filter_metrics(
@@ -123,7 +142,7 @@ def _filter_record(record, *, metric_names, include_context, show_learning_rate)
                 show_learning_rate=show_learning_rate,
             )
             continue
-        if include_context or key in _CORE_RECORD_FIELDS:
+        if include_context or key in core_fields:
             filtered[key] = value
     if "metrics" not in filtered:
         filtered["metrics"] = {}

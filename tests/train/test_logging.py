@@ -110,6 +110,13 @@ class RaiseOnEpochEndCallback(Callback):
         raise RuntimeError("callback boom")
 
 
+class RaiseOnFirstEpochCallback(Callback):
+    def on_epoch_end(self, trainer, epoch, train_summary, val_summary, history):
+        del trainer, train_summary, val_summary, history
+        if epoch == 1:
+            raise RuntimeError("boom")
+
+
 def _load_event_accumulator(log_dir):
     accumulator = EventAccumulator(str(log_dir))
     accumulator.Reload()
@@ -462,6 +469,98 @@ def test_json_lines_logger_can_filter_metrics_and_drop_context(tmp_path):
     assert set(records[0]["metrics"]) == {"train_loss", "val_loss"}
     assert "lr" not in records[0]["metrics"]
     assert records[1].keys() == records[0].keys()
+
+
+def test_json_lines_logger_preserves_fit_start_core_fields_without_context(tmp_path):
+    path = tmp_path / "fit_start.jsonl"
+    trainer = Trainer(
+        model=ToyModel(),
+        task=ToyTask(),
+        optimizer=torch.optim.SGD,
+        lr=0.1,
+        max_epochs=1,
+        loggers=[
+            JSONLinesLogger(
+                path,
+                flush=True,
+                events={"fit_start"},
+                include_context=False,
+            )
+        ],
+        enable_console_logging=False,
+    )
+
+    trainer.fit([ToyBatch(1.0)])
+
+    records = [json.loads(line) for line in path.read_text().splitlines()]
+
+    assert len(records) == 1
+    assert records[0].keys() == {
+        "batch_idx",
+        "epoch",
+        "epochs",
+        "event",
+        "global_step",
+        "metrics",
+        "monitor",
+        "model_name",
+        "task_name",
+        "optimizer_name",
+        "lr_scheduler_name",
+        "precision",
+        "stage",
+        "total_parameters",
+        "trainable_parameters",
+    }
+    assert records[0]["event"] == "fit_start"
+    assert records[0]["monitor"] == "train_loss"
+    assert records[0]["model_name"] == "ToyModel"
+    assert records[0]["task_name"] == "ToyTask"
+    assert records[0]["optimizer_name"] == "SGD"
+    assert records[0]["metrics"] == {}
+    assert "callback_names" not in records[0]
+    assert "logger_names" not in records[0]
+
+
+def test_csv_logger_preserves_exception_core_fields_without_context(tmp_path):
+    path = tmp_path / "exception.csv"
+    trainer = Trainer(
+        model=ToyModel(),
+        task=ToyTask(),
+        optimizer=torch.optim.SGD,
+        lr=0.1,
+        max_epochs=1,
+        callbacks=[RaiseOnFirstEpochCallback()],
+        loggers=[
+            CSVLogger(
+                path,
+                flush=True,
+                events={"exception"},
+                include_context=False,
+            )
+        ],
+        enable_console_logging=False,
+    )
+
+    with pytest.raises(RuntimeError, match="boom"):
+        trainer.fit([ToyBatch(1.0)])
+
+    rows = list(csv.DictReader(path.read_text().splitlines()))
+
+    assert len(rows) == 1
+    assert set(rows[0]) == {
+        "event",
+        "stage",
+        "epoch",
+        "epochs",
+        "global_step",
+        "batch_idx",
+        "exception_type",
+        "exception_message",
+    }
+    assert rows[0]["event"] == "exception"
+    assert rows[0]["exception_type"] == "RuntimeError"
+    assert rows[0]["exception_message"] == "boom"
 
 
 def test_json_lines_logger_can_hide_learning_rate_metrics(tmp_path):
