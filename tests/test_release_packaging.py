@@ -783,6 +783,11 @@ def test_release_readme_documents_public_install_paths():
     assert "interop-smoke" in releasing
     assert "builds the artifacts" in releasing
     assert "python scripts/interop_smoke.py --backend all" in releasing
+    assert "Release failure triage" in releasing
+    assert "Issue intake" in releasing
+    assert "Performance Regression" in releasing
+    assert "Interop Failure" in releasing
+    assert "Dataset Or On-Disk Bug" in releasing
     assert "providing automated artifact-level verification for the combined backend scenario" in support_matrix
     assert "python scripts/benchmark_hotpaths.py --preset ci --output artifacts/benchmark-hotpaths.json" in training
     assert "schema_version" in training

@@ -1,0 +1,27 @@
+name: Performance Regression
+description: Report a throughput or runtime regression with benchmark evidence.
+title: "[performance] "
+labels:
+  - performance
+body:
+  - type: textarea
+    id: summary
+    attributes:
+      label: Summary
+      description: Describe the workload, the regression, and what changed.
+    validations:
+      required: true
+  - type: textarea
+    id: benchmark
+    attributes:
+      label: Benchmark evidence
+      description: Include the command and relevant output from `python scripts/benchmark_hotpaths.py --preset ci --output artifacts/benchmark-hotpaths.json`.
+    validations:
+      required: true
+  - type: textarea
+    id: environment
+    attributes:
+      label: Environment
+      description: Include Python, PyTorch, hardware, and OS details.
+    validations:
+      required: true

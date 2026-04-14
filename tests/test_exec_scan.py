@@ -81,6 +81,25 @@ def test_manual_interop_workflow_covers_pyg_and_dgl():
     assert "python scripts/release_smoke.py --artifact-dir dist --kind wheel --interop-backend all" in workflow_text
 
 
+def test_issue_templates_cover_performance_interop_and_dataset_intake():
+    template_root = REPO_ROOT / ".github" / "ISSUE_TEMPLATE"
+    config = (template_root / "config.yml").read_text(encoding="utf-8")
+
+    performance = (template_root / "performance-regression.yml").read_text(encoding="utf-8")
+    interop = (template_root / "interop-failure.yml").read_text(encoding="utf-8")
+    dataset = (template_root / "dataset-bug.yml").read_text(encoding="utf-8")
+
+    assert "blank_issues_enabled: false" in config
+    assert "scripts/benchmark_hotpaths.py" in performance
+    assert "benchmark-hotpaths.json" in performance
+    assert "scripts/interop_smoke.py" in interop
+    assert "scripts/release_smoke.py" in interop
+    assert "sky-vgl[pyg]" in interop
+    assert "sky-vgl[dgl]" in interop
+    assert "graph payload format/version" in dataset
+    assert "Minimal Reproduction" in dataset
+
+
 def test_ci_and_publish_build_jobs_gate_all_backend_artifact_interop():
     ci_install_step = workflow_step_text(
         REPO_ROOT / ".github" / "workflows" / "ci.yml",

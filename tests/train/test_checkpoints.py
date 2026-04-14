@@ -4,6 +4,7 @@ from torch import nn
 from vgl.engine.checkpoints import (
     CHECKPOINT_FORMAT,
     CHECKPOINT_FORMAT_VERSION,
+    checkpoint_event_fields,
     load_checkpoint,
     restore_checkpoint,
     save_checkpoint,
@@ -109,3 +110,16 @@ def test_save_and_load_checkpoint_round_trip_with_training_state_sections(tmp_pa
         "trainer_state": {"global_step": 3, "best_epoch": 2},
         "history_state": {"epochs": 5, "completed_epochs": 2},
     }
+
+
+def test_checkpoint_event_fields_include_checkpoint_artifact_metadata(tmp_path):
+    checkpoint = tmp_path / "event.pt"
+    save_checkpoint(checkpoint, {"weight": torch.tensor([1.0])})
+
+    event_fields = checkpoint_event_fields(checkpoint, save_seconds=0.25)
+
+    assert event_fields["format"] == CHECKPOINT_FORMAT
+    assert event_fields["format_version"] == CHECKPOINT_FORMAT_VERSION
+    assert event_fields["path"] == str(checkpoint)
+    assert event_fields["size_bytes"] > 0
+    assert event_fields["save_seconds"] == 0.25

@@ -3,6 +3,8 @@ from copy import deepcopy
 
 import torch
 
+from vgl._artifact import build_artifact_metadata
+
 
 CHECKPOINT_FORMAT = "vgl.trainer_checkpoint"
 CHECKPOINT_FORMAT_VERSION = 1
@@ -20,8 +22,7 @@ def build_checkpoint_payload(
     history_state=None,
 ):
     payload = {
-        "format": CHECKPOINT_FORMAT,
-        "format_version": CHECKPOINT_FORMAT_VERSION,
+        **build_artifact_metadata(CHECKPOINT_FORMAT, CHECKPOINT_FORMAT_VERSION),
         "model_state_dict": deepcopy(dict(model_state_dict)),
         "metadata": dict(metadata or {}),
     }
@@ -74,6 +75,7 @@ def save_checkpoint(
 def checkpoint_event_fields(path, *, save_seconds):
     checkpoint_path = Path(path)
     return {
+        **build_artifact_metadata(CHECKPOINT_FORMAT, CHECKPOINT_FORMAT_VERSION),
         "path": str(checkpoint_path),
         "size_bytes": int(checkpoint_path.stat().st_size),
         "save_seconds": float(save_seconds),

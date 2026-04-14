@@ -65,6 +65,32 @@ before proving combined artifact interop.
 git log --oneline --decorate <previous-tag>..HEAD
 ```
 
+## Release failure triage
+
+Use the failing workflow and step name to narrow the fix path before rerunning anything:
+
+- `ci.yml -> package-check` covers artifact build, metadata validation, release smoke, and all-backend artifact interop
+- `interop-smoke.yml -> backend-smoke` covers single-backend checkout interop smoke
+- `interop-smoke.yml -> all-artifact-smoke` covers combined built-wheel backend validation
+- `publish.yml -> build` is the real publishing gate and should only be retried after the equivalent local commands pass
+
+Recommended order:
+
+1. Re-run the exact failing command locally.
+2. Preserve the smoke output or benchmark artifact in the PR or issue.
+3. If the failure is backend-specific, compare `python scripts/interop_smoke.py --backend <name>` with `python scripts/release_smoke.py --artifact-dir dist --kind wheel --interop-backend <name>`.
+4. If the failure is packaging-specific, inspect `python scripts/release_contract_scan.py --artifact-dir dist` and `python -m twine check dist/*.whl dist/*.tar.gz` before rebuilding.
+
+## Issue intake
+
+The repository now ships focused GitHub issue templates under `.github/ISSUE_TEMPLATE/`:
+
+- `Performance Regression` asks for `scripts/benchmark_hotpaths.py` evidence and the generated `benchmark-hotpaths.json`
+- `Interop Failure` asks for `scripts/interop_smoke.py` or `scripts/release_smoke.py` output plus the exact extra install command
+- `Dataset Or On-Disk Bug` asks for a `Minimal Reproduction` plus any graph payload format/version or `manifest.json` evidence
+
+Keep these templates aligned with the workflow names and smoke commands above so incoming reports already contain the artifacts maintainers need.
+
 ## TestPyPI
 
 Use the GitHub `publish` workflow in manual mode to publish to TestPyPI first.

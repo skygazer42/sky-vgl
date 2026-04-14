@@ -1,0 +1,27 @@
+name: Dataset Or On-Disk Bug
+description: Report dataset loading, manifest, or on-disk storage regressions.
+title: "[dataset] "
+labels:
+  - dataset
+body:
+  - type: textarea
+    id: summary
+    attributes:
+      label: Summary
+      description: Name the dataset, manifest, or storage layout that failed.
+    validations:
+      required: true
+  - type: textarea
+    id: reproduction
+    attributes:
+      label: Minimal Reproduction
+      description: Include the smallest script, loader invocation, or manifest snippet that reproduces the problem.
+    validations:
+      required: true
+  - type: textarea
+    id: payload
+    attributes:
+      label: Supporting artifacts
+      description: Include any relevant `graph payload format/version` details, `manifest.json` content, or stack traces.
+    validations:
+      required: true

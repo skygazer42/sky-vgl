@@ -1,0 +1,5 @@
+blank_issues_enabled: false
+contact_links:
+  - name: VGL Documentation
+    url: https://skygazer42.github.io/sky-vgl/
+    about: Review the published guides, support matrix, and release notes before filing an issue.

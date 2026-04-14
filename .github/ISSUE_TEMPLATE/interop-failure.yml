@@ -1,0 +1,27 @@
+name: Interop Failure
+description: Report a DGL/PyG interop problem with smoke output and install details.
+title: "[interop] "
+labels:
+  - interop
+body:
+  - type: textarea
+    id: backend
+    attributes:
+      label: Backend
+      description: State whether the failure is on PyG, DGL, or combined `all` mode.
+    validations:
+      required: true
+  - type: textarea
+    id: smoke_output
+    attributes:
+      label: Smoke output
+      description: Paste the output from `python scripts/interop_smoke.py --backend ...` or `python scripts/release_smoke.py --artifact-dir dist --kind wheel --interop-backend ...`.
+    validations:
+      required: true
+  - type: textarea
+    id: install_details
+    attributes:
+      label: Install details
+      description: Include the exact extra install command, such as `pip install "sky-vgl[pyg]"` or `pip install "sky-vgl[dgl]"`.
+    validations:
+      required: true

@@ -2,9 +2,13 @@ from dataclasses import dataclass
 
 import torch
 
+from vgl._artifact import build_artifact_metadata
 from vgl.graph.schema import GraphSchema
 from vgl.graph.stores import EdgeStore, NodeStore
 from vgl.graph.view import GraphView, _as_python_int
+
+GRAPH_FORMAT = "vgl.graph"
+GRAPH_FORMAT_VERSION = 1
 
 
 @dataclass(slots=True)
@@ -56,6 +60,17 @@ class Graph:
             else:
                 edge_data[key] = value
         return edge_data
+
+    def artifact_metadata(self) -> dict[str, object]:
+        return build_artifact_metadata(
+            GRAPH_FORMAT,
+            GRAPH_FORMAT_VERSION,
+            metadata={
+                "node_types": tuple(self.schema.node_types),
+                "edge_types": tuple(self.schema.edge_types),
+                "time_attr": self.schema.time_attr,
+            },
+        )
 
     def _mark_sparse_format_created(self, format_name: str) -> None:
         created = set(self.created_sparse_formats)
