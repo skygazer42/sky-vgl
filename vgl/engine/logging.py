@@ -140,6 +140,8 @@ _EVENT_CORE_RECORD_FIELDS = {
         "monitor_value",
         "format",
         "format_version",
+        "exception_type",
+        "exception_message",
     ),
 }
 

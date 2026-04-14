@@ -377,6 +377,38 @@ def test_model_checkpoint_callback_emits_checkpoint_saved_events(tmp_path):
     assert checkpoint_events[1]["save_seconds"] >= 0.0
 
 
+def test_model_checkpoint_callback_emits_exception_checkpoint_saved_event(tmp_path):
+    logger = RecordingLogger()
+    callback = ModelCheckpoint(
+        tmp_path / "checkpoints",
+        save_top_k=0,
+        save_last=False,
+        save_on_exception=True,
+    )
+    trainer = Trainer(
+        model=ToyModel(),
+        task=ToyTask(),
+        optimizer=torch.optim.SGD,
+        lr=0.1,
+        max_epochs=2,
+        callbacks=[callback, RaiseOnFirstEpochCallback()],
+        loggers=[logger],
+        enable_console_logging=False,
+    )
+
+    with pytest.raises(RuntimeError, match="boom"):
+        trainer.fit([ToyBatch(1.0)])
+
+    checkpoint_events = [event for event in logger.events if event["event"] == "checkpoint_saved"]
+
+    assert [event["checkpoint_tag"] for event in checkpoint_events] == ["exception"]
+    assert checkpoint_events[0]["path"].endswith("exception.ckpt")
+    assert checkpoint_events[0]["exception_type"] == "RuntimeError"
+    assert checkpoint_events[0]["exception_message"] == "boom"
+    assert checkpoint_events[0]["size_bytes"] > 0
+    assert checkpoint_events[0]["save_seconds"] >= 0.0
+
+
 def test_json_lines_logger_writes_structured_fit_events(tmp_path):
     path = tmp_path / "training.jsonl"
     trainer = Trainer(
@@ -621,6 +653,68 @@ def test_json_lines_logger_preserves_checkpoint_saved_core_fields_without_contex
     assert records[0]["event"] == "checkpoint_saved"
     assert records[0]["checkpoint_tag"] == "best"
     assert records[0]["monitor_name"] == "val_loss"
+    assert records[0]["format"] == "vgl.trainer_checkpoint"
+    assert records[0]["format_version"] == 1
+    assert records[0]["size_bytes"] > 0
+    assert records[0]["save_seconds"] >= 0.0
+
+
+def test_json_lines_logger_preserves_exception_checkpoint_saved_core_fields_without_context(tmp_path):
+    path = tmp_path / "checkpoint_saved_exception.jsonl"
+    checkpoint_dir = tmp_path / "checkpoints"
+    trainer = Trainer(
+        model=ToyModel(),
+        task=ToyTask(),
+        optimizer=torch.optim.SGD,
+        lr=0.1,
+        max_epochs=2,
+        callbacks=[
+            ModelCheckpoint(
+                checkpoint_dir,
+                save_top_k=0,
+                save_last=False,
+                save_on_exception=True,
+            ),
+            RaiseOnFirstEpochCallback(),
+        ],
+        loggers=[
+            JSONLinesLogger(
+                path,
+                flush=True,
+                events={"checkpoint_saved"},
+                include_context=False,
+            )
+        ],
+        enable_console_logging=False,
+    )
+
+    with pytest.raises(RuntimeError, match="boom"):
+        trainer.fit([ToyBatch(1.0)])
+
+    records = [json.loads(line) for line in path.read_text().splitlines()]
+
+    assert len(records) == 1
+    assert records[0].keys() == {
+        "batch_idx",
+        "checkpoint_tag",
+        "epoch",
+        "epochs",
+        "event",
+        "exception_message",
+        "exception_type",
+        "format",
+        "format_version",
+        "global_step",
+        "metrics",
+        "path",
+        "save_seconds",
+        "size_bytes",
+        "stage",
+    }
+    assert records[0]["event"] == "checkpoint_saved"
+    assert records[0]["checkpoint_tag"] == "exception"
+    assert records[0]["exception_type"] == "RuntimeError"
+    assert records[0]["exception_message"] == "boom"
     assert records[0]["format"] == "vgl.trainer_checkpoint"
     assert records[0]["format_version"] == 1
     assert records[0]["size_bytes"] > 0
