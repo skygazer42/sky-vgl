@@ -7,11 +7,14 @@ from vgl._artifact import (
     ARTIFACT_FORMAT_KEY,
     ARTIFACT_FORMAT_VERSION_KEY,
     build_artifact_metadata,
+    read_artifact_metadata,
 )
 
 
 CHECKPOINT_FORMAT = "vgl.trainer_checkpoint"
 CHECKPOINT_FORMAT_VERSION = 1
+LEGACY_CHECKPOINT_FORMAT = "legacy.state_dict"
+LEGACY_CHECKPOINT_FORMAT_VERSION = 0
 
 
 def build_checkpoint_payload(
@@ -87,14 +90,19 @@ def checkpoint_event_fields(path, *, save_seconds):
 
 
 def normalize_checkpoint_payload(payload):
+    checkpoint_format, checkpoint_format_version = read_artifact_metadata(
+        payload,
+        default_format=None,
+        default_format_version=CHECKPOINT_FORMAT_VERSION,
+    ) if isinstance(payload, dict) else (None, None)
     if (
         isinstance(payload, dict)
-        and payload.get(ARTIFACT_FORMAT_KEY) == CHECKPOINT_FORMAT
+        and checkpoint_format == CHECKPOINT_FORMAT
         and "model_state_dict" in payload
     ):
         normalized = {
-            ARTIFACT_FORMAT_KEY: payload[ARTIFACT_FORMAT_KEY],
-            ARTIFACT_FORMAT_VERSION_KEY: payload.get(ARTIFACT_FORMAT_VERSION_KEY, CHECKPOINT_FORMAT_VERSION),
+            ARTIFACT_FORMAT_KEY: checkpoint_format,
+            ARTIFACT_FORMAT_VERSION_KEY: checkpoint_format_version,
             "model_state_dict": payload["model_state_dict"],
             "metadata": dict(payload.get("metadata") or {}),
         }
@@ -111,8 +119,7 @@ def normalize_checkpoint_payload(payload):
         return normalized
     if isinstance(payload, dict):
         return {
-            "format": "legacy.state_dict",
-            "format_version": 0,
+            **build_artifact_metadata(LEGACY_CHECKPOINT_FORMAT, LEGACY_CHECKPOINT_FORMAT_VERSION),
             "model_state_dict": payload,
             "metadata": {},
         }

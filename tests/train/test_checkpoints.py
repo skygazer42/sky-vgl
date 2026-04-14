@@ -5,6 +5,8 @@ from vgl._artifact import ARTIFACT_FORMAT_KEY, ARTIFACT_FORMAT_VERSION_KEY
 from vgl.engine.checkpoints import (
     CHECKPOINT_FORMAT,
     CHECKPOINT_FORMAT_VERSION,
+    LEGACY_CHECKPOINT_FORMAT,
+    LEGACY_CHECKPOINT_FORMAT_VERSION,
     checkpoint_event_fields,
     load_checkpoint,
     restore_checkpoint,
@@ -76,8 +78,8 @@ def test_restore_checkpoint_loads_legacy_state_dict_into_model(tmp_path):
 
     assert torch.equal(model.weight.detach(), torch.tensor([6.0]))
     assert payload == {
-        ARTIFACT_FORMAT_KEY: "legacy.state_dict",
-        ARTIFACT_FORMAT_VERSION_KEY: 0,
+        ARTIFACT_FORMAT_KEY: LEGACY_CHECKPOINT_FORMAT,
+        ARTIFACT_FORMAT_VERSION_KEY: LEGACY_CHECKPOINT_FORMAT_VERSION,
         "model_state_dict": {"weight": torch.tensor([6.0])},
         "metadata": {},
     }

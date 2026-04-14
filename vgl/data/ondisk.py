@@ -7,6 +7,7 @@ from vgl._artifact import (
     ARTIFACT_FORMAT_KEY,
     ARTIFACT_FORMAT_VERSION_KEY,
     build_artifact_metadata,
+    read_artifact_metadata,
 )
 from vgl.data.catalog import DatasetManifest, DatasetSplit
 from vgl.graph.graph import Graph
@@ -33,7 +34,7 @@ def serialize_graph(graph: Graph) -> dict:
 def deserialize_graph(payload: dict) -> Graph:
     if not isinstance(payload, dict):
         raise ValueError("graph payload must be a mapping")
-    payload_format = payload.get(ARTIFACT_FORMAT_KEY)
+    payload_format, _ = read_artifact_metadata(payload)
     if payload_format is not None and payload_format != GRAPH_PAYLOAD_FORMAT:
         raise ValueError(f"Unsupported graph payload format: {payload_format!r}")
     if "nodes" not in payload or "edges" not in payload:
