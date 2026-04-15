@@ -528,6 +528,55 @@ def test_trainer_restore_training_checkpoint_detaches_history_state_from_returne
     assert resumed_trainer.global_step == uninterrupted_trainer.global_step == 4
 
 
+def test_trainer_restore_training_checkpoint_caches_normalized_history_state_for_resume(
+    tmp_path,
+):
+    checkpoint = tmp_path / "normalized-history-resume.pt"
+    torch.save(
+        {
+            ARTIFACT_FORMAT_KEY: CHECKPOINT_FORMAT,
+            ARTIFACT_FORMAT_VERSION_KEY: CHECKPOINT_FORMAT_VERSION,
+            "model_state_dict": {"weight": torch.tensor([9.0])},
+            "metadata": {},
+            "history_state": {
+                "epochs": 4,
+                "monitor": "train_loss",
+                "completed_epochs": "2",
+                "train": [{"loss": 4.0}, {"loss": 4.0}],
+                "epoch_elapsed_seconds": ["0.1", "0.2"],
+                "best_epoch": "2",
+                "best_metric": "1.0",
+                "run_name": 123,
+                "root_dir": 456,
+                "fast_dev_run": 1,
+            },
+            "trainer_state": {
+                "best_epoch": 2,
+                "best_metric": 1.0,
+                "best_state_dict": {"weight": torch.tensor([7.0])},
+                "global_step": 2,
+            },
+        },
+        checkpoint,
+    )
+    trainer = Trainer(
+        model=ToyModel(),
+        task=ToyTask(),
+        optimizer=torch.optim.SGD,
+        lr=1.0,
+        max_epochs=4,
+    )
+
+    trainer.restore_training_checkpoint(checkpoint)
+
+    assert trainer._resume_state["history_state"]["completed_epochs"] == 2
+    assert trainer._resume_state["history_state"]["best_epoch"] == 2
+    assert trainer._resume_state["history_state"]["best_metric"] == 1.0
+    assert trainer._resume_state["history_state"]["run_name"] == "123"
+    assert trainer._resume_state["history_state"]["root_dir"] == "456"
+    assert trainer._resume_state["history_state"]["fast_dev_run"] is True
+
+
 def test_trainer_restore_training_checkpoint_detaches_callback_states_from_returned_payload(
     tmp_path,
 ):
