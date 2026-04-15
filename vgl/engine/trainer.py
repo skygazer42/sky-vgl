@@ -117,6 +117,23 @@ def _normalize_restored_trainer_state(state):
     fit_profile = normalized.get("fit_profile")
     if fit_profile is not None and not isinstance(fit_profile, dict):
         raise ValueError("trainer_state.fit_profile must be a mapping")
+    if isinstance(fit_profile, dict):
+        normalized_fit_profile = dict(fit_profile)
+        for key in PROFILE_TOTAL_KEYS:
+            if key not in fit_profile:
+                continue
+            value = float(fit_profile[key])
+            if value < 0.0:
+                raise ValueError(f"trainer_state.fit_profile {key} must be >= 0")
+            normalized_fit_profile[key] = value
+        for key in PROFILE_COUNT_KEYS:
+            if key not in fit_profile:
+                continue
+            value = int(fit_profile[key])
+            if value < 0:
+                raise ValueError(f"trainer_state.fit_profile {key} must be >= 0")
+            normalized_fit_profile[key] = value
+        normalized["fit_profile"] = normalized_fit_profile
     return normalized
 
 
@@ -566,6 +583,8 @@ class Trainer:
             self._epoch_profile[key] += value
 
     def _profile_snapshot(self, profile):
+        if self.profiler != "simple":
+            return None
         return normalize_profile(profile, profiler=self.profiler)
 
     def _record_with_run_context(self, record):

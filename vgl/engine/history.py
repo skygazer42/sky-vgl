@@ -14,8 +14,10 @@ PROFILE_DERIVED_KEYS = ("train_step_seconds_avg",)
 
 
 def normalize_profile(profile, *, profiler):
-    if profiler != "simple" or profile is None:
+    if profile is None:
         return None
+    if profiler != "simple":
+        raise ValueError("profile requires profiler='simple'")
     if not isinstance(profile, dict):
         raise ValueError("profile must be a mapping")
     normalized = {}
@@ -93,6 +95,8 @@ class TrainingHistory(dict):
             profiler=state.get("profiler"),
         )
         history.update(dict(state))
+        if state.get("profile") is not None and history["profiler"] != "simple":
+            raise ValueError("history_state profile requires profiler='simple'")
         history["profile"] = normalize_profile(
             state.get("profile"),
             profiler=history["profiler"],
