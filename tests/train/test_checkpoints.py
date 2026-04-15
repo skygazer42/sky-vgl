@@ -101,7 +101,13 @@ def test_save_and_load_checkpoint_round_trip_with_training_state_sections(tmp_pa
             {"callback": "pkg.CallbackB", "index": 1, "state": {"shadow": 2}},
         ],
         trainer_state={"global_step": 3, "best_epoch": 2},
-        history_state={"epochs": 5, "completed_epochs": 2},
+        history_state={
+            "epochs": 5,
+            "monitor": "val_loss",
+            "completed_epochs": 2,
+            "train": [{"loss": 1.0}, {"loss": 0.5}],
+            "epoch_elapsed_seconds": [0.1, 0.2],
+        },
     )
     payload = load_checkpoint(checkpoint)
 
@@ -118,8 +124,77 @@ def test_save_and_load_checkpoint_round_trip_with_training_state_sections(tmp_pa
             {"callback": "pkg.CallbackB", "index": 1, "state": {"shadow": 2}},
         ],
         "trainer_state": {"global_step": 3, "best_epoch": 2},
-        "history_state": {"epochs": 5, "completed_epochs": 2},
+        "history_state": {
+            "epochs": 5,
+            "monitor": "val_loss",
+            "completed_epochs": 2,
+            "train": [{"loss": 1.0}, {"loss": 0.5}],
+            "epoch_elapsed_seconds": [0.1, 0.2],
+            "val": [],
+            "best_epoch": None,
+            "best_metric": None,
+            "stopped_early": False,
+            "stop_reason": None,
+            "fit_elapsed_seconds": None,
+            "final_train": None,
+            "final_val": None,
+            "run_name": None,
+            "root_dir": None,
+            "fast_dev_run": False,
+            "sanity_check_passed": False,
+            "profiler": None,
+            "profile": None,
+        },
     }
+
+
+def test_load_checkpoint_normalizes_training_state_sections(tmp_path):
+    checkpoint = tmp_path / "normalized-sections.pt"
+    torch.save(
+        {
+            ARTIFACT_FORMAT_KEY: CHECKPOINT_FORMAT,
+            ARTIFACT_FORMAT_VERSION_KEY: CHECKPOINT_FORMAT_VERSION,
+            "model_state_dict": {"weight": torch.tensor([4.0])},
+            "metadata": {"epoch": 5},
+            "trainer_state": {
+                "best_epoch": "2",
+                "best_metric": "1.0",
+                "best_state_dict": {"weight": torch.tensor([3.0])},
+                "global_step": "3",
+                "fit_elapsed_seconds": "1.5",
+                "fit_profile": {"forward_seconds_total": "2.0", "train_step_count": "4"},
+            },
+            "history_state": {
+                "epochs": "5",
+                "monitor": "val_loss",
+                "completed_epochs": "2",
+                "train": [{"loss": 1.0}, {"loss": 0.5}],
+                "epoch_elapsed_seconds": ["0.1", "0.2"],
+                "best_epoch": "2",
+                "best_metric": "1.0",
+                "run_name": 123,
+                "root_dir": 456,
+                "fast_dev_run": 1,
+            },
+        },
+        checkpoint,
+    )
+
+    payload = load_checkpoint(checkpoint)
+
+    assert payload["history_state"]["epochs"] == 5
+    assert payload["history_state"]["completed_epochs"] == 2
+    assert payload["history_state"]["best_epoch"] == 2
+    assert payload["history_state"]["best_metric"] == 1.0
+    assert payload["history_state"]["run_name"] == "123"
+    assert payload["history_state"]["root_dir"] == "456"
+    assert payload["history_state"]["fast_dev_run"] is True
+    assert payload["trainer_state"]["best_epoch"] == "2"
+    assert payload["trainer_state"]["best_metric"] == "1.0"
+    assert payload["trainer_state"]["global_step"] == "3"
+    assert payload["trainer_state"]["fit_elapsed_seconds"] == "1.5"
+    assert payload["trainer_state"]["fit_profile"]["forward_seconds_total"] == "2.0"
+    assert payload["trainer_state"]["fit_profile"]["train_step_count"] == "4"
 
 
 def test_checkpoint_event_fields_include_checkpoint_artifact_metadata(tmp_path):

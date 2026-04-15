@@ -170,6 +170,11 @@ def normalize_checkpoint_payload(payload):
         callback_states = _ensure_callback_states(payload)
         if callback_states is not None:
             normalized["callback_states"] = callback_states
+        history_state = normalized.get("history_state")
+        if history_state is not None:
+            from vgl.engine.history import TrainingHistory
+
+            normalized["history_state"] = TrainingHistory.from_state_dict(history_state).state_dict()
         return normalized
     if isinstance(payload, dict):
         return {
