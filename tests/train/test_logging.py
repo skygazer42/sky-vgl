@@ -349,6 +349,29 @@ def test_trainer_preserves_original_exception_and_finalizes_loggers_when_excepti
     assert trainer.last_history["completed_epochs"] == 1
 
 
+def test_trainer_preserves_partial_fit_timing_and_profile_on_exception():
+    finalize_logger = FinalizeRecordingLogger()
+    trainer = Trainer(
+        model=ToyModel(),
+        task=ToyTask(),
+        optimizer=torch.optim.SGD,
+        lr=0.1,
+        max_epochs=1,
+        callbacks=[RaiseOnEpochEndCallback()],
+        loggers=[finalize_logger],
+        enable_console_logging=False,
+        profiler="simple",
+    )
+
+    with pytest.raises(RuntimeError, match="callback boom"):
+        trainer.fit([ToyBatch(1.0)])
+
+    assert trainer.last_history is not None
+    assert trainer.last_history["fit_elapsed_seconds"] is not None
+    assert trainer.last_history["profile"]["train_step_count"] == 1
+    assert trainer.last_history["profile"]["train_stage_seconds_total"] >= 0.0
+
+
 def test_later_loggers_still_receive_exception_when_earlier_exception_logger_raises():
     finalize_logger = FinalizeRecordingLogger()
     raising_logger = RaiseOnExceptionLogger()

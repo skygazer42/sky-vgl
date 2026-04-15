@@ -1629,6 +1629,14 @@ class Trainer:
                     ),
                 )
         except Exception as exc:
+            history.finalize(
+                best_epoch=self.best_epoch,
+                best_metric=self.best_metric,
+                final_train=last_train_summary,
+                final_val=last_val_summary,
+                fit_elapsed_seconds=self._fit_elapsed_seconds(),
+                profile=self._profile_snapshot(self._fit_profile),
+            )
             self.last_history = history
             try:
                 self._run_callbacks("on_exception", exception=exc, history=history, suppress_errors=True)
