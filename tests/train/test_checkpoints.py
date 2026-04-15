@@ -96,7 +96,10 @@ def test_save_and_load_checkpoint_round_trip_with_training_state_sections(tmp_pa
         optimizer_state_dict={"state": {}, "param_groups": [{"lr": 0.1}]},
         lr_scheduler_state_dict={"last_epoch": 2},
         grad_scaler_state_dict={"scale": 1024.0},
-        callback_states=[{"records": [1]}, {"shadow": 2}],
+        callback_states=[
+            {"callback": "pkg.CallbackA", "index": 0, "state": {"records": [1]}},
+            {"callback": "pkg.CallbackB", "index": 1, "state": {"shadow": 2}},
+        ],
         trainer_state={"global_step": 3, "best_epoch": 2},
         history_state={"epochs": 5, "completed_epochs": 2},
     )
@@ -110,7 +113,10 @@ def test_save_and_load_checkpoint_round_trip_with_training_state_sections(tmp_pa
         "optimizer_state_dict": {"state": {}, "param_groups": [{"lr": 0.1}]},
         "lr_scheduler_state_dict": {"last_epoch": 2},
         "grad_scaler_state_dict": {"scale": 1024.0},
-        "callback_states": [{"records": [1]}, {"shadow": 2}],
+        "callback_states": [
+            {"callback": "pkg.CallbackA", "index": 0, "state": {"records": [1]}},
+            {"callback": "pkg.CallbackB", "index": 1, "state": {"shadow": 2}},
+        ],
         "trainer_state": {"global_step": 3, "best_epoch": 2},
         "history_state": {"epochs": 5, "completed_epochs": 2},
     }
@@ -177,4 +183,72 @@ def test_load_checkpoint_rejects_non_mapping_callback_state_entries(tmp_path):
     )
 
     with pytest.raises(ValueError, match="callback_states entries must be mappings"):
+        load_checkpoint(checkpoint)
+
+
+def test_load_checkpoint_rejects_non_string_callback_state_name(tmp_path):
+    checkpoint = tmp_path / "bad-callback-name.pt"
+    torch.save(
+        {
+            ARTIFACT_FORMAT_KEY: CHECKPOINT_FORMAT,
+            ARTIFACT_FORMAT_VERSION_KEY: CHECKPOINT_FORMAT_VERSION,
+            "model_state_dict": {"weight": torch.tensor([1.0])},
+            "metadata": {},
+            "callback_states": [{"callback": 123, "index": 0, "state": {}}],
+        },
+        checkpoint,
+    )
+
+    with pytest.raises(ValueError, match="callback_states entry callback must be a string"):
+        load_checkpoint(checkpoint)
+
+
+def test_load_checkpoint_rejects_non_integer_callback_state_index(tmp_path):
+    checkpoint = tmp_path / "bad-callback-index.pt"
+    torch.save(
+        {
+            ARTIFACT_FORMAT_KEY: CHECKPOINT_FORMAT,
+            ARTIFACT_FORMAT_VERSION_KEY: CHECKPOINT_FORMAT_VERSION,
+            "model_state_dict": {"weight": torch.tensor([1.0])},
+            "metadata": {},
+            "callback_states": [{"callback": "pkg.Callback", "index": "bad", "state": {}}],
+        },
+        checkpoint,
+    )
+
+    with pytest.raises(ValueError, match="callback_states entry index must be an integer"):
+        load_checkpoint(checkpoint)
+
+
+def test_load_checkpoint_rejects_negative_callback_state_index(tmp_path):
+    checkpoint = tmp_path / "bad-callback-negative-index.pt"
+    torch.save(
+        {
+            ARTIFACT_FORMAT_KEY: CHECKPOINT_FORMAT,
+            ARTIFACT_FORMAT_VERSION_KEY: CHECKPOINT_FORMAT_VERSION,
+            "model_state_dict": {"weight": torch.tensor([1.0])},
+            "metadata": {},
+            "callback_states": [{"callback": "pkg.Callback", "index": -1, "state": {}}],
+        },
+        checkpoint,
+    )
+
+    with pytest.raises(ValueError, match="callback_states entry index must be >= 0"):
+        load_checkpoint(checkpoint)
+
+
+def test_load_checkpoint_rejects_non_mapping_callback_state_payload(tmp_path):
+    checkpoint = tmp_path / "bad-callback-state-payload.pt"
+    torch.save(
+        {
+            ARTIFACT_FORMAT_KEY: CHECKPOINT_FORMAT,
+            ARTIFACT_FORMAT_VERSION_KEY: CHECKPOINT_FORMAT_VERSION,
+            "model_state_dict": {"weight": torch.tensor([1.0])},
+            "metadata": {},
+            "callback_states": [{"callback": "pkg.Callback", "index": 0, "state": ["bad"]}],
+        },
+        checkpoint,
+    )
+
+    with pytest.raises(ValueError, match="callback_states entry state must be a mapping"):
         load_checkpoint(checkpoint)
