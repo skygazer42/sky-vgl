@@ -163,6 +163,16 @@ def test_save_checkpoint_rejects_non_mapping_metadata_even_when_falsy(tmp_path):
         )
 
 
+def test_save_checkpoint_rejects_non_mapping_model_state_dict(tmp_path):
+    checkpoint = tmp_path / "bad-save-model-state.pt"
+
+    with pytest.raises(ValueError, match="model_state_dict must be a mapping"):
+        save_checkpoint(
+            checkpoint,
+            ["bad"],
+        )
+
+
 def test_save_checkpoint_rejects_malformed_callback_states(tmp_path):
     checkpoint = tmp_path / "bad-save-callbacks.pt"
 

@@ -69,6 +69,8 @@ def build_checkpoint_payload(
     trainer_state=None,
     history_state=None,
 ):
+    if not isinstance(model_state_dict, dict):
+        raise ValueError("model_state_dict must be a mapping")
     payload = {
         **build_artifact_metadata(CHECKPOINT_FORMAT, CHECKPOINT_FORMAT_VERSION),
         "model_state_dict": deepcopy(dict(model_state_dict)),
