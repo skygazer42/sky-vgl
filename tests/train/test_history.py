@@ -259,3 +259,14 @@ def test_training_history_from_state_dict_rejects_negative_profile_count():
                 "profile": {"train_step_count": -1},
             }
         )
+
+
+def test_training_history_from_state_dict_rejects_profile_without_simple_profiler():
+    with pytest.raises(ValueError, match="profile"):
+        TrainingHistory.from_state_dict(
+            {
+                "epochs": 3,
+                "monitor": "val_loss",
+                "profile": {"forward_seconds_total": 1.0},
+            }
+        )
