@@ -1253,9 +1253,25 @@ class Trainer:
         history_state = payload.get("history_state")
         if isinstance(history_state, dict):
             completed_epochs = int(history_state.get("completed_epochs", 0))
-            best_epoch = payload.get("trainer_state", {}).get("best_epoch")
+            trainer_state_payload = payload.get("trainer_state", {})
+            best_epoch = trainer_state_payload.get("best_epoch")
             if best_epoch is not None and int(best_epoch) > completed_epochs:
                 raise ValueError("trainer_state.best_epoch must be <= history_state.completed_epochs")
+            history_best_epoch = history_state.get("best_epoch")
+            if (
+                best_epoch is not None
+                and history_best_epoch is not None
+                and int(best_epoch) != int(history_best_epoch)
+            ):
+                raise ValueError("trainer_state.best_epoch must match history_state.best_epoch")
+            trainer_best_metric = trainer_state_payload.get("best_metric")
+            history_best_metric = history_state.get("best_metric")
+            if (
+                trainer_best_metric is not None
+                and history_best_metric is not None
+                and float(trainer_best_metric) != float(history_best_metric)
+            ):
+                raise ValueError("trainer_state.best_metric must match history_state.best_metric")
         trainer_state = _normalize_restored_trainer_state(payload.get("trainer_state"))
         scheduler_state = payload.get("lr_scheduler_state_dict")
         if scheduler_state is not None and self.lr_scheduler is None:

@@ -725,6 +725,82 @@ def test_trainer_restore_training_checkpoint_rejects_best_state_dict_without_bes
     assert torch.equal(model.weight.detach(), torch.tensor([0.0]))
 
 
+def test_trainer_restore_training_checkpoint_rejects_best_epoch_mismatch_between_history_and_trainer_state(
+    tmp_path,
+):
+    checkpoint = tmp_path / "bad-best-epoch-mismatch.pt"
+    model = ToyModel()
+    torch.save(
+        {
+            ARTIFACT_FORMAT_KEY: CHECKPOINT_FORMAT,
+            ARTIFACT_FORMAT_VERSION_KEY: CHECKPOINT_FORMAT_VERSION,
+            "model_state_dict": {"weight": torch.tensor([9.0])},
+            "metadata": {},
+            "history_state": {
+                "epochs": 4,
+                "monitor": "train_loss",
+                "completed_epochs": 2,
+                "train": [{"loss": 4.0}, {"loss": 4.0}],
+                "epoch_elapsed_seconds": [0.1, 0.1],
+                "best_epoch": 2,
+                "best_metric": 1.0,
+            },
+            "trainer_state": {"best_epoch": 1, "best_metric": 1.0},
+        },
+        checkpoint,
+    )
+    trainer = Trainer(
+        model=model,
+        task=ToyTask(),
+        optimizer=torch.optim.SGD,
+        lr=1.0,
+        max_epochs=4,
+    )
+
+    with pytest.raises(ValueError, match="best_epoch"):
+        trainer.restore_training_checkpoint(checkpoint)
+
+    assert torch.equal(model.weight.detach(), torch.tensor([0.0]))
+
+
+def test_trainer_restore_training_checkpoint_rejects_best_metric_mismatch_between_history_and_trainer_state(
+    tmp_path,
+):
+    checkpoint = tmp_path / "bad-best-metric-mismatch.pt"
+    model = ToyModel()
+    torch.save(
+        {
+            ARTIFACT_FORMAT_KEY: CHECKPOINT_FORMAT,
+            ARTIFACT_FORMAT_VERSION_KEY: CHECKPOINT_FORMAT_VERSION,
+            "model_state_dict": {"weight": torch.tensor([9.0])},
+            "metadata": {},
+            "history_state": {
+                "epochs": 4,
+                "monitor": "train_loss",
+                "completed_epochs": 2,
+                "train": [{"loss": 4.0}, {"loss": 4.0}],
+                "epoch_elapsed_seconds": [0.1, 0.1],
+                "best_epoch": 2,
+                "best_metric": 2.0,
+            },
+            "trainer_state": {"best_epoch": 2, "best_metric": 1.0},
+        },
+        checkpoint,
+    )
+    trainer = Trainer(
+        model=model,
+        task=ToyTask(),
+        optimizer=torch.optim.SGD,
+        lr=1.0,
+        max_epochs=4,
+    )
+
+    with pytest.raises(ValueError, match="best_metric"):
+        trainer.restore_training_checkpoint(checkpoint)
+
+    assert torch.equal(model.weight.detach(), torch.tensor([0.0]))
+
+
 def test_trainer_can_resume_lookahead_callback_state_from_checkpoint(tmp_path):
     checkpoint = tmp_path / "lookahead-resume.pt"
     paused_callback = Lookahead(sync_period=2, slow_step_size=0.5)
