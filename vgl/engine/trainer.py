@@ -88,6 +88,8 @@ def _normalize_restored_trainer_state(state):
     best_metric = normalized.get("best_metric")
     if best_epoch is not None and best_metric is None:
         raise ValueError("trainer_state.best_epoch requires best_metric")
+    if best_epoch is not None and best_state_dict is None:
+        raise ValueError("trainer_state.best_epoch requires best_state_dict")
     if best_metric is not None:
         if best_epoch is None:
             raise ValueError("trainer_state.best_metric requires best_epoch")
@@ -1253,8 +1255,10 @@ class Trainer:
         )
         self._validate_callback_state_targets(payload.get("callback_states"))
         history_state = payload.get("history_state")
+        normalized_history_state = None
         if isinstance(history_state, dict):
-            completed_epochs = int(history_state.get("completed_epochs", 0))
+            normalized_history_state = TrainingHistory.from_state_dict(history_state)
+            completed_epochs = int(normalized_history_state.get("completed_epochs", 0))
             trainer_state_payload = payload.get("trainer_state", {})
             trainer_global_step = trainer_state_payload.get("global_step")
             if trainer_global_step is not None and int(trainer_global_step) < completed_epochs:
@@ -1263,14 +1267,14 @@ class Trainer:
             if best_epoch is not None and int(best_epoch) > completed_epochs:
                 raise ValueError("trainer_state.best_epoch must be <= history_state.completed_epochs")
             active_monitor = trainer_state_payload.get("active_monitor")
-            history_monitor = history_state.get("monitor")
+            history_monitor = normalized_history_state.get("monitor")
             if (
                 active_monitor is not None
                 and history_monitor is not None
                 and str(active_monitor) != str(history_monitor)
             ):
                 raise ValueError("trainer_state.active_monitor must match history_state.monitor")
-            history_best_epoch = history_state.get("best_epoch")
+            history_best_epoch = normalized_history_state.get("best_epoch")
             if (best_epoch is None) != (history_best_epoch is None):
                 raise ValueError("trainer_state.best_epoch must match history_state.best_epoch")
             if (
@@ -1280,7 +1284,7 @@ class Trainer:
             ):
                 raise ValueError("trainer_state.best_epoch must match history_state.best_epoch")
             trainer_best_metric = trainer_state_payload.get("best_metric")
-            history_best_metric = history_state.get("best_metric")
+            history_best_metric = normalized_history_state.get("best_metric")
             if trainer_best_metric is not None and history_best_metric is None:
                 raise ValueError("trainer_state.best_metric must match history_state.best_metric")
             if trainer_best_metric is None and history_best_metric is not None:
