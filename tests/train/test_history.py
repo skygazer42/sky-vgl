@@ -261,6 +261,17 @@ def test_training_history_from_state_dict_rejects_negative_profile_count():
         )
 
 
+def test_training_history_from_state_dict_rejects_unsupported_profiler():
+    with pytest.raises(ValueError, match="profiler"):
+        TrainingHistory.from_state_dict(
+            {
+                "epochs": 3,
+                "monitor": "val_loss",
+                "profiler": "advanced",
+            }
+        )
+
+
 def test_training_history_from_state_dict_rejects_profile_without_simple_profiler():
     with pytest.raises(ValueError, match="profile"):
         TrainingHistory.from_state_dict(

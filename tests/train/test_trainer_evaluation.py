@@ -1258,6 +1258,43 @@ def test_trainer_restore_training_checkpoint_rejects_history_profile_without_sim
     assert torch.equal(model.weight.detach(), torch.tensor([0.0]))
 
 
+def test_trainer_restore_training_checkpoint_rejects_unsupported_history_profiler_before_mutating_model(
+    tmp_path,
+):
+    checkpoint = tmp_path / "bad-history-profiler.pt"
+    model = ToyModel()
+    torch.save(
+        {
+            ARTIFACT_FORMAT_KEY: CHECKPOINT_FORMAT,
+            ARTIFACT_FORMAT_VERSION_KEY: CHECKPOINT_FORMAT_VERSION,
+            "model_state_dict": {"weight": torch.tensor([9.0])},
+            "metadata": {},
+            "history_state": {
+                "epochs": 4,
+                "monitor": "train_loss",
+                "completed_epochs": 2,
+                "train": [{"loss": 4.0}, {"loss": 4.0}],
+                "epoch_elapsed_seconds": [0.1, 0.1],
+                "profiler": "advanced",
+            },
+            "trainer_state": {},
+        },
+        checkpoint,
+    )
+    trainer = Trainer(
+        model=model,
+        task=ToyTask(),
+        optimizer=torch.optim.SGD,
+        lr=1.0,
+        max_epochs=4,
+    )
+
+    with pytest.raises(ValueError, match="profiler"):
+        trainer.restore_training_checkpoint(checkpoint)
+
+    assert torch.equal(model.weight.detach(), torch.tensor([0.0]))
+
+
 def test_trainer_restore_training_checkpoint_rejects_negative_fit_profile_total_before_mutating_model(
     tmp_path,
 ):

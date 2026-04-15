@@ -86,13 +86,16 @@ class TrainingHistory(dict):
             raise ValueError(
                 "history_state missing required keys: " + ", ".join(missing_keys)
             )
+        profiler = state.get("profiler")
+        if profiler not in {None, "simple"}:
+            raise ValueError("history_state profiler must be None or 'simple'")
         history = cls(
             epochs=state["epochs"],
             monitor=state["monitor"],
             run_name=state.get("run_name"),
             root_dir=state.get("root_dir"),
             fast_dev_run=state.get("fast_dev_run", False),
-            profiler=state.get("profiler"),
+            profiler=profiler,
         )
         history.update(dict(state))
         if state.get("profile") is not None and history["profiler"] != "simple":
