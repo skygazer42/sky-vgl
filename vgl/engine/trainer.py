@@ -684,11 +684,15 @@ class Trainer:
             dtype = torch.float16
         return torch.autocast(device_type, dtype=dtype, enabled=True)
 
-    def _run_callbacks(self, hook_name, **kwargs):
+    def _run_callbacks(self, hook_name, *, suppress_errors=False, **kwargs):
         for callback in self.callbacks:
             hook = getattr(callback, hook_name, None)
             if hook is not None:
-                hook(self, **kwargs)
+                try:
+                    hook(self, **kwargs)
+                except Exception:
+                    if not suppress_errors:
+                        raise
 
     def _run_loggers(self, hook_name, payload, *, suppress_errors=False):
         try:
@@ -1600,7 +1604,7 @@ class Trainer:
                 )
         except Exception as exc:
             try:
-                self._run_callbacks("on_exception", exception=exc, history=history)
+                self._run_callbacks("on_exception", exception=exc, history=history, suppress_errors=True)
             except Exception:
                 pass
             self._run_loggers(
@@ -1632,7 +1636,7 @@ class Trainer:
             self._run_loggers("on_fit_end", self._build_fit_end_record(history))
         except Exception as exc:
             try:
-                self._run_callbacks("on_exception", exception=exc, history=history)
+                self._run_callbacks("on_exception", exception=exc, history=history, suppress_errors=True)
             except Exception:
                 pass
             self._run_loggers(
