@@ -147,9 +147,12 @@ def normalize_checkpoint_payload(payload):
         normalized = {
             ARTIFACT_FORMAT_KEY: checkpoint_format,
             ARTIFACT_FORMAT_VERSION_KEY: checkpoint_format_version,
-            "model_state_dict": payload["model_state_dict"],
             "metadata": dict(metadata),
         }
+        model_state_dict = _ensure_mapping_section(payload, "model_state_dict")
+        if model_state_dict is None:
+            raise ValueError("model_state_dict must be a mapping")
+        normalized["model_state_dict"] = model_state_dict
         for key in (
             "optimizer_state_dict",
             "lr_scheduler_state_dict",
