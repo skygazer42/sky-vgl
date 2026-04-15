@@ -18,9 +18,17 @@ def normalize_profile(profile, *, profiler):
         return None
     if not isinstance(profile, dict):
         raise ValueError("profile must be a mapping")
-    normalized = {key: float(profile.get(key, 0.0)) for key in PROFILE_TOTAL_KEYS}
+    normalized = {}
+    for key in PROFILE_TOTAL_KEYS:
+        value = float(profile.get(key, 0.0))
+        if value < 0.0:
+            raise ValueError(f"profile {key} must be >= 0")
+        normalized[key] = value
     for key in PROFILE_COUNT_KEYS:
-        normalized[key] = int(profile.get(key, 0))
+        value = int(profile.get(key, 0))
+        if value < 0:
+            raise ValueError(f"profile {key} must be >= 0")
+        normalized[key] = value
     count = normalized["train_step_count"]
     normalized["train_step_seconds_avg"] = (
         0.0 if count == 0 else float(normalized["train_step_seconds_total"]) / count

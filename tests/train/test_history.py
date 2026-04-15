@@ -235,3 +235,27 @@ def test_training_history_from_state_dict_rejects_negative_fit_elapsed_seconds()
                 "fit_elapsed_seconds": -1.0,
             }
         )
+
+
+def test_training_history_from_state_dict_rejects_negative_profile_total():
+    with pytest.raises(ValueError, match="profile"):
+        TrainingHistory.from_state_dict(
+            {
+                "epochs": 3,
+                "monitor": "val_loss",
+                "profiler": "simple",
+                "profile": {"forward_seconds_total": -1.0},
+            }
+        )
+
+
+def test_training_history_from_state_dict_rejects_negative_profile_count():
+    with pytest.raises(ValueError, match="profile"):
+        TrainingHistory.from_state_dict(
+            {
+                "epochs": 3,
+                "monitor": "val_loss",
+                "profiler": "simple",
+                "profile": {"train_step_count": -1},
+            }
+        )
