@@ -386,6 +386,28 @@ def test_training_history_from_state_dict_rejects_non_mapping_final_train():
         )
 
 
+def test_training_history_from_state_dict_rejects_final_train_without_progress():
+    with pytest.raises(ValueError, match="final_train"):
+        TrainingHistory.from_state_dict(
+            {
+                "epochs": 3,
+                "monitor": "train_loss",
+                "final_train": {"loss": 0.5},
+            }
+        )
+
+
+def test_training_history_from_state_dict_rejects_final_val_without_progress():
+    with pytest.raises(ValueError, match="final_val"):
+        TrainingHistory.from_state_dict(
+            {
+                "epochs": 3,
+                "monitor": "val_loss",
+                "final_val": {"loss": 0.4},
+            }
+        )
+
+
 def test_training_history_from_state_dict_rejects_val_history_length_past_completed_epochs():
     with pytest.raises(ValueError, match="val history length"):
         TrainingHistory.from_state_dict(

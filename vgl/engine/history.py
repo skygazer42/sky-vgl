@@ -154,10 +154,14 @@ class TrainingHistory(dict):
         final_train = history.get("final_train")
         if final_train is not None and not isinstance(final_train, dict):
             raise ValueError("history_state final_train must be a mapping")
+        if completed_epochs == 0 and final_train is not None:
+            raise ValueError("history_state final_train requires completed_epochs > 0")
         history["final_train"] = None if final_train is None else dict(final_train)
         final_val = history.get("final_val")
         if final_val is not None and not isinstance(final_val, dict):
             raise ValueError("history_state final_val must be a mapping")
+        if completed_epochs == 0 and final_val is not None:
+            raise ValueError("history_state final_val requires completed_epochs > 0")
         history["final_val"] = None if final_val is None else dict(final_val)
         epoch_elapsed = history.get("epoch_elapsed_seconds", [])
         if len(epoch_elapsed) != completed_epochs:

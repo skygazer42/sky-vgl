@@ -1918,6 +1918,40 @@ def test_trainer_restore_training_checkpoint_rejects_non_mapping_history_final_t
     assert torch.equal(model.weight.detach(), torch.tensor([0.0]))
 
 
+def test_trainer_restore_training_checkpoint_rejects_final_train_without_progress_before_mutating_model(
+    tmp_path,
+):
+    checkpoint = tmp_path / "bad-history-final-train-no-progress.pt"
+    model = ToyModel()
+    torch.save(
+        {
+            ARTIFACT_FORMAT_KEY: CHECKPOINT_FORMAT,
+            ARTIFACT_FORMAT_VERSION_KEY: CHECKPOINT_FORMAT_VERSION,
+            "model_state_dict": {"weight": torch.tensor([9.0])},
+            "metadata": {},
+            "history_state": {
+                "epochs": 4,
+                "monitor": "train_loss",
+                "final_train": {"loss": 0.5},
+            },
+            "trainer_state": {},
+        },
+        checkpoint,
+    )
+    trainer = Trainer(
+        model=model,
+        task=ToyTask(),
+        optimizer=torch.optim.SGD,
+        lr=1.0,
+        max_epochs=4,
+    )
+
+    with pytest.raises(ValueError, match="final_train"):
+        trainer.restore_training_checkpoint(checkpoint)
+
+    assert torch.equal(model.weight.detach(), torch.tensor([0.0]))
+
+
 def test_trainer_restore_training_checkpoint_rejects_val_history_length_past_completed_epochs_before_mutating_model(
     tmp_path,
 ):
