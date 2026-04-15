@@ -75,6 +75,26 @@ def test_training_history_from_state_dict_rejects_missing_required_keys():
         TrainingHistory.from_state_dict({"epochs": 3})
 
 
+def test_training_history_from_state_dict_rejects_non_integer_epochs():
+    with pytest.raises(ValueError, match="epochs"):
+        TrainingHistory.from_state_dict(
+            {
+                "epochs": "bad",
+                "monitor": "val_loss",
+            }
+        )
+
+
+def test_training_history_from_state_dict_rejects_non_string_monitor():
+    with pytest.raises(ValueError, match="monitor"):
+        TrainingHistory.from_state_dict(
+            {
+                "epochs": 3,
+                "monitor": ["bad"],
+            }
+        )
+
+
 def test_training_history_from_state_dict_normalizes_simple_profiler_profile_schema():
     history = TrainingHistory.from_state_dict(
         {

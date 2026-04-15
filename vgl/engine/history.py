@@ -92,12 +92,19 @@ class TrainingHistory(dict):
             raise ValueError(
                 "history_state missing required keys: " + ", ".join(missing_keys)
             )
+        try:
+            epochs = int(state["epochs"])
+        except (TypeError, ValueError) as exc:
+            raise ValueError("history_state epochs must be an integer") from exc
+        monitor = state["monitor"]
+        if not isinstance(monitor, str):
+            raise ValueError("history_state monitor must be a string")
         profiler = state.get("profiler")
         if profiler not in {None, "simple"}:
             raise ValueError("history_state profiler must be None or 'simple'")
         history = cls(
-            epochs=state["epochs"],
-            monitor=state["monitor"],
+            epochs=epochs,
+            monitor=monitor,
             run_name=state.get("run_name"),
             root_dir=state.get("root_dir"),
             fast_dev_run=state.get("fast_dev_run", False),
@@ -116,7 +123,7 @@ class TrainingHistory(dict):
             raise ValueError("history_state completed_epochs must be an integer") from exc
         if completed_epochs < 0:
             raise ValueError("history_state completed_epochs must be >= 0")
-        if completed_epochs > int(history["epochs"]):
+        if completed_epochs > history["epochs"]:
             raise ValueError("history_state completed_epochs must be <= epochs")
         train_history = history.get("train", [])
         if len(train_history) != completed_epochs:
