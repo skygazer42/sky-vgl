@@ -104,6 +104,12 @@ class RaiseOnExceptionLogger(FinalizeRecordingLogger):
         raise RuntimeError("exception logger boom")
 
 
+class RaiseOnFinalizeLogger(FinalizeRecordingLogger):
+    def finalize(self, status):
+        super().finalize(status)
+        raise RuntimeError("finalize logger boom")
+
+
 class RaiseOnEpochEndCallback(Callback):
     def on_epoch_end(self, trainer, epoch, train_summary, val_summary, history):
         del trainer, epoch, train_summary, val_summary, history
@@ -302,6 +308,25 @@ def test_later_loggers_still_receive_exception_when_earlier_exception_logger_rai
     assert raising_logger.finalize_statuses == ["exception"]
     assert finalize_logger.finalize_statuses == ["exception"]
     assert finalize_logger.exception_events[0]["exception_type"] == "RuntimeError"
+
+
+def test_later_loggers_still_finalize_when_earlier_finalize_logger_raises():
+    finalize_logger = FinalizeRecordingLogger()
+    raising_logger = RaiseOnFinalizeLogger()
+    trainer = Trainer(
+        model=ToyModel(),
+        task=ToyTask(),
+        optimizer=torch.optim.SGD,
+        lr=0.1,
+        max_epochs=1,
+        loggers=[raising_logger, finalize_logger],
+        enable_console_logging=False,
+    )
+
+    trainer.fit([ToyBatch(1.0)])
+
+    assert raising_logger.finalize_statuses == ["success"]
+    assert finalize_logger.finalize_statuses == ["success"]
 
 
 def test_trainer_finalizes_loggers_when_fit_end_callback_raises():

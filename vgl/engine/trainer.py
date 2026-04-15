@@ -706,12 +706,12 @@ class Trainer:
                     raise
 
     def _finalize_loggers(self, status, *, suppress_errors=False):
-        try:
-            for logger in self.loggers:
+        for logger in self.loggers:
+            try:
                 logger.finalize(status)
-        except Exception:
-            if not suppress_errors:
-                raise
+            except Exception:
+                if not suppress_errors:
+                    raise
 
     def _fit_elapsed_seconds(self):
         if self._fit_start_time is None:
