@@ -200,6 +200,33 @@ def test_training_history_from_state_dict_rejects_train_history_length_mismatch(
         )
 
 
+def test_training_history_from_state_dict_rejects_non_mapping_train_entry():
+    with pytest.raises(ValueError, match="train history"):
+        TrainingHistory.from_state_dict(
+            {
+                "epochs": 3,
+                "monitor": "val_loss",
+                "completed_epochs": 2,
+                "train": [{"loss": 1.0}, 2.0],
+                "epoch_elapsed_seconds": [0.1, 0.2],
+            }
+        )
+
+
+def test_training_history_from_state_dict_rejects_non_mapping_final_train():
+    with pytest.raises(ValueError, match="final_train"):
+        TrainingHistory.from_state_dict(
+            {
+                "epochs": 3,
+                "monitor": "val_loss",
+                "completed_epochs": 2,
+                "train": [{"loss": 1.0}, {"loss": 0.5}],
+                "epoch_elapsed_seconds": [0.1, 0.2],
+                "final_train": ["bad"],
+            }
+        )
+
+
 def test_training_history_from_state_dict_rejects_epoch_elapsed_length_mismatch():
     with pytest.raises(ValueError, match="epoch_elapsed_seconds"):
         TrainingHistory.from_state_dict(
