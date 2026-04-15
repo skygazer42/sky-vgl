@@ -36,6 +36,9 @@ def _ensure_callback_states(payload):
     for entry in value:
         if not isinstance(entry, dict):
             raise ValueError("callback_states entries must be mappings")
+        state = entry.get("state")
+        if state is not None and not isinstance(state, dict):
+            raise ValueError("callback_states entry state must be a mapping")
         normalized.append(entry)
     return normalized
 

@@ -575,6 +575,72 @@ def test_trainer_restore_training_checkpoint_rejects_callback_target_mismatch_be
     assert torch.equal(model.weight.detach(), torch.tensor([0.0]))
 
 
+def test_trainer_restore_training_checkpoint_rejects_non_mapping_callback_state_before_mutating_model(
+    tmp_path,
+):
+    checkpoint = tmp_path / "bad-callback-shape.pt"
+    model = ToyModel()
+    torch.save(
+        {
+            ARTIFACT_FORMAT_KEY: CHECKPOINT_FORMAT,
+            ARTIFACT_FORMAT_VERSION_KEY: CHECKPOINT_FORMAT_VERSION,
+            "model_state_dict": {"weight": torch.tensor([9.0])},
+            "metadata": {},
+            "callback_states": ["bad"],
+        },
+        checkpoint,
+    )
+    trainer = Trainer(
+        model=model,
+        task=ToyTask(),
+        optimizer=torch.optim.SGD,
+        lr=1.0,
+        max_epochs=1,
+        callbacks=[],
+    )
+
+    with pytest.raises(ValueError, match="callback_states"):
+        trainer.restore_training_checkpoint(checkpoint)
+
+    assert torch.equal(model.weight.detach(), torch.tensor([0.0]))
+
+
+def test_trainer_restore_training_checkpoint_rejects_non_mapping_callback_payload_state_before_mutating_model(
+    tmp_path,
+):
+    checkpoint = tmp_path / "bad-callback-state-payload.pt"
+    model = ToyModel()
+    torch.save(
+        {
+            ARTIFACT_FORMAT_KEY: CHECKPOINT_FORMAT,
+            ARTIFACT_FORMAT_VERSION_KEY: CHECKPOINT_FORMAT_VERSION,
+            "model_state_dict": {"weight": torch.tensor([9.0])},
+            "metadata": {},
+            "callback_states": [
+                {
+                    "callback": "vgl.engine.callbacks.ExponentialMovingAverage",
+                    "index": 0,
+                    "state": ["bad"],
+                }
+            ],
+        },
+        checkpoint,
+    )
+    trainer = Trainer(
+        model=model,
+        task=ToyTask(),
+        optimizer=torch.optim.SGD,
+        lr=1.0,
+        max_epochs=1,
+        callbacks=[],
+    )
+
+    with pytest.raises(ValueError, match="callback_states"):
+        trainer.restore_training_checkpoint(checkpoint)
+
+    assert torch.equal(model.weight.detach(), torch.tensor([0.0]))
+
+
 def test_trainer_restore_training_checkpoint_rejects_missing_lr_scheduler_before_mutating_model(
     tmp_path,
 ):
