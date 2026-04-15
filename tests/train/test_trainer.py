@@ -106,3 +106,19 @@ def test_validate_init_config_rejects_invalid_values():
             num_sanity_val_steps=0,
             profiler=None,
         )
+
+
+def test_trainer_rejects_non_blocking_when_batch_device_transfer_is_disabled():
+    with pytest.raises(ValueError, match="non_blocking"):
+        Trainer(
+            model=LinearNodeModel(),
+            task=NodeClassificationTask(
+                target="y",
+                split=("train_mask", "val_mask", "test_mask"),
+            ),
+            optimizer=torch.optim.Adam,
+            lr=1e-2,
+            max_epochs=1,
+            move_batch_to_device=False,
+            non_blocking=True,
+        )

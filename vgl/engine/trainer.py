@@ -187,6 +187,8 @@ class Trainer:
         self.device = None if device is None else torch.device(device)
         self.move_batch_to_device = bool(move_batch_to_device)
         self.non_blocking = non_blocking
+        if not self.move_batch_to_device and self.non_blocking is not None:
+            raise ValueError("non_blocking requires move_batch_to_device=True")
         if self.device is not None:
             self.model.to(self.device)
         self.task = task
