@@ -103,8 +103,8 @@ class TrainingHistory(dict):
         best_epoch = history.get("best_epoch")
         if best_epoch is not None:
             best_epoch = int(best_epoch)
-            if best_epoch < 0:
-                raise ValueError("history_state best_epoch must be >= 0")
+            if best_epoch <= 0:
+                raise ValueError("history_state best_epoch must be >= 1")
             if best_epoch > completed_epochs:
                 raise ValueError("history_state best_epoch must be <= completed_epochs")
             history["best_epoch"] = best_epoch

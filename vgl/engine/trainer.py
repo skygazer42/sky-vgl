@@ -81,8 +81,8 @@ def _normalize_restored_trainer_state(state):
     best_epoch = normalized.get("best_epoch")
     if best_epoch is not None:
         best_epoch = int(best_epoch)
-        if best_epoch < 0:
-            raise ValueError("trainer_state.best_epoch must be >= 0")
+        if best_epoch <= 0:
+            raise ValueError("trainer_state.best_epoch must be >= 1")
         normalized["best_epoch"] = best_epoch
 
     best_metric = normalized.get("best_metric")
@@ -1269,6 +1269,8 @@ class Trainer:
             ):
                 raise ValueError("trainer_state.active_monitor must match history_state.monitor")
             history_best_epoch = history_state.get("best_epoch")
+            if (best_epoch is None) != (history_best_epoch is None):
+                raise ValueError("trainer_state.best_epoch must match history_state.best_epoch")
             if (
                 best_epoch is not None
                 and history_best_epoch is not None
@@ -1277,6 +1279,8 @@ class Trainer:
                 raise ValueError("trainer_state.best_epoch must match history_state.best_epoch")
             trainer_best_metric = trainer_state_payload.get("best_metric")
             history_best_metric = history_state.get("best_metric")
+            if trainer_best_metric is None and history_best_metric is not None:
+                raise ValueError("trainer_state.best_metric must match history_state.best_metric")
             if (
                 trainer_best_metric is not None
                 and history_best_metric is not None
