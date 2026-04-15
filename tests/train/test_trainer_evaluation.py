@@ -577,6 +577,65 @@ def test_trainer_restore_training_checkpoint_caches_normalized_history_state_for
     assert trainer._resume_state["history_state"]["fast_dev_run"] is True
 
 
+def test_trainer_restore_training_checkpoint_returns_normalized_resume_sections(
+    tmp_path,
+):
+    checkpoint = tmp_path / "normalized-payload-resume.pt"
+    model = ToyModel()
+    torch.save(
+        {
+            ARTIFACT_FORMAT_KEY: CHECKPOINT_FORMAT,
+            ARTIFACT_FORMAT_VERSION_KEY: CHECKPOINT_FORMAT_VERSION,
+            "model_state_dict": {"weight": torch.tensor([9.0])},
+            "metadata": {},
+            "history_state": {
+                "epochs": "4",
+                "monitor": "train_loss",
+                "completed_epochs": "2",
+                "train": [{"loss": 4.0}, {"loss": 4.0}],
+                "epoch_elapsed_seconds": ["0.1", "0.2"],
+                "best_epoch": "2",
+                "best_metric": "1.0",
+                "run_name": 123,
+                "root_dir": 456,
+                "fast_dev_run": 1,
+            },
+            "trainer_state": {
+                "best_epoch": "2",
+                "best_metric": "1.0",
+                "best_state_dict": {"weight": torch.tensor([7.0])},
+                "global_step": "2",
+                "fit_elapsed_seconds": "1.5",
+                "fit_profile": {"forward_seconds_total": "1.0", "train_step_count": "2"},
+            },
+        },
+        checkpoint,
+    )
+    trainer = Trainer(
+        model=model,
+        task=ToyTask(),
+        optimizer=torch.optim.SGD,
+        lr=1.0,
+        max_epochs=4,
+    )
+
+    payload = trainer.restore_training_checkpoint(checkpoint)
+
+    assert payload["history_state"]["epochs"] == 4
+    assert payload["history_state"]["completed_epochs"] == 2
+    assert payload["history_state"]["best_epoch"] == 2
+    assert payload["history_state"]["best_metric"] == 1.0
+    assert payload["history_state"]["run_name"] == "123"
+    assert payload["history_state"]["root_dir"] == "456"
+    assert payload["history_state"]["fast_dev_run"] is True
+    assert payload["trainer_state"]["best_epoch"] == 2
+    assert payload["trainer_state"]["best_metric"] == 1.0
+    assert payload["trainer_state"]["global_step"] == 2
+    assert payload["trainer_state"]["fit_elapsed_seconds"] == 1.5
+    assert payload["trainer_state"]["fit_profile"]["forward_seconds_total"] == 1.0
+    assert payload["trainer_state"]["fit_profile"]["train_step_count"] == 2
+
+
 def test_trainer_restore_training_checkpoint_detaches_callback_states_from_returned_payload(
     tmp_path,
 ):

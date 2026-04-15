@@ -1369,6 +1369,9 @@ class Trainer:
         self.best_metric = trainer_state.get("best_metric")
         self.active_monitor = trainer_state.get("active_monitor")
         self.global_step = trainer_state.get("global_step", 0)
+        if normalized_history_state is not None:
+            payload["history_state"] = deepcopy(normalized_history_state.state_dict())
+        payload["trainer_state"] = deepcopy(trainer_state)
         self._resume_state = {
             "history_state": (
                 None
