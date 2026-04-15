@@ -141,7 +141,9 @@ def normalize_checkpoint_payload(payload):
         and checkpoint_format == CHECKPOINT_FORMAT
         and "model_state_dict" in payload
     ):
-        metadata = payload.get("metadata") or {}
+        metadata = payload.get("metadata")
+        if metadata is None:
+            metadata = {}
         if not isinstance(metadata, dict):
             raise ValueError("metadata must be a mapping")
         normalized = {

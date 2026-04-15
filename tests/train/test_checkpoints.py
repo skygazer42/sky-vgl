@@ -152,6 +152,22 @@ def test_load_checkpoint_rejects_non_mapping_history_state(tmp_path):
         load_checkpoint(checkpoint)
 
 
+def test_load_checkpoint_rejects_non_mapping_metadata_even_when_falsy(tmp_path):
+    checkpoint = tmp_path / "bad-metadata.pt"
+    torch.save(
+        {
+            ARTIFACT_FORMAT_KEY: CHECKPOINT_FORMAT,
+            ARTIFACT_FORMAT_VERSION_KEY: CHECKPOINT_FORMAT_VERSION,
+            "model_state_dict": {"weight": torch.tensor([1.0])},
+            "metadata": [],
+        },
+        checkpoint,
+    )
+
+    with pytest.raises(ValueError, match="metadata must be a mapping"):
+        load_checkpoint(checkpoint)
+
+
 def test_load_checkpoint_rejects_non_mapping_model_state_dict(tmp_path):
     checkpoint = tmp_path / "bad-model-state.pt"
     torch.save(
