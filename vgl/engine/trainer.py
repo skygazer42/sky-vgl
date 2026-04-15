@@ -695,14 +695,15 @@ class Trainer:
                         raise
 
     def _run_loggers(self, hook_name, payload, *, suppress_errors=False):
-        try:
-            for logger in self.loggers:
-                hook = getattr(logger, hook_name, None)
-                if hook is not None:
-                    hook(payload)
-        except Exception:
-            if not suppress_errors:
-                raise
+        for logger in self.loggers:
+            hook = getattr(logger, hook_name, None)
+            if hook is None:
+                continue
+            try:
+                hook(payload)
+            except Exception:
+                if not suppress_errors:
+                    raise
 
     def _finalize_loggers(self, status, *, suppress_errors=False):
         try:

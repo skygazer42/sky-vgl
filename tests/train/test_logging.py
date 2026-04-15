@@ -282,6 +282,28 @@ def test_trainer_preserves_original_exception_and_finalizes_loggers_when_excepti
     assert finalize_logger.exception_events[0]["exception_type"] == "RuntimeError"
 
 
+def test_later_loggers_still_receive_exception_when_earlier_exception_logger_raises():
+    finalize_logger = FinalizeRecordingLogger()
+    raising_logger = RaiseOnExceptionLogger()
+    trainer = Trainer(
+        model=ToyModel(),
+        task=ToyTask(),
+        optimizer=torch.optim.SGD,
+        lr=0.1,
+        max_epochs=1,
+        callbacks=[RaiseOnEpochEndCallback()],
+        loggers=[raising_logger, finalize_logger],
+        enable_console_logging=False,
+    )
+
+    with pytest.raises(RuntimeError, match="callback boom"):
+        trainer.fit([ToyBatch(1.0)])
+
+    assert raising_logger.finalize_statuses == ["exception"]
+    assert finalize_logger.finalize_statuses == ["exception"]
+    assert finalize_logger.exception_events[0]["exception_type"] == "RuntimeError"
+
+
 def test_trainer_finalizes_loggers_when_fit_end_callback_raises():
     finalize_logger = FinalizeRecordingLogger()
     raising_logger = RaiseOnFitEndLogger()
