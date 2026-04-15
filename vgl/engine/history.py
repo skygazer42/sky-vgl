@@ -104,7 +104,10 @@ class TrainingHistory(dict):
             state.get("profile"),
             profiler=history["profiler"],
         )
-        completed_epochs = int(history.get("completed_epochs", 0))
+        try:
+            completed_epochs = int(history.get("completed_epochs", 0))
+        except (TypeError, ValueError) as exc:
+            raise ValueError("history_state completed_epochs must be an integer") from exc
         if completed_epochs < 0:
             raise ValueError("history_state completed_epochs must be >= 0")
         if completed_epochs > int(history["epochs"]):

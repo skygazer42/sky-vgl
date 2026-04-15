@@ -102,7 +102,10 @@ def _normalize_restored_trainer_state(state):
     if active_monitor is not None and not isinstance(active_monitor, str):
         raise ValueError("trainer_state.active_monitor must be a string")
 
-    global_step = int(normalized.get("global_step", 0))
+    try:
+        global_step = int(normalized.get("global_step", 0))
+    except (TypeError, ValueError) as exc:
+        raise ValueError("trainer_state.global_step must be an integer") from exc
     if global_step < 0:
         raise ValueError("trainer_state.global_step must be >= 0")
     normalized["global_step"] = global_step

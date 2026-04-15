@@ -131,6 +131,17 @@ def test_training_history_from_state_dict_rejects_completed_epochs_past_total_ep
         )
 
 
+def test_training_history_from_state_dict_rejects_non_integer_completed_epochs():
+    with pytest.raises(ValueError, match="completed_epochs"):
+        TrainingHistory.from_state_dict(
+            {
+                "epochs": 3,
+                "monitor": "val_loss",
+                "completed_epochs": "bad",
+            }
+        )
+
+
 def test_training_history_from_state_dict_rejects_best_epoch_past_completed_epochs():
     with pytest.raises(ValueError, match="best_epoch"):
         TrainingHistory.from_state_dict(

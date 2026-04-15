@@ -515,6 +515,35 @@ def test_trainer_restore_training_checkpoint_rejects_negative_global_step_before
     assert torch.equal(model.weight.detach(), torch.tensor([0.0]))
 
 
+def test_trainer_restore_training_checkpoint_rejects_non_integer_global_step_before_mutating_model(
+    tmp_path,
+):
+    checkpoint = tmp_path / "bad-global-step-type.pt"
+    model = ToyModel()
+    torch.save(
+        {
+            ARTIFACT_FORMAT_KEY: CHECKPOINT_FORMAT,
+            ARTIFACT_FORMAT_VERSION_KEY: CHECKPOINT_FORMAT_VERSION,
+            "model_state_dict": {"weight": torch.tensor([9.0])},
+            "metadata": {},
+            "trainer_state": {"global_step": "bad"},
+        },
+        checkpoint,
+    )
+    trainer = Trainer(
+        model=model,
+        task=ToyTask(),
+        optimizer=torch.optim.SGD,
+        lr=1.0,
+        max_epochs=1,
+    )
+
+    with pytest.raises(ValueError, match="global_step"):
+        trainer.restore_training_checkpoint(checkpoint)
+
+    assert torch.equal(model.weight.detach(), torch.tensor([0.0]))
+
+
 def test_trainer_restore_training_checkpoint_rejects_non_mapping_best_state_dict(tmp_path):
     checkpoint = tmp_path / "bad-best-state.pt"
     torch.save(
