@@ -211,3 +211,27 @@ def test_training_history_from_state_dict_rejects_epoch_elapsed_length_mismatch(
                 "epoch_elapsed_seconds": [0.1],
             }
         )
+
+
+def test_training_history_from_state_dict_rejects_negative_epoch_elapsed_seconds():
+    with pytest.raises(ValueError, match="epoch_elapsed_seconds"):
+        TrainingHistory.from_state_dict(
+            {
+                "epochs": 3,
+                "monitor": "val_loss",
+                "completed_epochs": 2,
+                "train": [{"loss": 1.0}, {"loss": 0.5}],
+                "epoch_elapsed_seconds": [0.1, -0.2],
+            }
+        )
+
+
+def test_training_history_from_state_dict_rejects_negative_fit_elapsed_seconds():
+    with pytest.raises(ValueError, match="fit_elapsed_seconds"):
+        TrainingHistory.from_state_dict(
+            {
+                "epochs": 3,
+                "monitor": "val_loss",
+                "fit_elapsed_seconds": -1.0,
+            }
+        )

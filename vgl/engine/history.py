@@ -100,6 +100,24 @@ class TrainingHistory(dict):
         epoch_elapsed = history.get("epoch_elapsed_seconds", [])
         if len(epoch_elapsed) != completed_epochs:
             raise ValueError("history_state epoch_elapsed_seconds length must match completed_epochs")
+        normalized_epoch_elapsed = []
+        for elapsed_seconds in epoch_elapsed:
+            if elapsed_seconds is None:
+                normalized_epoch_elapsed.append(None)
+                continue
+            elapsed_seconds = float(elapsed_seconds)
+            if elapsed_seconds < 0.0:
+                raise ValueError(
+                    "history_state epoch_elapsed_seconds entries must be >= 0"
+                )
+            normalized_epoch_elapsed.append(elapsed_seconds)
+        history["epoch_elapsed_seconds"] = normalized_epoch_elapsed
+        fit_elapsed_seconds = history.get("fit_elapsed_seconds")
+        if fit_elapsed_seconds is not None:
+            fit_elapsed_seconds = float(fit_elapsed_seconds)
+            if fit_elapsed_seconds < 0.0:
+                raise ValueError("history_state fit_elapsed_seconds must be >= 0")
+            history["fit_elapsed_seconds"] = fit_elapsed_seconds
         best_epoch = history.get("best_epoch")
         if best_epoch is not None:
             best_epoch = int(best_epoch)
