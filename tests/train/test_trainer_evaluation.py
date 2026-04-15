@@ -1,6 +1,7 @@
 import pytest
 import torch
 from torch import nn
+from vgl._artifact import ARTIFACT_FORMAT_KEY, ARTIFACT_FORMAT_VERSION_KEY
 
 from vgl import Graph
 from vgl.engine import (
@@ -31,6 +32,7 @@ from vgl.engine import (
     WarmupCosineScheduler,
     WeightDecayScheduler,
 )
+from vgl.engine.checkpoints import CHECKPOINT_FORMAT, CHECKPOINT_FORMAT_VERSION
 from vgl.train.task import Task
 from vgl.train.tasks import BootstrapTask
 from vgl.train.tasks import ConfidencePenaltyTask
@@ -392,6 +394,57 @@ def test_trainer_can_resume_full_training_state_from_checkpoint(tmp_path):
         uninterrupted_trainer.optimizer.param_groups[0]["lr"]
     )
     assert resumed_history["best_epoch"] == uninterrupted_history["best_epoch"]
+
+
+def test_trainer_restore_training_checkpoint_rejects_negative_global_step_before_mutating_model(tmp_path):
+    checkpoint = tmp_path / "bad-global-step.pt"
+    model = ToyModel()
+    torch.save(
+        {
+            ARTIFACT_FORMAT_KEY: CHECKPOINT_FORMAT,
+            ARTIFACT_FORMAT_VERSION_KEY: CHECKPOINT_FORMAT_VERSION,
+            "model_state_dict": {"weight": torch.tensor([9.0])},
+            "metadata": {},
+            "trainer_state": {"global_step": -1},
+        },
+        checkpoint,
+    )
+    trainer = Trainer(
+        model=model,
+        task=ToyTask(),
+        optimizer=torch.optim.SGD,
+        lr=1.0,
+        max_epochs=1,
+    )
+
+    with pytest.raises(ValueError, match="global_step"):
+        trainer.restore_training_checkpoint(checkpoint)
+
+    assert torch.equal(model.weight.detach(), torch.tensor([0.0]))
+
+
+def test_trainer_restore_training_checkpoint_rejects_non_mapping_best_state_dict(tmp_path):
+    checkpoint = tmp_path / "bad-best-state.pt"
+    torch.save(
+        {
+            ARTIFACT_FORMAT_KEY: CHECKPOINT_FORMAT,
+            ARTIFACT_FORMAT_VERSION_KEY: CHECKPOINT_FORMAT_VERSION,
+            "model_state_dict": {"weight": torch.tensor([9.0])},
+            "metadata": {},
+            "trainer_state": {"best_state_dict": ["bad-state"]},
+        },
+        checkpoint,
+    )
+    trainer = Trainer(
+        model=ToyModel(),
+        task=ToyTask(),
+        optimizer=torch.optim.SGD,
+        lr=1.0,
+        max_epochs=1,
+    )
+
+    with pytest.raises(ValueError, match="best_state_dict"):
+        trainer.restore_training_checkpoint(checkpoint)
 
 
 def test_trainer_can_resume_lookahead_callback_state_from_checkpoint(tmp_path):

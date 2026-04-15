@@ -67,6 +67,39 @@ def _validate_init_config(
         raise ValueError("profiler must be None or 'simple'")
 
 
+def _normalize_restored_trainer_state(state):
+    if state is None:
+        return {}
+    if not isinstance(state, dict):
+        raise ValueError("trainer_state must be a mapping")
+
+    normalized = dict(state)
+    best_state_dict = normalized.get("best_state_dict")
+    if best_state_dict is not None and not isinstance(best_state_dict, dict):
+        raise ValueError("trainer_state.best_state_dict must be a mapping")
+
+    best_epoch = normalized.get("best_epoch")
+    if best_epoch is not None:
+        best_epoch = int(best_epoch)
+        if best_epoch < 0:
+            raise ValueError("trainer_state.best_epoch must be >= 0")
+        normalized["best_epoch"] = best_epoch
+
+    best_metric = normalized.get("best_metric")
+    if best_metric is not None:
+        normalized["best_metric"] = float(best_metric)
+
+    active_monitor = normalized.get("active_monitor")
+    if active_monitor is not None and not isinstance(active_monitor, str):
+        raise ValueError("trainer_state.active_monitor must be a string")
+
+    global_step = int(normalized.get("global_step", 0))
+    if global_step < 0:
+        raise ValueError("trainer_state.global_step must be >= 0")
+    normalized["global_step"] = global_step
+    return normalized
+
+
 class Trainer:
     CHECKPOINT_FORMAT = CHECKPOINT_FORMAT
     CHECKPOINT_FORMAT_VERSION = CHECKPOINT_FORMAT_VERSION
@@ -1156,6 +1189,7 @@ class Trainer:
             map_location=map_location,
             weights_only=weights_only,
         )
+        trainer_state = _normalize_restored_trainer_state(payload.get("trainer_state"))
         self.model.load_state_dict(payload["model_state_dict"], strict=strict)
         optimizer_state = payload.get("optimizer_state_dict")
         if optimizer_state is not None:
@@ -1166,12 +1200,11 @@ class Trainer:
                 raise ValueError("checkpoint contains lr_scheduler_state_dict but trainer has no lr_scheduler")
             self.lr_scheduler.load_state_dict(scheduler_state)
         self._load_grad_scaler_state(payload.get("grad_scaler_state_dict"))
-        trainer_state = dict(payload.get("trainer_state") or {})
         self.best_state_dict = trainer_state.get("best_state_dict")
         self.best_epoch = trainer_state.get("best_epoch")
         self.best_metric = trainer_state.get("best_metric")
         self.active_monitor = trainer_state.get("active_monitor")
-        self.global_step = int(trainer_state.get("global_step", 0))
+        self.global_step = trainer_state.get("global_step", 0)
         self._resume_state = {
             "history_state": payload.get("history_state"),
             "callback_states": payload.get("callback_states"),
