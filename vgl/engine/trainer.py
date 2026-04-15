@@ -1279,6 +1279,8 @@ class Trainer:
                 raise ValueError("trainer_state.best_epoch must match history_state.best_epoch")
             trainer_best_metric = trainer_state_payload.get("best_metric")
             history_best_metric = history_state.get("best_metric")
+            if trainer_best_metric is not None and history_best_metric is None:
+                raise ValueError("trainer_state.best_metric must match history_state.best_metric")
             if trainer_best_metric is None and history_best_metric is not None:
                 raise ValueError("trainer_state.best_metric must match history_state.best_metric")
             if (
