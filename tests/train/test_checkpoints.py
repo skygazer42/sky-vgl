@@ -152,6 +152,28 @@ def test_load_checkpoint_rejects_non_mapping_history_state(tmp_path):
         load_checkpoint(checkpoint)
 
 
+def test_save_checkpoint_rejects_non_mapping_metadata_even_when_falsy(tmp_path):
+    checkpoint = tmp_path / "bad-save-metadata.pt"
+
+    with pytest.raises(ValueError, match="metadata must be a mapping"):
+        save_checkpoint(
+            checkpoint,
+            {"weight": torch.tensor([1.0])},
+            metadata=[],
+        )
+
+
+def test_save_checkpoint_rejects_malformed_callback_states(tmp_path):
+    checkpoint = tmp_path / "bad-save-callbacks.pt"
+
+    with pytest.raises(ValueError, match="callback_states entry callback must be a string"):
+        save_checkpoint(
+            checkpoint,
+            {"weight": torch.tensor([1.0])},
+            callback_states=[{"state": {}}],
+        )
+
+
 def test_load_checkpoint_rejects_non_mapping_metadata_even_when_falsy(tmp_path):
     checkpoint = tmp_path / "bad-metadata.pt"
     torch.save(

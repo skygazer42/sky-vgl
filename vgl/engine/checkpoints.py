@@ -72,7 +72,7 @@ def build_checkpoint_payload(
     payload = {
         **build_artifact_metadata(CHECKPOINT_FORMAT, CHECKPOINT_FORMAT_VERSION),
         "model_state_dict": deepcopy(dict(model_state_dict)),
-        "metadata": dict(metadata or {}),
+        "metadata": {} if metadata is None else deepcopy(metadata),
     }
     optional_sections = {
         "optimizer_state_dict": optimizer_state_dict,
@@ -85,7 +85,7 @@ def build_checkpoint_payload(
     for key, value in optional_sections.items():
         if value is not None:
             payload[key] = deepcopy(value)
-    return payload
+    return normalize_checkpoint_payload(payload)
 
 
 def save_checkpoint(
