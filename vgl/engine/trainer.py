@@ -1630,6 +1630,7 @@ class Trainer:
             fit_elapsed_seconds=self._fit_elapsed_seconds(),
             profile=self._profile_snapshot(self._fit_profile),
         )
+        self.last_history = history
         if self.best_state_dict is not None:
             self.model.load_state_dict(self.best_state_dict)
         try:
@@ -1659,5 +1660,4 @@ class Trainer:
                 self._finalize_loggers("success", suppress_errors=True)
                 self._fit_start_time = None
                 self._epoch_profile = None
-        self.last_history = history
         return history

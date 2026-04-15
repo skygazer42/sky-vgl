@@ -98,6 +98,12 @@ class RaiseOnFitEndLogger(FinalizeRecordingLogger):
         raise RuntimeError("fit-end logger boom")
 
 
+class RaiseOnFitStartLogger(FinalizeRecordingLogger):
+    def on_fit_start(self, run_info):
+        del run_info
+        raise RuntimeError("fit-start logger boom")
+
+
 class RaiseOnExceptionLogger(FinalizeRecordingLogger):
     def on_exception(self, exception_record):
         super().on_exception(exception_record)
@@ -242,6 +248,31 @@ def test_trainer_finalizes_loggers_when_fit_end_logger_raises():
     assert finalize_logger.exception_events[0]["exception_type"] == "RuntimeError"
     assert finalize_logger.exception_events[0]["stage"] == "fit"
     assert finalize_logger.exception_events[0]["epoch"] == 1
+    assert trainer.last_history is not None
+    assert trainer.last_history["completed_epochs"] == 1
+
+
+def test_trainer_marks_fit_start_logger_failures_as_fit_stage_exceptions():
+    finalize_logger = FinalizeRecordingLogger()
+    raising_logger = RaiseOnFitStartLogger()
+    trainer = Trainer(
+        model=ToyModel(),
+        task=ToyTask(),
+        optimizer=torch.optim.SGD,
+        lr=0.1,
+        max_epochs=1,
+        loggers=[finalize_logger, raising_logger],
+        enable_console_logging=False,
+    )
+
+    with pytest.raises(RuntimeError, match="fit-start logger boom"):
+        trainer.fit([ToyBatch(1.0)])
+
+    assert finalize_logger.finalize_statuses == ["exception"]
+    assert raising_logger.finalize_statuses == ["exception"]
+    assert finalize_logger.exception_events[0]["exception_type"] == "RuntimeError"
+    assert finalize_logger.exception_events[0]["stage"] == "fit"
+    assert finalize_logger.exception_events[0]["epoch"] == 0
 
 
 def test_trainer_finalizes_loggers_when_exception_logger_raises():
@@ -351,6 +382,8 @@ def test_trainer_finalizes_loggers_when_fit_end_callback_raises():
     assert finalize_logger.exception_events[0]["exception_type"] == "RuntimeError"
     assert finalize_logger.exception_events[0]["stage"] == "fit"
     assert finalize_logger.exception_events[0]["epoch"] == 1
+    assert trainer.last_history is not None
+    assert trainer.last_history["completed_epochs"] == 1
 
 
 def test_fit_start_and_checkpoint_records_include_artifact_paths(tmp_path):
