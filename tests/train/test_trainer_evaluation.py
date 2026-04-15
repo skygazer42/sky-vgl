@@ -713,6 +713,42 @@ def test_trainer_restore_training_checkpoint_rejects_negative_callback_index_bef
     assert torch.equal(model.weight.detach(), torch.tensor([0.0]))
 
 
+def test_trainer_restore_training_checkpoint_rejects_non_integer_callback_index_before_mutating_model(
+    tmp_path,
+):
+    checkpoint = tmp_path / "bad-callback-index-type.pt"
+    model = ToyModel()
+    torch.save(
+        {
+            ARTIFACT_FORMAT_KEY: CHECKPOINT_FORMAT,
+            ARTIFACT_FORMAT_VERSION_KEY: CHECKPOINT_FORMAT_VERSION,
+            "model_state_dict": {"weight": torch.tensor([9.0])},
+            "metadata": {},
+            "callback_states": [
+                {
+                    "callback": "vgl.engine.callbacks.ExponentialMovingAverage",
+                    "index": "bad",
+                    "state": {},
+                }
+            ],
+        },
+        checkpoint,
+    )
+    trainer = Trainer(
+        model=model,
+        task=ToyTask(),
+        optimizer=torch.optim.SGD,
+        lr=1.0,
+        max_epochs=1,
+        callbacks=[],
+    )
+
+    with pytest.raises(ValueError, match="callback_states"):
+        trainer.restore_training_checkpoint(checkpoint)
+
+    assert torch.equal(model.weight.detach(), torch.tensor([0.0]))
+
+
 def test_trainer_restore_training_checkpoint_rejects_missing_lr_scheduler_before_mutating_model(
     tmp_path,
 ):

@@ -39,7 +39,10 @@ def _ensure_callback_states(payload):
         callback_name = entry.get("callback")
         if not isinstance(callback_name, str):
             raise ValueError("callback_states entry callback must be a string")
-        callback_index = int(entry.get("index", 0))
+        try:
+            callback_index = int(entry.get("index", 0))
+        except (TypeError, ValueError) as exc:
+            raise ValueError("callback_states entry index must be an integer") from exc
         if callback_index < 0:
             raise ValueError("callback_states entry index must be >= 0")
         state = entry.get("state")
