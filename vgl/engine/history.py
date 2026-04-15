@@ -94,6 +94,12 @@ class TrainingHistory(dict):
             raise ValueError("history_state completed_epochs must be >= 0")
         if completed_epochs > int(history["epochs"]):
             raise ValueError("history_state completed_epochs must be <= epochs")
+        train_history = history.get("train", [])
+        if len(train_history) != completed_epochs:
+            raise ValueError("history_state train history length must match completed_epochs")
+        epoch_elapsed = history.get("epoch_elapsed_seconds", [])
+        if len(epoch_elapsed) != completed_epochs:
+            raise ValueError("history_state epoch_elapsed_seconds length must match completed_epochs")
         best_epoch = history.get("best_epoch")
         if best_epoch is not None:
             best_epoch = int(best_epoch)
