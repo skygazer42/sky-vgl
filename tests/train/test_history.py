@@ -400,6 +400,20 @@ def test_training_history_from_state_dict_rejects_val_history_length_past_comple
         )
 
 
+def test_training_history_from_state_dict_rejects_val_monitor_without_full_val_history():
+    with pytest.raises(ValueError, match="val history"):
+        TrainingHistory.from_state_dict(
+            {
+                "epochs": 3,
+                "monitor": "val_loss",
+                "completed_epochs": 2,
+                "train": [{"loss": 1.0}, {"loss": 0.5}],
+                "val": [{"loss": 0.8}],
+                "epoch_elapsed_seconds": [0.1, 0.2],
+            }
+        )
+
+
 def test_training_history_from_state_dict_rejects_epoch_elapsed_length_mismatch():
     with pytest.raises(ValueError, match="epoch_elapsed_seconds"):
         TrainingHistory.from_state_dict(

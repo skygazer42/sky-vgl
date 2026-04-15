@@ -148,6 +148,8 @@ class TrainingHistory(dict):
             raise ValueError("history_state val history length must be <= completed_epochs")
         if any(not isinstance(summary, dict) for summary in val_history):
             raise ValueError("history_state val history entries must be mappings")
+        if monitor.startswith("val_") and val_history and len(val_history) != completed_epochs:
+            raise ValueError("history_state val history length must match completed_epochs for val monitor")
         history["val"] = [dict(summary) for summary in val_history]
         final_train = history.get("final_train")
         if final_train is not None and not isinstance(final_train, dict):
