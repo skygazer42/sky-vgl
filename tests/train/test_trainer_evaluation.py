@@ -173,6 +173,26 @@ class SaveAndStop(Callback):
             raise RuntimeError("pause")
 
 
+class RestoreAwareCounterCallback(Callback):
+    def __init__(self):
+        self.counter = 0
+        self.fit_start_seen_counter = None
+
+    def state_dict(self):
+        return {"counter": self.counter}
+
+    def load_state_dict(self, state):
+        self.counter = int(state["counter"])
+
+    def on_fit_start(self, trainer, history):
+        del trainer, history
+        self.fit_start_seen_counter = self.counter
+
+    def on_epoch_end(self, trainer, epoch, train_summary, val_summary, history):
+        del trainer, epoch, train_summary, val_summary, history
+        self.counter += 1
+
+
 def test_evaluate_and_test_do_not_step_optimizer():
     trainer = Trainer(
         model=ToyModel(),
@@ -394,6 +414,36 @@ def test_trainer_can_resume_full_training_state_from_checkpoint(tmp_path):
         uninterrupted_trainer.optimizer.param_groups[0]["lr"]
     )
     assert resumed_history["best_epoch"] == uninterrupted_history["best_epoch"]
+
+
+def test_trainer_restores_callback_state_before_on_fit_start_on_resume(tmp_path):
+    checkpoint = tmp_path / "callback-order-resume.pt"
+    paused_callback = RestoreAwareCounterCallback()
+    paused_trainer = Trainer(
+        model=ToyModel(),
+        task=ToyTask(),
+        optimizer=torch.optim.SGD,
+        lr=1.0,
+        max_epochs=3,
+        callbacks=[paused_callback, SaveAndStop(checkpoint, stop_epoch=1)],
+    )
+
+    with pytest.raises(RuntimeError, match="pause"):
+        paused_trainer.fit([ToyBatch(2.0)])
+
+    resumed_callback = RestoreAwareCounterCallback()
+    resumed_trainer = Trainer(
+        model=ToyModel(),
+        task=ToyTask(),
+        optimizer=torch.optim.SGD,
+        lr=1.0,
+        max_epochs=3,
+        callbacks=[resumed_callback],
+    )
+    resumed_trainer.restore_training_checkpoint(checkpoint)
+    resumed_trainer.fit([ToyBatch(2.0)])
+
+    assert resumed_callback.fit_start_seen_counter == 1
 
 
 def test_trainer_restore_training_checkpoint_rejects_negative_global_step_before_mutating_model(tmp_path):

@@ -1118,7 +1118,7 @@ class Trainer:
             )
         return callback_states
 
-    def _restore_callback_states(self, callback_states):
+    def _restore_callback_states(self, callback_states, *, defer_invalid=False):
         if callback_states is None:
             return
         state_lookup = {
@@ -1134,10 +1134,15 @@ class Trainer:
             key = (callback_name, callback_index)
             if key not in state_lookup:
                 continue
-            callback.load_state_dict(state_lookup[key])
+            try:
+                callback.load_state_dict(state_lookup[key])
+            except ValueError:
+                if defer_invalid:
+                    continue
+                raise
             restored.add(key)
         missing = sorted(set(state_lookup) - restored)
-        if missing:
+        if missing and not defer_invalid:
             raise ValueError("checkpoint callback state does not match configured callbacks")
 
     def _grad_scaler_state_dict(self):
@@ -1460,10 +1465,13 @@ class Trainer:
         last_train_summary = None
         last_val_summary = None
         try:
-            self._run_callbacks("on_fit_start", history=history)
+            callback_states = None if resume_state is None else resume_state.get("callback_states")
             if resume_state is not None:
-                self._restore_callback_states(resume_state.get("callback_states"))
+                self._restore_callback_states(callback_states, defer_invalid=True)
                 self._resume_state = None
+            self._run_callbacks("on_fit_start", history=history)
+            if callback_states is not None:
+                self._restore_callback_states(callback_states)
             self._run_loggers("on_fit_start", self._build_fit_start_record(monitor))
 
             if val_data is not None and self.num_sanity_val_steps > 0:
