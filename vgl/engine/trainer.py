@@ -1617,6 +1617,10 @@ class Trainer:
             self._run_callbacks("on_fit_end", history=history)
             self._run_loggers("on_fit_end", self._build_fit_end_record(history))
         except Exception as exc:
+            try:
+                self._run_callbacks("on_exception", exception=exc, history=history)
+            except Exception:
+                pass
             self._run_loggers(
                 "on_exception",
                 self._build_exception_record(exc),

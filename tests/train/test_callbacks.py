@@ -142,6 +142,10 @@ class RecordingCallback(Callback):
             ("fit_end", history["completed_epochs"], history["stopped_early"], history["stop_reason"])
         )
 
+    def on_exception(self, trainer, exception, history):
+        del trainer
+        self.events.append(("exception", type(exception).__name__, str(exception), history["completed_epochs"]))
+
 
 class StopAfterFirstEpoch(Callback):
     def on_epoch_end(self, trainer, epoch, train_summary, val_summary, history):
@@ -155,6 +159,12 @@ class RaiseOnFirstEpoch(Callback):
         del trainer, train_summary, val_summary, history
         if epoch == 1:
             raise RuntimeError("boom")
+
+
+class RaiseOnFitEnd(Callback):
+    def on_fit_end(self, trainer, history):
+        del trainer, history
+        raise RuntimeError("fit-end boom")
 
 
 class StepRecordingCallback(Callback):
@@ -478,6 +488,29 @@ def test_trainer_callbacks_observe_fit_lifecycle():
         ("epoch_end", 1, 1, None),
         ("epoch_end", 2, 2, None),
         ("fit_end", 2, False, None),
+    ]
+
+
+def test_recording_callback_receives_exception_when_fit_end_callback_fails():
+    callback = RecordingCallback()
+    trainer = Trainer(
+        model=ToyModel(),
+        task=ToyTask(),
+        optimizer=torch.optim.SGD,
+        lr=1.0,
+        max_epochs=1,
+        callbacks=[callback, RaiseOnFitEnd()],
+        enable_console_logging=False,
+    )
+
+    with pytest.raises(RuntimeError, match="fit-end boom"):
+        trainer.fit([ToyBatch(1.0)])
+
+    assert callback.events == [
+        ("fit_start", "train_loss", 0),
+        ("epoch_end", 1, 1, None),
+        ("fit_end", 1, False, None),
+        ("exception", "RuntimeError", "fit-end boom", 1),
     ]
 
 
