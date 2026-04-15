@@ -22,12 +22,18 @@ def normalize_profile(profile, *, profiler):
         raise ValueError("profile must be a mapping")
     normalized = {}
     for key in PROFILE_TOTAL_KEYS:
-        value = float(profile.get(key, 0.0))
+        try:
+            value = float(profile.get(key, 0.0))
+        except (TypeError, ValueError) as exc:
+            raise ValueError(f"profile {key} must be numeric") from exc
         if value < 0.0:
             raise ValueError(f"profile {key} must be >= 0")
         normalized[key] = value
     for key in PROFILE_COUNT_KEYS:
-        value = int(profile.get(key, 0))
+        try:
+            value = int(profile.get(key, 0))
+        except (TypeError, ValueError) as exc:
+            raise ValueError(f"profile {key} must be an integer") from exc
         if value < 0:
             raise ValueError(f"profile {key} must be >= 0")
         normalized[key] = value
@@ -136,7 +142,12 @@ class TrainingHistory(dict):
             if elapsed_seconds is None:
                 normalized_epoch_elapsed.append(None)
                 continue
-            elapsed_seconds = float(elapsed_seconds)
+            try:
+                elapsed_seconds = float(elapsed_seconds)
+            except (TypeError, ValueError) as exc:
+                raise ValueError(
+                    "history_state epoch_elapsed_seconds entries must be numeric"
+                ) from exc
             if elapsed_seconds < 0.0:
                 raise ValueError(
                     "history_state epoch_elapsed_seconds entries must be >= 0"
@@ -145,7 +156,10 @@ class TrainingHistory(dict):
         history["epoch_elapsed_seconds"] = normalized_epoch_elapsed
         fit_elapsed_seconds = history.get("fit_elapsed_seconds")
         if fit_elapsed_seconds is not None:
-            fit_elapsed_seconds = float(fit_elapsed_seconds)
+            try:
+                fit_elapsed_seconds = float(fit_elapsed_seconds)
+            except (TypeError, ValueError) as exc:
+                raise ValueError("history_state fit_elapsed_seconds must be numeric") from exc
             if fit_elapsed_seconds < 0.0:
                 raise ValueError("history_state fit_elapsed_seconds must be >= 0")
             history["fit_elapsed_seconds"] = fit_elapsed_seconds

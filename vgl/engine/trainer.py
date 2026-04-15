@@ -118,7 +118,10 @@ def _normalize_restored_trainer_state(state):
 
     fit_elapsed_seconds = normalized.get("fit_elapsed_seconds")
     if fit_elapsed_seconds is not None:
-        fit_elapsed_seconds = float(fit_elapsed_seconds)
+        try:
+            fit_elapsed_seconds = float(fit_elapsed_seconds)
+        except (TypeError, ValueError) as exc:
+            raise ValueError("trainer_state.fit_elapsed_seconds must be numeric") from exc
         if fit_elapsed_seconds < 0.0:
             raise ValueError("trainer_state.fit_elapsed_seconds must be >= 0")
         normalized["fit_elapsed_seconds"] = fit_elapsed_seconds
@@ -131,14 +134,20 @@ def _normalize_restored_trainer_state(state):
         for key in PROFILE_TOTAL_KEYS:
             if key not in fit_profile:
                 continue
-            value = float(fit_profile[key])
+            try:
+                value = float(fit_profile[key])
+            except (TypeError, ValueError) as exc:
+                raise ValueError(f"trainer_state.fit_profile {key} must be numeric") from exc
             if value < 0.0:
                 raise ValueError(f"trainer_state.fit_profile {key} must be >= 0")
             normalized_fit_profile[key] = value
         for key in PROFILE_COUNT_KEYS:
             if key not in fit_profile:
                 continue
-            value = int(fit_profile[key])
+            try:
+                value = int(fit_profile[key])
+            except (TypeError, ValueError) as exc:
+                raise ValueError(f"trainer_state.fit_profile {key} must be an integer") from exc
             if value < 0:
                 raise ValueError(f"trainer_state.fit_profile {key} must be >= 0")
             normalized_fit_profile[key] = value

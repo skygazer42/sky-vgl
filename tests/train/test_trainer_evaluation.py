@@ -1567,6 +1567,43 @@ def test_trainer_restore_training_checkpoint_rejects_negative_history_fit_elapse
     assert torch.equal(model.weight.detach(), torch.tensor([0.0]))
 
 
+def test_trainer_restore_training_checkpoint_rejects_non_numeric_history_fit_elapsed_seconds_before_mutating_model(
+    tmp_path,
+):
+    checkpoint = tmp_path / "bad-history-fit-elapsed-type.pt"
+    model = ToyModel()
+    torch.save(
+        {
+            ARTIFACT_FORMAT_KEY: CHECKPOINT_FORMAT,
+            ARTIFACT_FORMAT_VERSION_KEY: CHECKPOINT_FORMAT_VERSION,
+            "model_state_dict": {"weight": torch.tensor([9.0])},
+            "metadata": {},
+            "history_state": {
+                "epochs": 4,
+                "monitor": "train_loss",
+                "completed_epochs": 2,
+                "train": [{"loss": 4.0}, {"loss": 4.0}],
+                "epoch_elapsed_seconds": [0.1, 0.1],
+                "fit_elapsed_seconds": "bad",
+            },
+            "trainer_state": {},
+        },
+        checkpoint,
+    )
+    trainer = Trainer(
+        model=model,
+        task=ToyTask(),
+        optimizer=torch.optim.SGD,
+        lr=1.0,
+        max_epochs=4,
+    )
+
+    with pytest.raises(ValueError, match="fit_elapsed_seconds"):
+        trainer.restore_training_checkpoint(checkpoint)
+
+    assert torch.equal(model.weight.detach(), torch.tensor([0.0]))
+
+
 def test_trainer_restore_training_checkpoint_rejects_negative_history_profile_before_mutating_model(
     tmp_path,
 ):
@@ -1720,6 +1757,93 @@ def test_trainer_restore_training_checkpoint_rejects_negative_fit_profile_count_
             "model_state_dict": {"weight": torch.tensor([9.0])},
             "metadata": {},
             "trainer_state": {"fit_profile": {"train_step_count": -1}},
+        },
+        checkpoint,
+    )
+    trainer = Trainer(
+        model=model,
+        task=ToyTask(),
+        optimizer=torch.optim.SGD,
+        lr=1.0,
+        max_epochs=4,
+    )
+
+    with pytest.raises(ValueError, match="fit_profile"):
+        trainer.restore_training_checkpoint(checkpoint)
+
+    assert torch.equal(model.weight.detach(), torch.tensor([0.0]))
+
+
+def test_trainer_restore_training_checkpoint_rejects_non_numeric_fit_elapsed_seconds_before_mutating_model(
+    tmp_path,
+):
+    checkpoint = tmp_path / "bad-fit-elapsed-type.pt"
+    model = ToyModel()
+    torch.save(
+        {
+            ARTIFACT_FORMAT_KEY: CHECKPOINT_FORMAT,
+            ARTIFACT_FORMAT_VERSION_KEY: CHECKPOINT_FORMAT_VERSION,
+            "model_state_dict": {"weight": torch.tensor([9.0])},
+            "metadata": {},
+            "trainer_state": {"fit_elapsed_seconds": "bad"},
+        },
+        checkpoint,
+    )
+    trainer = Trainer(
+        model=model,
+        task=ToyTask(),
+        optimizer=torch.optim.SGD,
+        lr=1.0,
+        max_epochs=4,
+    )
+
+    with pytest.raises(ValueError, match="fit_elapsed_seconds"):
+        trainer.restore_training_checkpoint(checkpoint)
+
+    assert torch.equal(model.weight.detach(), torch.tensor([0.0]))
+
+
+def test_trainer_restore_training_checkpoint_rejects_non_numeric_fit_profile_total_before_mutating_model(
+    tmp_path,
+):
+    checkpoint = tmp_path / "bad-fit-profile-total-type.pt"
+    model = ToyModel()
+    torch.save(
+        {
+            ARTIFACT_FORMAT_KEY: CHECKPOINT_FORMAT,
+            ARTIFACT_FORMAT_VERSION_KEY: CHECKPOINT_FORMAT_VERSION,
+            "model_state_dict": {"weight": torch.tensor([9.0])},
+            "metadata": {},
+            "trainer_state": {"fit_profile": {"forward_seconds_total": "bad"}},
+        },
+        checkpoint,
+    )
+    trainer = Trainer(
+        model=model,
+        task=ToyTask(),
+        optimizer=torch.optim.SGD,
+        lr=1.0,
+        max_epochs=4,
+    )
+
+    with pytest.raises(ValueError, match="fit_profile"):
+        trainer.restore_training_checkpoint(checkpoint)
+
+    assert torch.equal(model.weight.detach(), torch.tensor([0.0]))
+
+
+def test_trainer_restore_training_checkpoint_rejects_non_integer_fit_profile_count_before_mutating_model(
+    tmp_path,
+):
+    checkpoint = tmp_path / "bad-fit-profile-count-type.pt"
+    model = ToyModel()
+    torch.save(
+        {
+            ARTIFACT_FORMAT_KEY: CHECKPOINT_FORMAT,
+            ARTIFACT_FORMAT_VERSION_KEY: CHECKPOINT_FORMAT_VERSION,
+            "model_state_dict": {"weight": torch.tensor([9.0])},
+            "metadata": {},
+            "trainer_state": {"fit_profile": {"train_step_count": "bad"}},
         },
         checkpoint,
     )

@@ -293,6 +293,19 @@ def test_training_history_from_state_dict_rejects_negative_epoch_elapsed_seconds
         )
 
 
+def test_training_history_from_state_dict_rejects_non_numeric_epoch_elapsed_seconds():
+    with pytest.raises(ValueError, match="epoch_elapsed_seconds"):
+        TrainingHistory.from_state_dict(
+            {
+                "epochs": 3,
+                "monitor": "val_loss",
+                "completed_epochs": 2,
+                "train": [{"loss": 1.0}, {"loss": 0.5}],
+                "epoch_elapsed_seconds": [0.1, "bad"],
+            }
+        )
+
+
 def test_training_history_from_state_dict_rejects_negative_fit_elapsed_seconds():
     with pytest.raises(ValueError, match="fit_elapsed_seconds"):
         TrainingHistory.from_state_dict(
@@ -300,6 +313,17 @@ def test_training_history_from_state_dict_rejects_negative_fit_elapsed_seconds()
                 "epochs": 3,
                 "monitor": "val_loss",
                 "fit_elapsed_seconds": -1.0,
+            }
+        )
+
+
+def test_training_history_from_state_dict_rejects_non_numeric_fit_elapsed_seconds():
+    with pytest.raises(ValueError, match="fit_elapsed_seconds"):
+        TrainingHistory.from_state_dict(
+            {
+                "epochs": 3,
+                "monitor": "val_loss",
+                "fit_elapsed_seconds": "bad",
             }
         )
 
@@ -316,6 +340,18 @@ def test_training_history_from_state_dict_rejects_negative_profile_total():
         )
 
 
+def test_training_history_from_state_dict_rejects_non_numeric_profile_total():
+    with pytest.raises(ValueError, match="profile"):
+        TrainingHistory.from_state_dict(
+            {
+                "epochs": 3,
+                "monitor": "val_loss",
+                "profiler": "simple",
+                "profile": {"forward_seconds_total": "bad"},
+            }
+        )
+
+
 def test_training_history_from_state_dict_rejects_negative_profile_count():
     with pytest.raises(ValueError, match="profile"):
         TrainingHistory.from_state_dict(
@@ -324,6 +360,18 @@ def test_training_history_from_state_dict_rejects_negative_profile_count():
                 "monitor": "val_loss",
                 "profiler": "simple",
                 "profile": {"train_step_count": -1},
+            }
+        )
+
+
+def test_training_history_from_state_dict_rejects_non_integer_profile_count():
+    with pytest.raises(ValueError, match="profile"):
+        TrainingHistory.from_state_dict(
+            {
+                "epochs": 3,
+                "monitor": "val_loss",
+                "profiler": "simple",
+                "profile": {"train_step_count": "bad"},
             }
         )
 
