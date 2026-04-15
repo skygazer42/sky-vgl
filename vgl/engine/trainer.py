@@ -905,15 +905,15 @@ class Trainer:
             self._fit_profile,
         ))
 
-    def _build_exception_record(self, exception):
+    def _build_exception_record(self, exception, *, stage=None, epoch=None, batch_idx=None):
         return self._record_with_run_context(
             {
             "event": "exception",
-            "stage": self._active_stage,
-            "epoch": self._active_epoch,
+            "stage": self._active_stage if stage is None else stage,
+            "epoch": self._active_epoch if epoch is None else epoch,
             "epochs": self._fit_epochs,
             "global_step": self.global_step,
-            "batch_idx": self._active_batch_idx,
+            "batch_idx": self._active_batch_idx if batch_idx is None else batch_idx,
             "metrics": {},
             "monitor": self.active_monitor,
             "best_epoch": self.best_epoch,
@@ -1596,7 +1596,12 @@ class Trainer:
                 pass
             self._run_loggers(
                 "on_exception",
-                self._build_exception_record(exc),
+                self._build_exception_record(
+                    exc,
+                    stage="fit",
+                    epoch=history["completed_epochs"],
+                    batch_idx=None,
+                ),
                 suppress_errors=True,
             )
             self._finalize_loggers("exception", suppress_errors=True)
@@ -1623,7 +1628,12 @@ class Trainer:
                 pass
             self._run_loggers(
                 "on_exception",
-                self._build_exception_record(exc),
+                self._build_exception_record(
+                    exc,
+                    stage="fit",
+                    epoch=history["completed_epochs"],
+                    batch_idx=None,
+                ),
                 suppress_errors=True,
             )
             self._finalize_loggers("exception", suppress_errors=True)
