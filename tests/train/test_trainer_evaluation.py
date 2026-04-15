@@ -1183,6 +1183,43 @@ def test_trainer_restore_training_checkpoint_rejects_non_mapping_history_final_t
     assert torch.equal(model.weight.detach(), torch.tensor([0.0]))
 
 
+def test_trainer_restore_training_checkpoint_rejects_val_history_length_past_completed_epochs_before_mutating_model(
+    tmp_path,
+):
+    checkpoint = tmp_path / "bad-history-val-length.pt"
+    model = ToyModel()
+    torch.save(
+        {
+            ARTIFACT_FORMAT_KEY: CHECKPOINT_FORMAT,
+            ARTIFACT_FORMAT_VERSION_KEY: CHECKPOINT_FORMAT_VERSION,
+            "model_state_dict": {"weight": torch.tensor([9.0])},
+            "metadata": {},
+            "history_state": {
+                "epochs": 4,
+                "monitor": "val_loss",
+                "completed_epochs": 1,
+                "train": [{"loss": 4.0}],
+                "val": [{"loss": 3.0}, {"loss": 2.0}],
+                "epoch_elapsed_seconds": [0.1],
+            },
+            "trainer_state": {},
+        },
+        checkpoint,
+    )
+    trainer = Trainer(
+        model=model,
+        task=ToyTask(),
+        optimizer=torch.optim.SGD,
+        lr=1.0,
+        max_epochs=4,
+    )
+
+    with pytest.raises(ValueError, match="val history length"):
+        trainer.restore_training_checkpoint(checkpoint)
+
+    assert torch.equal(model.weight.detach(), torch.tensor([0.0]))
+
+
 def test_trainer_restore_training_checkpoint_rejects_negative_history_fit_elapsed_seconds_before_mutating_model(
     tmp_path,
 ):

@@ -115,6 +115,8 @@ class TrainingHistory(dict):
         if any(not isinstance(summary, dict) for summary in train_history):
             raise ValueError("history_state train history entries must be mappings")
         val_history = history.get("val", [])
+        if len(val_history) > completed_epochs:
+            raise ValueError("history_state val history length must be <= completed_epochs")
         if any(not isinstance(summary, dict) for summary in val_history):
             raise ValueError("history_state val history entries must be mappings")
         final_train = history.get("final_train")
