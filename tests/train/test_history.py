@@ -144,6 +144,20 @@ def test_training_history_from_state_dict_normalizes_run_context_fields():
     assert history["fast_dev_run"] is True
 
 
+def test_training_history_from_state_dict_normalizes_completed_epochs():
+    history = TrainingHistory.from_state_dict(
+        {
+            "epochs": 3,
+            "monitor": "val_loss",
+            "completed_epochs": "2",
+            "train": [{"loss": 1.0}, {"loss": 0.5}],
+            "epoch_elapsed_seconds": [0.1, 0.2],
+        }
+    )
+
+    assert history["completed_epochs"] == 2
+
+
 def test_training_history_from_state_dict_rejects_non_mapping_profile():
     with pytest.raises(ValueError, match="profile must be a mapping"):
         TrainingHistory.from_state_dict(

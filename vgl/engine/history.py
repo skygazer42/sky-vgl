@@ -131,6 +131,7 @@ class TrainingHistory(dict):
             raise ValueError("history_state completed_epochs must be >= 0")
         if completed_epochs > history["epochs"]:
             raise ValueError("history_state completed_epochs must be <= epochs")
+        history["completed_epochs"] = completed_epochs
         train_history = history.get("train", [])
         if len(train_history) != completed_epochs:
             raise ValueError("history_state train history length must match completed_epochs")
