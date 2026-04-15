@@ -1345,6 +1345,8 @@ class Trainer:
                     raise ValueError("trainer_state.best_metric must be numeric") from exc
                 if trainer_best_metric != float(history_best_metric):
                     raise ValueError("trainer_state.best_metric must match history_state.best_metric")
+            if trainer_global_step is None and completed_epochs > 0:
+                raise ValueError("trainer_state.global_step must be >= history_state.completed_epochs")
         trainer_state = deepcopy(
             _normalize_restored_trainer_state(payload.get("trainer_state"))
         )
