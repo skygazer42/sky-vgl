@@ -1568,7 +1568,10 @@ class Trainer:
                     ),
                 )
         except Exception as exc:
-            self._run_callbacks("on_exception", exception=exc, history=history)
+            try:
+                self._run_callbacks("on_exception", exception=exc, history=history)
+            except Exception:
+                pass
             self._run_loggers(
                 "on_exception",
                 self._build_exception_record(exc),
@@ -1588,8 +1591,8 @@ class Trainer:
         )
         if self.best_state_dict is not None:
             self.model.load_state_dict(self.best_state_dict)
-        self._run_callbacks("on_fit_end", history=history)
         try:
+            self._run_callbacks("on_fit_end", history=history)
             self._run_loggers("on_fit_end", self._build_fit_end_record(history))
         finally:
             self._finalize_loggers("success", suppress_errors=True)

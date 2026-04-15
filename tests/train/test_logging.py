@@ -110,11 +110,27 @@ class RaiseOnEpochEndCallback(Callback):
         raise RuntimeError("callback boom")
 
 
+class RaiseOnExceptionCallback(Callback):
+    def on_epoch_end(self, trainer, epoch, train_summary, val_summary, history):
+        del trainer, epoch, train_summary, val_summary, history
+        raise RuntimeError("callback boom")
+
+    def on_exception(self, trainer, exception, history):
+        del trainer, exception, history
+        raise RuntimeError("exception callback boom")
+
+
 class RaiseOnFirstEpochCallback(Callback):
     def on_epoch_end(self, trainer, epoch, train_summary, val_summary, history):
         del trainer, train_summary, val_summary, history
         if epoch == 1:
             raise RuntimeError("boom")
+
+
+class RaiseOnFitEndCallback(Callback):
+    def on_fit_end(self, trainer, history):
+        del trainer, history
+        raise RuntimeError("fit-end callback boom")
 
 
 def _load_event_accumulator(log_dir):
@@ -239,6 +255,49 @@ def test_trainer_finalizes_loggers_when_exception_logger_raises():
     assert finalize_logger.finalize_statuses == ["exception"]
     assert raising_logger.finalize_statuses == ["exception"]
     assert finalize_logger.exception_events[0]["exception_type"] == "RuntimeError"
+
+
+def test_trainer_preserves_original_exception_and_finalizes_loggers_when_exception_callback_raises():
+    finalize_logger = FinalizeRecordingLogger()
+    raising_logger = RaiseOnExceptionLogger()
+    trainer = Trainer(
+        model=ToyModel(),
+        task=ToyTask(),
+        optimizer=torch.optim.SGD,
+        lr=0.1,
+        max_epochs=1,
+        callbacks=[RaiseOnExceptionCallback()],
+        loggers=[finalize_logger, raising_logger],
+        enable_console_logging=False,
+    )
+
+    with pytest.raises(RuntimeError, match="callback boom"):
+        trainer.fit([ToyBatch(1.0)])
+
+    assert finalize_logger.finalize_statuses == ["exception"]
+    assert raising_logger.finalize_statuses == ["exception"]
+    assert finalize_logger.exception_events[0]["exception_type"] == "RuntimeError"
+
+
+def test_trainer_finalizes_loggers_when_fit_end_callback_raises():
+    finalize_logger = FinalizeRecordingLogger()
+    raising_logger = RaiseOnFitEndLogger()
+    trainer = Trainer(
+        model=ToyModel(),
+        task=ToyTask(),
+        optimizer=torch.optim.SGD,
+        lr=0.1,
+        max_epochs=1,
+        callbacks=[RaiseOnFitEndCallback()],
+        loggers=[finalize_logger, raising_logger],
+        enable_console_logging=False,
+    )
+
+    with pytest.raises(RuntimeError, match="fit-end callback boom"):
+        trainer.fit([ToyBatch(1.0)])
+
+    assert finalize_logger.finalize_statuses == ["success"]
+    assert raising_logger.finalize_statuses == ["success"]
 
 
 def test_fit_start_and_checkpoint_records_include_artifact_paths(tmp_path):
