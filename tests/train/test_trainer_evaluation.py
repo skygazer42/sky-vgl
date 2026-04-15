@@ -726,6 +726,43 @@ def test_trainer_restore_training_checkpoint_rejects_non_integer_history_epochs_
     assert torch.equal(model.weight.detach(), torch.tensor([0.0]))
 
 
+def test_trainer_restore_training_checkpoint_rejects_stop_reason_without_stopped_early_before_mutating_model(
+    tmp_path,
+):
+    checkpoint = tmp_path / "bad-history-stop-reason.pt"
+    model = ToyModel()
+    torch.save(
+        {
+            ARTIFACT_FORMAT_KEY: CHECKPOINT_FORMAT,
+            ARTIFACT_FORMAT_VERSION_KEY: CHECKPOINT_FORMAT_VERSION,
+            "model_state_dict": {"weight": torch.tensor([9.0])},
+            "metadata": {},
+            "history_state": {
+                "epochs": 4,
+                "monitor": "train_loss",
+                "completed_epochs": 2,
+                "train": [{"loss": 4.0}, {"loss": 4.0}],
+                "epoch_elapsed_seconds": [0.1, 0.1],
+                "stop_reason": "requested stop",
+            },
+            "trainer_state": {},
+        },
+        checkpoint,
+    )
+    trainer = Trainer(
+        model=model,
+        task=ToyTask(),
+        optimizer=torch.optim.SGD,
+        lr=1.0,
+        max_epochs=1,
+    )
+
+    with pytest.raises(ValueError, match="stop_reason"):
+        trainer.restore_training_checkpoint(checkpoint)
+
+    assert torch.equal(model.weight.detach(), torch.tensor([0.0]))
+
+
 def test_trainer_restore_training_checkpoint_rejects_non_string_history_monitor_before_mutating_model(
     tmp_path,
 ):

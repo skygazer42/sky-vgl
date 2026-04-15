@@ -119,6 +119,8 @@ class TrainingHistory(dict):
         history["stop_reason"] = None if state.get("stop_reason") is None else str(state.get("stop_reason"))
         history["fast_dev_run"] = bool(state.get("fast_dev_run", False))
         history["sanity_check_passed"] = bool(state.get("sanity_check_passed", False))
+        if history["stop_reason"] is not None and not history["stopped_early"]:
+            raise ValueError("history_state stop_reason requires stopped_early")
         history["profiler"] = profiler
         if state.get("profile") is not None and history["profiler"] != "simple":
             raise ValueError("history_state profile requires profiler='simple'")

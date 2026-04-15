@@ -187,6 +187,17 @@ def test_training_history_from_state_dict_normalizes_stop_reason():
     assert history["stop_reason"] == "404"
 
 
+def test_training_history_from_state_dict_rejects_stop_reason_without_stopped_early():
+    with pytest.raises(ValueError, match="stop_reason"):
+        TrainingHistory.from_state_dict(
+            {
+                "epochs": 3,
+                "monitor": "val_loss",
+                "stop_reason": "requested stop",
+            }
+        )
+
+
 def test_training_history_from_state_dict_copies_summary_mappings():
     train_entry = {"loss": 1.0}
     val_entry = {"loss": 0.8}
