@@ -1000,6 +1000,35 @@ def test_trainer_restore_training_checkpoint_rejects_zero_best_epoch(
     assert torch.equal(model.weight.detach(), torch.tensor([0.0]))
 
 
+def test_trainer_restore_training_checkpoint_rejects_non_integer_best_epoch(
+    tmp_path,
+):
+    checkpoint = tmp_path / "bad-best-epoch-type.pt"
+    model = ToyModel()
+    torch.save(
+        {
+            ARTIFACT_FORMAT_KEY: CHECKPOINT_FORMAT,
+            ARTIFACT_FORMAT_VERSION_KEY: CHECKPOINT_FORMAT_VERSION,
+            "model_state_dict": {"weight": torch.tensor([9.0])},
+            "metadata": {},
+            "trainer_state": {"best_epoch": "bad", "best_metric": 1.0, "best_state_dict": {"weight": torch.tensor([7.0])}},
+        },
+        checkpoint,
+    )
+    trainer = Trainer(
+        model=model,
+        task=ToyTask(),
+        optimizer=torch.optim.SGD,
+        lr=1.0,
+        max_epochs=1,
+    )
+
+    with pytest.raises(ValueError, match="best_epoch"):
+        trainer.restore_training_checkpoint(checkpoint)
+
+    assert torch.equal(model.weight.detach(), torch.tensor([0.0]))
+
+
 def test_trainer_restore_training_checkpoint_rejects_best_epoch_without_best_metric_without_history_state(
     tmp_path,
 ):

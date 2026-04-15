@@ -151,7 +151,10 @@ class TrainingHistory(dict):
             history["fit_elapsed_seconds"] = fit_elapsed_seconds
         best_epoch = history.get("best_epoch")
         if best_epoch is not None:
-            best_epoch = int(best_epoch)
+            try:
+                best_epoch = int(best_epoch)
+            except (TypeError, ValueError) as exc:
+                raise ValueError("history_state best_epoch must be an integer") from exc
             if best_epoch <= 0:
                 raise ValueError("history_state best_epoch must be >= 1")
             if best_epoch > completed_epochs:
