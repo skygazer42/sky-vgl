@@ -92,6 +92,19 @@ def test_trainer_rejects_fp16_mixed_with_grad_scaler_without_cuda():
         )
 
 
+def test_trainer_rejects_fp16_mixed_without_cuda_even_without_grad_scaler():
+    with pytest.raises(ValueError, match="fp16-mixed"):
+        Trainer(
+            model=ToyModel(),
+            task=ToyTask(),
+            optimizer=torch.optim.SGD,
+            lr=1.0,
+            max_epochs=1,
+            precision="fp16-mixed",
+            device="cpu",
+        )
+
+
 def test_trainer_enters_autocast_for_bf16_precision(monkeypatch):
     calls = []
 

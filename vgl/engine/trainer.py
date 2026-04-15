@@ -200,6 +200,8 @@ class Trainer:
         self.val_check_interval = self._normalize_val_check_interval(val_check_interval)
         self.num_sanity_val_steps = int(num_sanity_val_steps)
         self.profiler = profiler
+        if precision == "fp16-mixed" and self._resolved_device_type() != "cuda":
+            raise ValueError("precision='fp16-mixed' requires a CUDA model/device")
         self.optimizer = optimizer(
             self._build_optimizer_param_groups(optimizer_param_groups, lr),
             lr=lr,
