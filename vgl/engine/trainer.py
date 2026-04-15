@@ -1257,6 +1257,14 @@ class Trainer:
             best_epoch = trainer_state_payload.get("best_epoch")
             if best_epoch is not None and int(best_epoch) > completed_epochs:
                 raise ValueError("trainer_state.best_epoch must be <= history_state.completed_epochs")
+            active_monitor = trainer_state_payload.get("active_monitor")
+            history_monitor = history_state.get("monitor")
+            if (
+                active_monitor is not None
+                and history_monitor is not None
+                and str(active_monitor) != str(history_monitor)
+            ):
+                raise ValueError("trainer_state.active_monitor must match history_state.monitor")
             history_best_epoch = history_state.get("best_epoch")
             if (
                 best_epoch is not None
