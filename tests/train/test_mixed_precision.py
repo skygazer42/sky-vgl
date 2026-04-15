@@ -78,6 +78,20 @@ def test_trainer_rejects_unknown_precision_mode():
         )
 
 
+def test_trainer_rejects_fp16_mixed_with_grad_scaler_without_cuda():
+    with pytest.raises(ValueError, match="fp16-mixed"):
+        Trainer(
+            model=ToyModel(),
+            task=ToyTask(),
+            optimizer=torch.optim.SGD,
+            lr=1.0,
+            max_epochs=1,
+            precision="fp16-mixed",
+            grad_scaler=FakeGradScaler(),
+            device="cpu",
+        )
+
+
 def test_trainer_enters_autocast_for_bf16_precision(monkeypatch):
     calls = []
 

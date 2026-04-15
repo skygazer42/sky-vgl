@@ -381,6 +381,8 @@ class Trainer:
             if self.precision == "fp16-mixed" and self._resolved_device_type() == "cuda":
                 return torch.cuda.amp.GradScaler()
             return None
+        if self.precision == "fp16-mixed" and self._resolved_device_type() != "cuda":
+            raise ValueError("precision='fp16-mixed' with grad_scaler requires a CUDA model/device")
         if callable(grad_scaler) and not hasattr(grad_scaler, "scale"):
             grad_scaler = grad_scaler()
         for method_name in ("scale", "step", "update"):
