@@ -1343,7 +1343,9 @@ class Trainer:
                     raise ValueError("trainer_state.best_metric must be numeric") from exc
                 if trainer_best_metric != float(history_best_metric):
                     raise ValueError("trainer_state.best_metric must match history_state.best_metric")
-        trainer_state = _normalize_restored_trainer_state(payload.get("trainer_state"))
+        trainer_state = deepcopy(
+            _normalize_restored_trainer_state(payload.get("trainer_state"))
+        )
         scheduler_state = payload.get("lr_scheduler_state_dict")
         if scheduler_state is not None and self.lr_scheduler is None:
             raise ValueError("checkpoint contains lr_scheduler_state_dict but trainer has no lr_scheduler")

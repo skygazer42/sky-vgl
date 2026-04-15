@@ -628,6 +628,39 @@ def test_trainer_restore_training_checkpoint_rejects_non_mapping_best_state_dict
         trainer.restore_training_checkpoint(checkpoint)
 
 
+def test_trainer_restore_training_checkpoint_detaches_best_state_dict_from_returned_payload(
+    tmp_path,
+):
+    checkpoint = tmp_path / "best-state-alias.pt"
+    model = ToyModel()
+    torch.save(
+        {
+            ARTIFACT_FORMAT_KEY: CHECKPOINT_FORMAT,
+            ARTIFACT_FORMAT_VERSION_KEY: CHECKPOINT_FORMAT_VERSION,
+            "model_state_dict": {"weight": torch.tensor([9.0])},
+            "metadata": {},
+            "trainer_state": {
+                "best_epoch": 1,
+                "best_metric": 1.0,
+                "best_state_dict": {"weight": torch.tensor([7.0])},
+            },
+        },
+        checkpoint,
+    )
+    trainer = Trainer(
+        model=model,
+        task=ToyTask(),
+        optimizer=torch.optim.SGD,
+        lr=1.0,
+        max_epochs=1,
+    )
+
+    payload = trainer.restore_training_checkpoint(checkpoint)
+    payload["trainer_state"]["best_state_dict"]["weight"] = torch.tensor([3.0])
+
+    assert torch.equal(trainer.best_state_dict["weight"], torch.tensor([7.0]))
+
+
 def test_trainer_restore_training_checkpoint_rejects_callback_target_mismatch_before_mutating_model(
     tmp_path,
 ):
