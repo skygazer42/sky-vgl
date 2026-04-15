@@ -66,6 +66,17 @@ class FakeGradScaler:
         self.update_calls += 1
 
 
+class FakeGradScalerWithoutUnscale:
+    def scale(self, loss):
+        return FakeScaledLoss(loss, self)
+
+    def step(self, optimizer):
+        optimizer.step()
+
+    def update(self):
+        return None
+
+
 def test_trainer_rejects_unknown_precision_mode():
     with pytest.raises(ValueError, match="precision"):
         Trainer(
@@ -102,6 +113,20 @@ def test_trainer_rejects_fp16_mixed_without_cuda_even_without_grad_scaler():
             max_epochs=1,
             precision="fp16-mixed",
             device="cpu",
+        )
+
+
+def test_trainer_rejects_grad_scaler_without_unscale_when_pre_step_ops_are_enabled():
+    with pytest.raises(TypeError, match="unscale_"):
+        Trainer(
+            model=ToyModel(),
+            task=ToyTask(),
+            optimizer=torch.optim.SGD,
+            lr=1.0,
+            max_epochs=1,
+            precision="bf16-mixed",
+            grad_scaler=FakeGradScalerWithoutUnscale(),
+            gradient_clip_val=1.0,
         )
 
 

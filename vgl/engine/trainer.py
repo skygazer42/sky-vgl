@@ -414,6 +414,11 @@ class Trainer:
     def _validate_optimizer_configuration(self):
         if self._uses_sharpness_aware_optimizer() and self.grad_scaler is not None:
             raise ValueError("sharpness-aware optimizers are not supported with grad_scaler")
+        if self.grad_scaler is not None and self._requires_unscaled_gradients():
+            if not hasattr(self.grad_scaler, "unscale_"):
+                raise TypeError(
+                    "grad_scaler must define unscale_() when pre-step gradient operations are enabled"
+                )
 
     def _build_optimizer_param_groups(self, optimizer_param_groups, lr):
         if optimizer_param_groups is None:
