@@ -97,6 +97,17 @@ def _normalize_restored_trainer_state(state):
     if global_step < 0:
         raise ValueError("trainer_state.global_step must be >= 0")
     normalized["global_step"] = global_step
+
+    fit_elapsed_seconds = normalized.get("fit_elapsed_seconds")
+    if fit_elapsed_seconds is not None:
+        fit_elapsed_seconds = float(fit_elapsed_seconds)
+        if fit_elapsed_seconds < 0.0:
+            raise ValueError("trainer_state.fit_elapsed_seconds must be >= 0")
+        normalized["fit_elapsed_seconds"] = fit_elapsed_seconds
+
+    fit_profile = normalized.get("fit_profile")
+    if fit_profile is not None and not isinstance(fit_profile, dict):
+        raise ValueError("trainer_state.fit_profile must be a mapping")
     return normalized
 
 
@@ -232,6 +243,7 @@ class Trainer:
         self._resume_state = None
         self.last_history = None
         self._fit_start_time = None
+        self._fit_elapsed_offset = 0.0
         self._active_epoch = None
         self._active_stage = None
         self._active_batch_idx = None
@@ -690,7 +702,7 @@ class Trainer:
     def _fit_elapsed_seconds(self):
         if self._fit_start_time is None:
             return None
-        return float(perf_counter() - self._fit_start_time)
+        return float(self._fit_elapsed_offset + (perf_counter() - self._fit_start_time))
 
     def _steps_per_second(self):
         elapsed_seconds = self._fit_elapsed_seconds()
@@ -1177,6 +1189,8 @@ class Trainer:
                 "best_metric": self.best_metric,
                 "active_monitor": self.active_monitor,
                 "global_step": self.global_step,
+                "fit_elapsed_seconds": self._fit_elapsed_seconds(),
+                "fit_profile": deepcopy(self._fit_profile),
             },
             history_state=history_state,
         )
@@ -1428,6 +1442,7 @@ class Trainer:
         self._fit_epochs = self._effective_epochs()
         self._checkpointing_enabled = not self.fast_dev_run
         self._fit_profile = self._empty_profile()
+        self._fit_elapsed_offset = 0.0
         self._epoch_profile = None
         resume_state = self._resume_state
         history_kwargs = {
@@ -1460,6 +1475,13 @@ class Trainer:
             self.best_metric = trainer_state.get("best_metric")
             self.active_monitor = trainer_state.get("active_monitor", monitor) or monitor
             self.global_step = int(trainer_state.get("global_step", 0))
+            self._fit_elapsed_offset = float(trainer_state.get("fit_elapsed_seconds") or 0.0)
+            restored_fit_profile = trainer_state.get("fit_profile")
+            if isinstance(restored_fit_profile, dict):
+                for key in PROFILE_TOTAL_KEYS:
+                    self._fit_profile[key] = float(restored_fit_profile.get(key, self._fit_profile[key]))
+                for key in PROFILE_COUNT_KEYS:
+                    self._fit_profile[key] = int(restored_fit_profile.get(key, self._fit_profile[key]))
         self._fit_start_time = perf_counter()
         self._active_epoch = start_epoch - 1
         last_train_summary = None

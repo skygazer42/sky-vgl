@@ -416,6 +416,48 @@ def test_trainer_can_resume_full_training_state_from_checkpoint(tmp_path):
     assert resumed_history["best_epoch"] == uninterrupted_history["best_epoch"]
 
 
+def test_trainer_resume_preserves_profiler_totals_across_checkpoint(tmp_path):
+    checkpoint = tmp_path / "resume-profiler.pt"
+    paused_callback = SaveAndStop(checkpoint, stop_epoch=2)
+    paused_trainer = Trainer(
+        model=ToyModel(),
+        task=ToyTask(),
+        optimizer=torch.optim.SGD,
+        lr=1.0,
+        max_epochs=4,
+        profiler="simple",
+        callbacks=[paused_callback],
+    )
+
+    with pytest.raises(RuntimeError, match="pause"):
+        paused_trainer.fit([ToyBatch(2.0)])
+
+    resumed_trainer = Trainer(
+        model=ToyModel(),
+        task=ToyTask(),
+        optimizer=torch.optim.SGD,
+        lr=1.0,
+        max_epochs=4,
+        profiler="simple",
+    )
+    resumed_trainer.restore_training_checkpoint(checkpoint)
+    resumed_history = resumed_trainer.fit([ToyBatch(2.0)])
+
+    uninterrupted_trainer = Trainer(
+        model=ToyModel(),
+        task=ToyTask(),
+        optimizer=torch.optim.SGD,
+        lr=1.0,
+        max_epochs=4,
+        profiler="simple",
+    )
+    uninterrupted_history = uninterrupted_trainer.fit([ToyBatch(2.0)])
+
+    assert resumed_history["profile"]["train_step_count"] == uninterrupted_history["profile"]["train_step_count"] == 4
+    assert resumed_history["profile"]["train_stage_seconds_total"] >= 0.0
+    assert resumed_history["fit_elapsed_seconds"] is not None
+
+
 def test_trainer_restores_callback_state_before_on_fit_start_on_resume(tmp_path):
     checkpoint = tmp_path / "callback-order-resume.pt"
     paused_callback = RestoreAwareCounterCallback()
