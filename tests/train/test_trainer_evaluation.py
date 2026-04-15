@@ -667,6 +667,64 @@ def test_trainer_restore_training_checkpoint_rejects_best_epoch_past_resumed_his
     assert torch.equal(model.weight.detach(), torch.tensor([0.0]))
 
 
+def test_trainer_restore_training_checkpoint_rejects_best_metric_without_best_epoch(
+    tmp_path,
+):
+    checkpoint = tmp_path / "bad-best-metric.pt"
+    model = ToyModel()
+    torch.save(
+        {
+            ARTIFACT_FORMAT_KEY: CHECKPOINT_FORMAT,
+            ARTIFACT_FORMAT_VERSION_KEY: CHECKPOINT_FORMAT_VERSION,
+            "model_state_dict": {"weight": torch.tensor([9.0])},
+            "metadata": {},
+            "trainer_state": {"best_metric": 1.0},
+        },
+        checkpoint,
+    )
+    trainer = Trainer(
+        model=model,
+        task=ToyTask(),
+        optimizer=torch.optim.SGD,
+        lr=1.0,
+        max_epochs=1,
+    )
+
+    with pytest.raises(ValueError, match="best_metric"):
+        trainer.restore_training_checkpoint(checkpoint)
+
+    assert torch.equal(model.weight.detach(), torch.tensor([0.0]))
+
+
+def test_trainer_restore_training_checkpoint_rejects_best_state_dict_without_best_epoch(
+    tmp_path,
+):
+    checkpoint = tmp_path / "bad-best-state-without-epoch.pt"
+    model = ToyModel()
+    torch.save(
+        {
+            ARTIFACT_FORMAT_KEY: CHECKPOINT_FORMAT,
+            ARTIFACT_FORMAT_VERSION_KEY: CHECKPOINT_FORMAT_VERSION,
+            "model_state_dict": {"weight": torch.tensor([9.0])},
+            "metadata": {},
+            "trainer_state": {"best_state_dict": {"weight": torch.tensor([7.0])}},
+        },
+        checkpoint,
+    )
+    trainer = Trainer(
+        model=model,
+        task=ToyTask(),
+        optimizer=torch.optim.SGD,
+        lr=1.0,
+        max_epochs=1,
+    )
+
+    with pytest.raises(ValueError, match="best_state_dict"):
+        trainer.restore_training_checkpoint(checkpoint)
+
+    assert torch.equal(model.weight.detach(), torch.tensor([0.0]))
+
+
 def test_trainer_can_resume_lookahead_callback_state_from_checkpoint(tmp_path):
     checkpoint = tmp_path / "lookahead-resume.pt"
     paused_callback = Lookahead(sync_period=2, slow_step_size=0.5)

@@ -87,7 +87,12 @@ def _normalize_restored_trainer_state(state):
 
     best_metric = normalized.get("best_metric")
     if best_metric is not None:
+        if best_epoch is None:
+            raise ValueError("trainer_state.best_metric requires best_epoch")
         normalized["best_metric"] = float(best_metric)
+
+    if best_state_dict is not None and best_epoch is None:
+        raise ValueError("trainer_state.best_state_dict requires best_epoch")
 
     active_monitor = normalized.get("active_monitor")
     if active_monitor is not None and not isinstance(active_monitor, str):
