@@ -1242,16 +1242,22 @@ class Trainer:
         )
         self._validate_callback_state_targets(payload.get("callback_states"))
         trainer_state = _normalize_restored_trainer_state(payload.get("trainer_state"))
+        scheduler_state = payload.get("lr_scheduler_state_dict")
+        if scheduler_state is not None and self.lr_scheduler is None:
+            raise ValueError("checkpoint contains lr_scheduler_state_dict but trainer has no lr_scheduler")
+        grad_scaler_state = payload.get("grad_scaler_state_dict")
+        if grad_scaler_state is not None:
+            if self.grad_scaler is None:
+                raise ValueError("checkpoint contains grad_scaler_state_dict but trainer has no grad_scaler")
+            if not hasattr(self.grad_scaler, "load_state_dict"):
+                raise TypeError("grad_scaler must define load_state_dict() to restore checkpoint state")
         self.model.load_state_dict(payload["model_state_dict"], strict=strict)
         optimizer_state = payload.get("optimizer_state_dict")
         if optimizer_state is not None:
             self.optimizer.load_state_dict(optimizer_state)
-        scheduler_state = payload.get("lr_scheduler_state_dict")
         if scheduler_state is not None:
-            if self.lr_scheduler is None:
-                raise ValueError("checkpoint contains lr_scheduler_state_dict but trainer has no lr_scheduler")
             self.lr_scheduler.load_state_dict(scheduler_state)
-        self._load_grad_scaler_state(payload.get("grad_scaler_state_dict"))
+        self._load_grad_scaler_state(grad_scaler_state)
         self.best_state_dict = trainer_state.get("best_state_dict")
         self.best_epoch = trainer_state.get("best_epoch")
         self.best_metric = trainer_state.get("best_metric")
