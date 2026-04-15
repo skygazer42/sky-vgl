@@ -145,6 +145,12 @@ class RaiseOnFitEndCallback(Callback):
         raise RuntimeError("fit-end callback boom")
 
 
+class RaiseOnFitStartCallback(Callback):
+    def on_fit_start(self, trainer, history):
+        del trainer, history
+        raise RuntimeError("fit-start callback boom")
+
+
 def _load_event_accumulator(log_dir):
     accumulator = EventAccumulator(str(log_dir))
     accumulator.Reload()
@@ -275,6 +281,28 @@ def test_trainer_marks_fit_start_logger_failures_as_fit_stage_exceptions():
     assert finalize_logger.exception_events[0]["epoch"] == 0
 
 
+def test_trainer_marks_fit_start_callback_failures_as_fit_stage_exceptions():
+    finalize_logger = FinalizeRecordingLogger()
+    trainer = Trainer(
+        model=ToyModel(),
+        task=ToyTask(),
+        optimizer=torch.optim.SGD,
+        lr=0.1,
+        max_epochs=1,
+        callbacks=[RaiseOnFitStartCallback()],
+        loggers=[finalize_logger],
+        enable_console_logging=False,
+    )
+
+    with pytest.raises(RuntimeError, match="fit-start callback boom"):
+        trainer.fit([ToyBatch(1.0)])
+
+    assert finalize_logger.finalize_statuses == ["exception"]
+    assert finalize_logger.exception_events[0]["exception_type"] == "RuntimeError"
+    assert finalize_logger.exception_events[0]["stage"] == "fit"
+    assert finalize_logger.exception_events[0]["epoch"] == 0
+
+
 def test_trainer_finalizes_loggers_when_exception_logger_raises():
     finalize_logger = FinalizeRecordingLogger()
     raising_logger = RaiseOnExceptionLogger()
@@ -317,6 +345,8 @@ def test_trainer_preserves_original_exception_and_finalizes_loggers_when_excepti
     assert finalize_logger.finalize_statuses == ["exception"]
     assert raising_logger.finalize_statuses == ["exception"]
     assert finalize_logger.exception_events[0]["exception_type"] == "RuntimeError"
+    assert trainer.last_history is not None
+    assert trainer.last_history["completed_epochs"] == 1
 
 
 def test_later_loggers_still_receive_exception_when_earlier_exception_logger_raises():

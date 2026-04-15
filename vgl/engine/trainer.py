@@ -1144,6 +1144,24 @@ class Trainer:
             )
         return callback_states
 
+    def _validate_callback_state_targets(self, callback_states):
+        if callback_states is None:
+            return
+        state_keys = {
+            (entry["callback"], int(entry.get("index", 0)))
+            for entry in callback_states
+        }
+        callback_counts = {}
+        known_keys = set()
+        for callback in self.callbacks:
+            callback_name = f"{callback.__class__.__module__}.{callback.__class__.__qualname__}"
+            callback_index = callback_counts.get(callback_name, 0)
+            callback_counts[callback_name] = callback_index + 1
+            known_keys.add((callback_name, callback_index))
+        missing = sorted(state_keys - known_keys)
+        if missing:
+            raise ValueError("checkpoint callback state does not match configured callbacks")
+
     def _restore_callback_states(self, callback_states, *, defer_invalid=False):
         if callback_states is None:
             return
@@ -1222,6 +1240,7 @@ class Trainer:
             map_location=map_location,
             weights_only=weights_only,
         )
+        self._validate_callback_state_targets(payload.get("callback_states"))
         trainer_state = _normalize_restored_trainer_state(payload.get("trainer_state"))
         self.model.load_state_dict(payload["model_state_dict"], strict=strict)
         optimizer_state = payload.get("optimizer_state_dict")
@@ -1604,6 +1623,7 @@ class Trainer:
                     ),
                 )
         except Exception as exc:
+            self.last_history = history
             try:
                 self._run_callbacks("on_exception", exception=exc, history=history, suppress_errors=True)
             except Exception:

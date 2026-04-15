@@ -539,6 +539,42 @@ def test_trainer_restore_training_checkpoint_rejects_non_mapping_best_state_dict
         trainer.restore_training_checkpoint(checkpoint)
 
 
+def test_trainer_restore_training_checkpoint_rejects_callback_target_mismatch_before_mutating_model(
+    tmp_path,
+):
+    checkpoint = tmp_path / "bad-callback-target.pt"
+    model = ToyModel()
+    torch.save(
+        {
+            ARTIFACT_FORMAT_KEY: CHECKPOINT_FORMAT,
+            ARTIFACT_FORMAT_VERSION_KEY: CHECKPOINT_FORMAT_VERSION,
+            "model_state_dict": {"weight": torch.tensor([9.0])},
+            "metadata": {},
+            "callback_states": [
+                {
+                    "callback": "vgl.engine.callbacks.ExponentialMovingAverage",
+                    "index": 0,
+                    "state": {"shadow_state": None, "num_updates": 1},
+                }
+            ],
+        },
+        checkpoint,
+    )
+    trainer = Trainer(
+        model=model,
+        task=ToyTask(),
+        optimizer=torch.optim.SGD,
+        lr=1.0,
+        max_epochs=1,
+        callbacks=[],
+    )
+
+    with pytest.raises(ValueError, match="checkpoint callback state does not match configured callbacks"):
+        trainer.restore_training_checkpoint(checkpoint)
+
+    assert torch.equal(model.weight.detach(), torch.tensor([0.0]))
+
+
 def test_trainer_can_resume_lookahead_callback_state_from_checkpoint(tmp_path):
     checkpoint = tmp_path / "lookahead-resume.pt"
     paused_callback = Lookahead(sync_period=2, slow_step_size=0.5)
