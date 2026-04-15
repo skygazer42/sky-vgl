@@ -488,6 +488,79 @@ def test_trainer_restores_callback_state_before_on_fit_start_on_resume(tmp_path)
     assert resumed_callback.fit_start_seen_counter == 1
 
 
+def test_trainer_restore_training_checkpoint_detaches_history_state_from_returned_payload(
+    tmp_path,
+):
+    checkpoint = tmp_path / "history-alias-resume.pt"
+    paused_trainer = Trainer(
+        model=ToyModel(),
+        task=ToyTask(),
+        optimizer=torch.optim.SGD,
+        lr=1.0,
+        max_epochs=4,
+        callbacks=[SaveAndStop(checkpoint, stop_epoch=2)],
+    )
+
+    with pytest.raises(RuntimeError, match="pause"):
+        paused_trainer.fit([ToyBatch(2.0)])
+
+    resumed_trainer = Trainer(
+        model=ToyModel(),
+        task=ToyTask(),
+        optimizer=torch.optim.SGD,
+        lr=1.0,
+        max_epochs=4,
+    )
+    resumed_payload = resumed_trainer.restore_training_checkpoint(checkpoint)
+    resumed_payload["history_state"]["completed_epochs"] = 0
+    resumed_history = resumed_trainer.fit([ToyBatch(2.0)])
+
+    uninterrupted_trainer = Trainer(
+        model=ToyModel(),
+        task=ToyTask(),
+        optimizer=torch.optim.SGD,
+        lr=1.0,
+        max_epochs=4,
+    )
+    uninterrupted_history = uninterrupted_trainer.fit([ToyBatch(2.0)])
+
+    assert resumed_history["completed_epochs"] == uninterrupted_history["completed_epochs"] == 4
+    assert resumed_trainer.global_step == uninterrupted_trainer.global_step == 4
+
+
+def test_trainer_restore_training_checkpoint_detaches_callback_states_from_returned_payload(
+    tmp_path,
+):
+    checkpoint = tmp_path / "callback-alias-resume.pt"
+    paused_callback = RestoreAwareCounterCallback()
+    paused_trainer = Trainer(
+        model=ToyModel(),
+        task=ToyTask(),
+        optimizer=torch.optim.SGD,
+        lr=1.0,
+        max_epochs=3,
+        callbacks=[paused_callback, SaveAndStop(checkpoint, stop_epoch=1)],
+    )
+
+    with pytest.raises(RuntimeError, match="pause"):
+        paused_trainer.fit([ToyBatch(2.0)])
+
+    resumed_callback = RestoreAwareCounterCallback()
+    resumed_trainer = Trainer(
+        model=ToyModel(),
+        task=ToyTask(),
+        optimizer=torch.optim.SGD,
+        lr=1.0,
+        max_epochs=3,
+        callbacks=[resumed_callback],
+    )
+    resumed_payload = resumed_trainer.restore_training_checkpoint(checkpoint)
+    resumed_payload["callback_states"][0]["state"]["counter"] = 99
+    resumed_trainer.fit([ToyBatch(2.0)])
+
+    assert resumed_callback.fit_start_seen_counter == 1
+
+
 def test_trainer_restore_training_checkpoint_rejects_negative_global_step_before_mutating_model(tmp_path):
     checkpoint = tmp_path / "bad-global-step.pt"
     model = ToyModel()

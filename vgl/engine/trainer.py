@@ -1368,8 +1368,8 @@ class Trainer:
         self.active_monitor = trainer_state.get("active_monitor")
         self.global_step = trainer_state.get("global_step", 0)
         self._resume_state = {
-            "history_state": payload.get("history_state"),
-            "callback_states": payload.get("callback_states"),
+            "history_state": deepcopy(payload.get("history_state")),
+            "callback_states": deepcopy(payload.get("callback_states")),
             "trainer_state": trainer_state,
         }
         return payload
