@@ -89,6 +89,19 @@ class TrainingHistory(dict):
             state.get("profile"),
             profiler=history["profiler"],
         )
+        completed_epochs = int(history.get("completed_epochs", 0))
+        if completed_epochs < 0:
+            raise ValueError("history_state completed_epochs must be >= 0")
+        if completed_epochs > int(history["epochs"]):
+            raise ValueError("history_state completed_epochs must be <= epochs")
+        best_epoch = history.get("best_epoch")
+        if best_epoch is not None:
+            best_epoch = int(best_epoch)
+            if best_epoch < 0:
+                raise ValueError("history_state best_epoch must be >= 0")
+            if best_epoch > completed_epochs:
+                raise ValueError("history_state best_epoch must be <= completed_epochs")
+            history["best_epoch"] = best_epoch
         return history
 
     def record_epoch(
