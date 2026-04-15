@@ -130,6 +130,19 @@ def test_trainer_rejects_grad_scaler_without_unscale_when_pre_step_ops_are_enabl
         )
 
 
+def test_trainer_rejects_grad_scaler_with_32bit_precision():
+    with pytest.raises(ValueError, match="grad_scaler"):
+        Trainer(
+            model=ToyModel(),
+            task=ToyTask(),
+            optimizer=torch.optim.SGD,
+            lr=1.0,
+            max_epochs=1,
+            precision="32",
+            grad_scaler=FakeGradScaler(),
+        )
+
+
 def test_trainer_enters_autocast_for_bf16_precision(monkeypatch):
     calls = []
 

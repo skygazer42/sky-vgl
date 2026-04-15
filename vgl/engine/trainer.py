@@ -386,6 +386,8 @@ class Trainer:
         return self._move_batch_to_device(batch)
 
     def _build_grad_scaler(self, grad_scaler):
+        if grad_scaler is not None and self.precision == "32":
+            raise ValueError("grad_scaler requires mixed precision; precision='32' is not supported")
         if grad_scaler is None:
             if self.precision == "fp16-mixed" and self._resolved_device_type() == "cuda":
                 return torch.cuda.amp.GradScaler()
