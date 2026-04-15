@@ -137,17 +137,21 @@ class TrainingHistory(dict):
             raise ValueError("history_state train history length must match completed_epochs")
         if any(not isinstance(summary, dict) for summary in train_history):
             raise ValueError("history_state train history entries must be mappings")
+        history["train"] = [dict(summary) for summary in train_history]
         val_history = history.get("val", [])
         if len(val_history) > completed_epochs:
             raise ValueError("history_state val history length must be <= completed_epochs")
         if any(not isinstance(summary, dict) for summary in val_history):
             raise ValueError("history_state val history entries must be mappings")
+        history["val"] = [dict(summary) for summary in val_history]
         final_train = history.get("final_train")
         if final_train is not None and not isinstance(final_train, dict):
             raise ValueError("history_state final_train must be a mapping")
+        history["final_train"] = None if final_train is None else dict(final_train)
         final_val = history.get("final_val")
         if final_val is not None and not isinstance(final_val, dict):
             raise ValueError("history_state final_val must be a mapping")
+        history["final_val"] = None if final_val is None else dict(final_val)
         epoch_elapsed = history.get("epoch_elapsed_seconds", [])
         if len(epoch_elapsed) != completed_epochs:
             raise ValueError("history_state epoch_elapsed_seconds length must match completed_epochs")

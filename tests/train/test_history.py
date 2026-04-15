@@ -158,6 +158,34 @@ def test_training_history_from_state_dict_normalizes_completed_epochs():
     assert history["completed_epochs"] == 2
 
 
+def test_training_history_from_state_dict_copies_summary_mappings():
+    train_entry = {"loss": 1.0}
+    val_entry = {"loss": 0.8}
+    final_train = {"loss": 0.5}
+    final_val = {"loss": 0.4}
+    history = TrainingHistory.from_state_dict(
+        {
+            "epochs": 3,
+            "monitor": "val_loss",
+            "completed_epochs": 1,
+            "train": [train_entry],
+            "val": [val_entry],
+            "epoch_elapsed_seconds": [0.1],
+            "final_train": final_train,
+            "final_val": final_val,
+        }
+    )
+
+    assert history["train"][0] == {"loss": 1.0}
+    assert history["val"][0] == {"loss": 0.8}
+    assert history["final_train"] == {"loss": 0.5}
+    assert history["final_val"] == {"loss": 0.4}
+    assert history["train"][0] is not train_entry
+    assert history["val"][0] is not val_entry
+    assert history["final_train"] is not final_train
+    assert history["final_val"] is not final_val
+
+
 def test_training_history_from_state_dict_rejects_non_mapping_profile():
     with pytest.raises(ValueError, match="profile must be a mapping"):
         TrainingHistory.from_state_dict(
