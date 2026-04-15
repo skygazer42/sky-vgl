@@ -797,6 +797,35 @@ def test_trainer_restore_training_checkpoint_rejects_zero_best_epoch(
     assert torch.equal(model.weight.detach(), torch.tensor([0.0]))
 
 
+def test_trainer_restore_training_checkpoint_rejects_best_epoch_without_best_metric_without_history_state(
+    tmp_path,
+):
+    checkpoint = tmp_path / "bad-best-epoch-without-metric.pt"
+    model = ToyModel()
+    torch.save(
+        {
+            ARTIFACT_FORMAT_KEY: CHECKPOINT_FORMAT,
+            ARTIFACT_FORMAT_VERSION_KEY: CHECKPOINT_FORMAT_VERSION,
+            "model_state_dict": {"weight": torch.tensor([9.0])},
+            "metadata": {},
+            "trainer_state": {"best_epoch": 1},
+        },
+        checkpoint,
+    )
+    trainer = Trainer(
+        model=model,
+        task=ToyTask(),
+        optimizer=torch.optim.SGD,
+        lr=1.0,
+        max_epochs=1,
+    )
+
+    with pytest.raises(ValueError, match="best_metric"):
+        trainer.restore_training_checkpoint(checkpoint)
+
+    assert torch.equal(model.weight.detach(), torch.tensor([0.0]))
+
+
 def test_trainer_restore_training_checkpoint_rejects_best_state_dict_without_best_epoch(
     tmp_path,
 ):
@@ -998,6 +1027,43 @@ def test_trainer_restore_training_checkpoint_rejects_missing_history_best_metric
                 "best_epoch": 2,
             },
             "trainer_state": {"best_epoch": 2, "best_metric": 1.0},
+        },
+        checkpoint,
+    )
+    trainer = Trainer(
+        model=model,
+        task=ToyTask(),
+        optimizer=torch.optim.SGD,
+        lr=1.0,
+        max_epochs=4,
+    )
+
+    with pytest.raises(ValueError, match="best_metric"):
+        trainer.restore_training_checkpoint(checkpoint)
+
+    assert torch.equal(model.weight.detach(), torch.tensor([0.0]))
+
+
+def test_trainer_restore_training_checkpoint_rejects_best_epoch_without_best_metric(
+    tmp_path,
+):
+    checkpoint = tmp_path / "best-epoch-without-best-metric.pt"
+    model = ToyModel()
+    torch.save(
+        {
+            ARTIFACT_FORMAT_KEY: CHECKPOINT_FORMAT,
+            ARTIFACT_FORMAT_VERSION_KEY: CHECKPOINT_FORMAT_VERSION,
+            "model_state_dict": {"weight": torch.tensor([9.0])},
+            "metadata": {},
+            "history_state": {
+                "epochs": 4,
+                "monitor": "train_loss",
+                "completed_epochs": 2,
+                "train": [{"loss": 4.0}, {"loss": 4.0}],
+                "epoch_elapsed_seconds": [0.1, 0.1],
+                "best_epoch": 2,
+            },
+            "trainer_state": {"best_epoch": 2},
         },
         checkpoint,
     )

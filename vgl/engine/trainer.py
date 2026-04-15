@@ -86,6 +86,8 @@ def _normalize_restored_trainer_state(state):
         normalized["best_epoch"] = best_epoch
 
     best_metric = normalized.get("best_metric")
+    if best_epoch is not None and best_metric is None:
+        raise ValueError("trainer_state.best_epoch requires best_metric")
     if best_metric is not None:
         if best_epoch is None:
             raise ValueError("trainer_state.best_metric requires best_epoch")
