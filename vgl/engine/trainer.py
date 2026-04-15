@@ -1254,6 +1254,9 @@ class Trainer:
         if isinstance(history_state, dict):
             completed_epochs = int(history_state.get("completed_epochs", 0))
             trainer_state_payload = payload.get("trainer_state", {})
+            trainer_global_step = trainer_state_payload.get("global_step")
+            if trainer_global_step is not None and int(trainer_global_step) < completed_epochs:
+                raise ValueError("trainer_state.global_step must be >= history_state.completed_epochs")
             best_epoch = trainer_state_payload.get("best_epoch")
             if best_epoch is not None and int(best_epoch) > completed_epochs:
                 raise ValueError("trainer_state.best_epoch must be <= history_state.completed_epochs")
