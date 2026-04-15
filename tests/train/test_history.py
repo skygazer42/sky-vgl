@@ -128,6 +128,22 @@ def test_training_history_from_state_dict_normalizes_simple_profiler_profile_sch
     assert "unknown_extra" not in history["profile"]
 
 
+def test_training_history_from_state_dict_normalizes_run_context_fields():
+    history = TrainingHistory.from_state_dict(
+        {
+            "epochs": 3,
+            "monitor": "val_loss",
+            "run_name": 123,
+            "root_dir": 456,
+            "fast_dev_run": 1,
+        }
+    )
+
+    assert history["run_name"] == "123"
+    assert history["root_dir"] == "456"
+    assert history["fast_dev_run"] is True
+
+
 def test_training_history_from_state_dict_rejects_non_mapping_profile():
     with pytest.raises(ValueError, match="profile must be a mapping"):
         TrainingHistory.from_state_dict(

@@ -111,6 +111,12 @@ class TrainingHistory(dict):
             profiler=profiler,
         )
         history.update(dict(state))
+        history["epochs"] = epochs
+        history["monitor"] = monitor
+        history["run_name"] = None if state.get("run_name") is None else str(state.get("run_name"))
+        history["root_dir"] = None if state.get("root_dir") is None else str(state.get("root_dir"))
+        history["fast_dev_run"] = bool(state.get("fast_dev_run", False))
+        history["profiler"] = profiler
         if state.get("profile") is not None and history["profiler"] != "simple":
             raise ValueError("history_state profile requires profiler='simple'")
         history["profile"] = normalize_profile(
