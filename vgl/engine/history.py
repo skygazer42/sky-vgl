@@ -162,6 +162,8 @@ class TrainingHistory(dict):
             raise ValueError("history_state final_val must be a mapping")
         if completed_epochs == 0 and final_val is not None:
             raise ValueError("history_state final_val requires completed_epochs > 0")
+        if final_val is not None and not val_history:
+            raise ValueError("history_state final_val requires val history")
         history["final_val"] = None if final_val is None else dict(final_val)
         epoch_elapsed = history.get("epoch_elapsed_seconds", [])
         if len(epoch_elapsed) != completed_epochs:

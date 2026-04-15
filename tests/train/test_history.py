@@ -408,6 +408,20 @@ def test_training_history_from_state_dict_rejects_final_val_without_progress():
         )
 
 
+def test_training_history_from_state_dict_rejects_final_val_without_val_history():
+    with pytest.raises(ValueError, match="final_val"):
+        TrainingHistory.from_state_dict(
+            {
+                "epochs": 3,
+                "monitor": "val_loss",
+                "completed_epochs": 2,
+                "train": [{"loss": 1.0}, {"loss": 0.5}],
+                "epoch_elapsed_seconds": [0.1, 0.2],
+                "final_val": {"loss": 0.4},
+            }
+        )
+
+
 def test_training_history_from_state_dict_rejects_val_history_length_past_completed_epochs():
     with pytest.raises(ValueError, match="val history length"):
         TrainingHistory.from_state_dict(
