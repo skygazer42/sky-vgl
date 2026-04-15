@@ -214,6 +214,21 @@ def test_training_history_from_state_dict_rejects_best_metric_without_best_epoch
         )
 
 
+def test_training_history_from_state_dict_rejects_non_numeric_best_metric():
+    with pytest.raises(ValueError, match="best_metric"):
+        TrainingHistory.from_state_dict(
+            {
+                "epochs": 3,
+                "monitor": "val_loss",
+                "completed_epochs": 2,
+                "train": [{"loss": 1.0}, {"loss": 0.5}],
+                "epoch_elapsed_seconds": [0.1, 0.2],
+                "best_epoch": 2,
+                "best_metric": "bad",
+            }
+        )
+
+
 def test_training_history_from_state_dict_rejects_train_history_length_mismatch():
     with pytest.raises(ValueError, match="train history length"):
         TrainingHistory.from_state_dict(

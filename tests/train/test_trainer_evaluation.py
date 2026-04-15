@@ -1049,6 +1049,48 @@ def test_trainer_restore_training_checkpoint_rejects_non_numeric_best_metric_wit
     assert torch.equal(model.weight.detach(), torch.tensor([0.0]))
 
 
+def test_trainer_restore_training_checkpoint_rejects_non_numeric_history_best_metric_before_mutating_model(
+    tmp_path,
+):
+    checkpoint = tmp_path / "bad-history-best-metric-type.pt"
+    model = ToyModel()
+    torch.save(
+        {
+            ARTIFACT_FORMAT_KEY: CHECKPOINT_FORMAT,
+            ARTIFACT_FORMAT_VERSION_KEY: CHECKPOINT_FORMAT_VERSION,
+            "model_state_dict": {"weight": torch.tensor([9.0])},
+            "metadata": {},
+            "history_state": {
+                "epochs": 4,
+                "monitor": "train_loss",
+                "completed_epochs": 2,
+                "train": [{"loss": 4.0}, {"loss": 4.0}],
+                "epoch_elapsed_seconds": [0.1, 0.1],
+                "best_epoch": 2,
+                "best_metric": "bad",
+            },
+            "trainer_state": {
+                "best_epoch": 2,
+                "best_metric": 1.0,
+                "best_state_dict": {"weight": torch.tensor([7.0])},
+            },
+        },
+        checkpoint,
+    )
+    trainer = Trainer(
+        model=model,
+        task=ToyTask(),
+        optimizer=torch.optim.SGD,
+        lr=1.0,
+        max_epochs=4,
+    )
+
+    with pytest.raises(ValueError, match="best_metric"):
+        trainer.restore_training_checkpoint(checkpoint)
+
+    assert torch.equal(model.weight.detach(), torch.tensor([0.0]))
+
+
 def test_trainer_restore_training_checkpoint_rejects_zero_best_epoch(
     tmp_path,
 ):

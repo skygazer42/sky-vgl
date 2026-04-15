@@ -174,6 +174,13 @@ class TrainingHistory(dict):
             if best_epoch > completed_epochs:
                 raise ValueError("history_state best_epoch must be <= completed_epochs")
             history["best_epoch"] = best_epoch
+        best_metric = history.get("best_metric")
+        if best_metric is not None:
+            try:
+                best_metric = float(best_metric)
+            except (TypeError, ValueError) as exc:
+                raise ValueError("history_state best_metric must be numeric") from exc
+            history["best_metric"] = best_metric
         if best_epoch is not None and history.get("best_metric") is None:
             raise ValueError("history_state best_epoch requires best_metric")
         if history.get("best_metric") is not None and best_epoch is None:
