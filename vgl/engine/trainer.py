@@ -96,7 +96,10 @@ def _normalize_restored_trainer_state(state):
     if best_metric is not None:
         if best_epoch is None:
             raise ValueError("trainer_state.best_metric requires best_epoch")
-        normalized["best_metric"] = float(best_metric)
+        try:
+            normalized["best_metric"] = float(best_metric)
+        except (TypeError, ValueError) as exc:
+            raise ValueError("trainer_state.best_metric must be numeric") from exc
 
     if best_state_dict is not None and best_epoch is None:
         raise ValueError("trainer_state.best_state_dict requires best_epoch")
@@ -1286,11 +1289,21 @@ class Trainer:
             completed_epochs = int(normalized_history_state.get("completed_epochs", 0))
             trainer_state_payload = payload.get("trainer_state", {})
             trainer_global_step = trainer_state_payload.get("global_step")
-            if trainer_global_step is not None and int(trainer_global_step) < completed_epochs:
-                raise ValueError("trainer_state.global_step must be >= history_state.completed_epochs")
+            if trainer_global_step is not None:
+                try:
+                    trainer_global_step = int(trainer_global_step)
+                except (TypeError, ValueError) as exc:
+                    raise ValueError("trainer_state.global_step must be an integer") from exc
+                if trainer_global_step < completed_epochs:
+                    raise ValueError("trainer_state.global_step must be >= history_state.completed_epochs")
             best_epoch = trainer_state_payload.get("best_epoch")
-            if best_epoch is not None and int(best_epoch) > completed_epochs:
-                raise ValueError("trainer_state.best_epoch must be <= history_state.completed_epochs")
+            if best_epoch is not None:
+                try:
+                    best_epoch = int(best_epoch)
+                except (TypeError, ValueError) as exc:
+                    raise ValueError("trainer_state.best_epoch must be an integer") from exc
+                if best_epoch > completed_epochs:
+                    raise ValueError("trainer_state.best_epoch must be <= history_state.completed_epochs")
             active_monitor = trainer_state_payload.get("active_monitor")
             history_monitor = normalized_history_state.get("monitor")
             if (
@@ -1305,7 +1318,7 @@ class Trainer:
             if (
                 best_epoch is not None
                 and history_best_epoch is not None
-                and int(best_epoch) != int(history_best_epoch)
+                and best_epoch != int(history_best_epoch)
             ):
                 raise ValueError("trainer_state.best_epoch must match history_state.best_epoch")
             trainer_best_metric = trainer_state_payload.get("best_metric")
@@ -1314,12 +1327,13 @@ class Trainer:
                 raise ValueError("trainer_state.best_metric must match history_state.best_metric")
             if trainer_best_metric is None and history_best_metric is not None:
                 raise ValueError("trainer_state.best_metric must match history_state.best_metric")
-            if (
-                trainer_best_metric is not None
-                and history_best_metric is not None
-                and float(trainer_best_metric) != float(history_best_metric)
-            ):
-                raise ValueError("trainer_state.best_metric must match history_state.best_metric")
+            if trainer_best_metric is not None and history_best_metric is not None:
+                try:
+                    trainer_best_metric = float(trainer_best_metric)
+                except (TypeError, ValueError) as exc:
+                    raise ValueError("trainer_state.best_metric must be numeric") from exc
+                if trainer_best_metric != float(history_best_metric):
+                    raise ValueError("trainer_state.best_metric must match history_state.best_metric")
         trainer_state = _normalize_restored_trainer_state(payload.get("trainer_state"))
         scheduler_state = payload.get("lr_scheduler_state_dict")
         if scheduler_state is not None and self.lr_scheduler is None:
