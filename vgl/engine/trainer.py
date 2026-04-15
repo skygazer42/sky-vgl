@@ -1314,6 +1314,8 @@ class Trainer:
                 if best_epoch > completed_epochs:
                     raise ValueError("trainer_state.best_epoch must be <= history_state.completed_epochs")
             active_monitor = trainer_state_payload.get("active_monitor")
+            if active_monitor is not None and not isinstance(active_monitor, str):
+                raise ValueError("trainer_state.active_monitor must be a string")
             history_monitor = normalized_history_state.get("monitor")
             if (
                 active_monitor is not None
