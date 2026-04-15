@@ -158,6 +158,22 @@ def test_training_history_from_state_dict_normalizes_completed_epochs():
     assert history["completed_epochs"] == 2
 
 
+def test_training_history_from_state_dict_normalizes_boolean_flags():
+    history = TrainingHistory.from_state_dict(
+        {
+            "epochs": 3,
+            "monitor": "val_loss",
+            "stopped_early": 1,
+            "fast_dev_run": 1,
+            "sanity_check_passed": 1,
+        }
+    )
+
+    assert history["stopped_early"] is True
+    assert history["fast_dev_run"] is True
+    assert history["sanity_check_passed"] is True
+
+
 def test_training_history_from_state_dict_copies_summary_mappings():
     train_entry = {"loss": 1.0}
     val_entry = {"loss": 0.8}
