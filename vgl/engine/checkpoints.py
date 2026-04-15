@@ -36,10 +36,22 @@ def _ensure_callback_states(payload):
     for entry in value:
         if not isinstance(entry, dict):
             raise ValueError("callback_states entries must be mappings")
+        callback_name = entry.get("callback")
+        if not isinstance(callback_name, str):
+            raise ValueError("callback_states entry callback must be a string")
+        callback_index = int(entry.get("index", 0))
+        if callback_index < 0:
+            raise ValueError("callback_states entry index must be >= 0")
         state = entry.get("state")
         if state is not None and not isinstance(state, dict):
             raise ValueError("callback_states entry state must be a mapping")
-        normalized.append(entry)
+        normalized.append(
+            {
+                **entry,
+                "callback": callback_name,
+                "index": callback_index,
+            }
+        )
     return normalized
 
 
