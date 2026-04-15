@@ -1594,9 +1594,20 @@ class Trainer:
         try:
             self._run_callbacks("on_fit_end", history=history)
             self._run_loggers("on_fit_end", self._build_fit_end_record(history))
-        finally:
-            self._finalize_loggers("success", suppress_errors=True)
+        except Exception as exc:
+            self._run_loggers(
+                "on_exception",
+                self._build_exception_record(exc),
+                suppress_errors=True,
+            )
+            self._finalize_loggers("exception", suppress_errors=True)
             self._fit_start_time = None
             self._epoch_profile = None
+            raise
+        finally:
+            if self._fit_start_time is not None:
+                self._finalize_loggers("success", suppress_errors=True)
+                self._fit_start_time = None
+                self._epoch_profile = None
         self.last_history = history
         return history

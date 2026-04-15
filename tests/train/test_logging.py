@@ -231,8 +231,9 @@ def test_trainer_finalizes_loggers_when_fit_end_logger_raises():
     with pytest.raises(RuntimeError, match="fit-end logger boom"):
         trainer.fit([ToyBatch(1.0)])
 
-    assert finalize_logger.finalize_statuses == ["success"]
-    assert raising_logger.finalize_statuses == ["success"]
+    assert finalize_logger.finalize_statuses == ["exception"]
+    assert raising_logger.finalize_statuses == ["exception"]
+    assert finalize_logger.exception_events[0]["exception_type"] == "RuntimeError"
 
 
 def test_trainer_finalizes_loggers_when_exception_logger_raises():
@@ -296,8 +297,9 @@ def test_trainer_finalizes_loggers_when_fit_end_callback_raises():
     with pytest.raises(RuntimeError, match="fit-end callback boom"):
         trainer.fit([ToyBatch(1.0)])
 
-    assert finalize_logger.finalize_statuses == ["success"]
-    assert raising_logger.finalize_statuses == ["success"]
+    assert finalize_logger.finalize_statuses == ["exception"]
+    assert raising_logger.finalize_statuses == ["exception"]
+    assert finalize_logger.exception_events[0]["exception_type"] == "RuntimeError"
 
 
 def test_fit_start_and_checkpoint_records_include_artifact_paths(tmp_path):
