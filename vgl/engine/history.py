@@ -116,6 +116,7 @@ class TrainingHistory(dict):
         history["run_name"] = None if state.get("run_name") is None else str(state.get("run_name"))
         history["root_dir"] = None if state.get("root_dir") is None else str(state.get("root_dir"))
         history["stopped_early"] = bool(state.get("stopped_early", False))
+        history["stop_reason"] = None if state.get("stop_reason") is None else str(state.get("stop_reason"))
         history["fast_dev_run"] = bool(state.get("fast_dev_run", False))
         history["sanity_check_passed"] = bool(state.get("sanity_check_passed", False))
         history["profiler"] = profiler

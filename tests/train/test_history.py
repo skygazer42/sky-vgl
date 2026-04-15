@@ -174,6 +174,19 @@ def test_training_history_from_state_dict_normalizes_boolean_flags():
     assert history["sanity_check_passed"] is True
 
 
+def test_training_history_from_state_dict_normalizes_stop_reason():
+    history = TrainingHistory.from_state_dict(
+        {
+            "epochs": 3,
+            "monitor": "val_loss",
+            "stopped_early": 1,
+            "stop_reason": 404,
+        }
+    )
+
+    assert history["stop_reason"] == "404"
+
+
 def test_training_history_from_state_dict_copies_summary_mappings():
     train_entry = {"loss": 1.0}
     val_entry = {"loss": 0.8}
