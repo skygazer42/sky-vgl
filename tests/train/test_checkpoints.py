@@ -377,6 +377,22 @@ def test_save_checkpoint_rejects_best_metric_mismatch_with_history_state(tmp_pat
         )
 
 
+def test_save_checkpoint_rejects_active_monitor_mismatch_with_history_state(tmp_path):
+    checkpoint = tmp_path / "bad-save-active-monitor-mismatch.pt"
+
+    with pytest.raises(ValueError, match="active_monitor"):
+        save_checkpoint(
+            checkpoint,
+            {"weight": torch.tensor([1.0])},
+            trainer_state={"active_monitor": "val_loss"},
+            history_state={
+                "epochs": 4,
+                "monitor": "train_loss",
+                "completed_epochs": 0,
+            },
+        )
+
+
 def test_load_checkpoint_rejects_non_mapping_metadata_even_when_falsy(tmp_path):
     checkpoint = tmp_path / "bad-metadata.pt"
     torch.save(

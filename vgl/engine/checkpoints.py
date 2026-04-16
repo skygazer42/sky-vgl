@@ -115,6 +115,14 @@ def build_checkpoint_payload(
             and trainer_best_metric != history_best_metric
         ):
             raise ValueError("trainer_state.best_metric must match history_state.best_metric")
+        trainer_active_monitor = optional_sections["trainer_state"].get("active_monitor")
+        history_monitor = normalized_history_state.get("monitor")
+        if (
+            trainer_active_monitor is not None
+            and history_monitor is not None
+            and trainer_active_monitor != history_monitor
+        ):
+            raise ValueError("trainer_state.active_monitor must match history_state.monitor")
     for key, value in optional_sections.items():
         if value is not None:
             payload[key] = deepcopy(value)
