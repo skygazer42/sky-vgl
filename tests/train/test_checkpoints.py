@@ -288,6 +288,82 @@ def test_load_checkpoint_rejects_final_val_without_val_history_in_history_state(
         load_checkpoint(checkpoint)
 
 
+def test_load_checkpoint_rejects_final_train_without_progress_in_history_state(
+    tmp_path,
+):
+    checkpoint = tmp_path / "bad-history-final-train-no-progress.pt"
+    torch.save(
+        {
+            ARTIFACT_FORMAT_KEY: CHECKPOINT_FORMAT,
+            ARTIFACT_FORMAT_VERSION_KEY: CHECKPOINT_FORMAT_VERSION,
+            "model_state_dict": {"weight": torch.tensor([1.0])},
+            "metadata": {},
+            "history_state": {
+                "epochs": 4,
+                "monitor": "train_loss",
+                "final_train": {"loss": 0.5},
+            },
+        },
+        checkpoint,
+    )
+
+    with pytest.raises(ValueError, match="final_train"):
+        load_checkpoint(checkpoint)
+
+
+def test_load_checkpoint_rejects_final_train_mismatch_in_history_state(
+    tmp_path,
+):
+    checkpoint = tmp_path / "bad-history-final-train-mismatch.pt"
+    torch.save(
+        {
+            ARTIFACT_FORMAT_KEY: CHECKPOINT_FORMAT,
+            ARTIFACT_FORMAT_VERSION_KEY: CHECKPOINT_FORMAT_VERSION,
+            "model_state_dict": {"weight": torch.tensor([1.0])},
+            "metadata": {},
+            "history_state": {
+                "epochs": 4,
+                "monitor": "train_loss",
+                "completed_epochs": 2,
+                "train": [{"loss": 1.0}, {"loss": 0.5}],
+                "epoch_elapsed_seconds": [0.1, 0.2],
+                "final_train": {"loss": 0.25},
+            },
+        },
+        checkpoint,
+    )
+
+    with pytest.raises(ValueError, match="final_train"):
+        load_checkpoint(checkpoint)
+
+
+def test_load_checkpoint_rejects_final_val_mismatch_in_history_state(
+    tmp_path,
+):
+    checkpoint = tmp_path / "bad-history-final-val-mismatch.pt"
+    torch.save(
+        {
+            ARTIFACT_FORMAT_KEY: CHECKPOINT_FORMAT,
+            ARTIFACT_FORMAT_VERSION_KEY: CHECKPOINT_FORMAT_VERSION,
+            "model_state_dict": {"weight": torch.tensor([1.0])},
+            "metadata": {},
+            "history_state": {
+                "epochs": 4,
+                "monitor": "val_loss",
+                "completed_epochs": 2,
+                "train": [{"loss": 1.0}, {"loss": 0.5}],
+                "val": [{"loss": 0.9}, {"loss": 0.8}],
+                "epoch_elapsed_seconds": [0.1, 0.2],
+                "final_val": {"loss": 0.4},
+            },
+        },
+        checkpoint,
+    )
+
+    with pytest.raises(ValueError, match="final_val"):
+        load_checkpoint(checkpoint)
+
+
 def test_save_checkpoint_rejects_non_mapping_metadata_even_when_falsy(tmp_path):
     checkpoint = tmp_path / "bad-save-metadata.pt"
 
