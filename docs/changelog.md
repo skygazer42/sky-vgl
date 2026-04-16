@@ -4,6 +4,24 @@
 
 ### API
 
+- 暂无条目。
+
+### Performance
+
+- 暂无条目。
+
+### Interop
+
+- 暂无条目。
+
+### Migration
+
+- 暂无条目。
+
+## v0.1.7
+
+### API
+
 - Release and public-surface policy now lives in a shared machine-readable contract used by scans, tests, and smoke tooling.
 
 ### Performance
