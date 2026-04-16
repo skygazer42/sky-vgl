@@ -101,6 +101,8 @@ def build_checkpoint_payload(
             raise ValueError("trainer_state.global_step must be >= history_state.completed_epochs")
         trainer_best_epoch = optional_sections["trainer_state"].get("best_epoch")
         history_best_epoch = normalized_history_state.get("best_epoch")
+        if (trainer_best_epoch is None) != (history_best_epoch is None):
+            raise ValueError("trainer_state.best_epoch must match history_state.best_epoch")
         if (
             trainer_best_epoch is not None
             and history_best_epoch is not None

@@ -112,6 +112,8 @@ def test_save_and_load_checkpoint_round_trip_with_training_state_sections(tmp_pa
             "completed_epochs": 2,
             "train": [{"loss": 1.0}, {"loss": 0.5}],
             "epoch_elapsed_seconds": [0.1, 0.2],
+            "best_epoch": 2,
+            "best_metric": 1.0,
         },
     )
     payload = load_checkpoint(checkpoint)
@@ -140,9 +142,9 @@ def test_save_and_load_checkpoint_round_trip_with_training_state_sections(tmp_pa
             "completed_epochs": 2,
             "train": [{"loss": 1.0}, {"loss": 0.5}],
             "epoch_elapsed_seconds": [0.1, 0.2],
+            "best_epoch": 2,
+            "best_metric": 1.0,
             "val": [],
-            "best_epoch": None,
-            "best_metric": None,
             "stopped_early": False,
             "stop_reason": None,
             "fit_elapsed_seconds": None,
@@ -373,6 +375,46 @@ def test_save_checkpoint_rejects_best_metric_mismatch_with_history_state(tmp_pat
                 "epoch_elapsed_seconds": [0.1, 0.2],
                 "best_epoch": 2,
                 "best_metric": 2.0,
+            },
+        )
+
+
+def test_save_checkpoint_rejects_missing_trainer_best_epoch_when_history_has_one(tmp_path):
+    checkpoint = tmp_path / "bad-save-missing-trainer-best-epoch.pt"
+
+    with pytest.raises(ValueError, match="best_epoch"):
+        save_checkpoint(
+            checkpoint,
+            {"weight": torch.tensor([1.0])},
+            trainer_state={"global_step": 2},
+            history_state={
+                "epochs": 4,
+                "monitor": "train_loss",
+                "completed_epochs": 2,
+                "train": [{"loss": 1.0}, {"loss": 0.5}],
+                "epoch_elapsed_seconds": [0.1, 0.2],
+                "best_epoch": 2,
+                "best_metric": 1.0,
+            },
+        )
+
+
+def test_save_checkpoint_rejects_missing_trainer_best_metric_when_history_has_one(tmp_path):
+    checkpoint = tmp_path / "bad-save-missing-trainer-best-metric.pt"
+
+    with pytest.raises(ValueError, match="best_metric"):
+        save_checkpoint(
+            checkpoint,
+            {"weight": torch.tensor([1.0])},
+            trainer_state={"global_step": 2, "best_epoch": 2, "best_state_dict": {"weight": torch.tensor([1.0])}},
+            history_state={
+                "epochs": 4,
+                "monitor": "train_loss",
+                "completed_epochs": 2,
+                "train": [{"loss": 1.0}, {"loss": 0.5}],
+                "epoch_elapsed_seconds": [0.1, 0.2],
+                "best_epoch": 2,
+                "best_metric": 1.0,
             },
         )
 
