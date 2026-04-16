@@ -99,6 +99,22 @@ def build_checkpoint_payload(
             raise ValueError("trainer_state.global_step must be >= history_state.completed_epochs")
         if trainer_global_step is not None and trainer_global_step < completed_epochs:
             raise ValueError("trainer_state.global_step must be >= history_state.completed_epochs")
+        trainer_best_epoch = optional_sections["trainer_state"].get("best_epoch")
+        history_best_epoch = normalized_history_state.get("best_epoch")
+        if (
+            trainer_best_epoch is not None
+            and history_best_epoch is not None
+            and trainer_best_epoch != history_best_epoch
+        ):
+            raise ValueError("trainer_state.best_epoch must match history_state.best_epoch")
+        trainer_best_metric = optional_sections["trainer_state"].get("best_metric")
+        history_best_metric = normalized_history_state.get("best_metric")
+        if (
+            trainer_best_metric is not None
+            and history_best_metric is not None
+            and trainer_best_metric != history_best_metric
+        ):
+            raise ValueError("trainer_state.best_metric must match history_state.best_metric")
     for key, value in optional_sections.items():
         if value is not None:
             payload[key] = deepcopy(value)
