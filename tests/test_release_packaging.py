@@ -354,6 +354,7 @@ def test_release_workflows_exist_for_ci_and_pypi_publish():
     assert "needs.probe-publish-auth.outputs.has_pypi_api_token" in publish_text
     assert "needs.probe-publish-auth.outputs.has_test_pypi_api_token" in publish_text
     assert "GITHUB_OUTPUT" in publish_text
+    assert 'python scripts/metadata_consistency.py --git-ref "${GITHUB_REF}"' in publish_text
     assert "python scripts/release_smoke.py --artifact-dir dist --kind all" in publish_text
     assert "python scripts/install_release_extras.py --artifact-dir dist --extras pyg dgl" in publish_build_install_step
     assert 'python -m pip install -e ".[pyg,dgl]"' not in publish_build_install_step
