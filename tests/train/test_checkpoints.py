@@ -291,6 +291,42 @@ def test_save_checkpoint_rejects_non_string_trainer_state_active_monitor(tmp_pat
         )
 
 
+def test_save_checkpoint_rejects_missing_global_step_when_history_has_progress(tmp_path):
+    checkpoint = tmp_path / "bad-save-global-step-missing.pt"
+
+    with pytest.raises(ValueError, match="global_step"):
+        save_checkpoint(
+            checkpoint,
+            {"weight": torch.tensor([1.0])},
+            trainer_state={},
+            history_state={
+                "epochs": 4,
+                "monitor": "train_loss",
+                "completed_epochs": 2,
+                "train": [{"loss": 1.0}, {"loss": 0.5}],
+                "epoch_elapsed_seconds": [0.1, 0.2],
+            },
+        )
+
+
+def test_save_checkpoint_rejects_global_step_behind_history_progress(tmp_path):
+    checkpoint = tmp_path / "bad-save-global-step-range.pt"
+
+    with pytest.raises(ValueError, match="global_step"):
+        save_checkpoint(
+            checkpoint,
+            {"weight": torch.tensor([1.0])},
+            trainer_state={"global_step": 1},
+            history_state={
+                "epochs": 4,
+                "monitor": "train_loss",
+                "completed_epochs": 2,
+                "train": [{"loss": 1.0}, {"loss": 0.5}],
+                "epoch_elapsed_seconds": [0.1, 0.2],
+            },
+        )
+
+
 def test_load_checkpoint_rejects_non_mapping_metadata_even_when_falsy(tmp_path):
     checkpoint = tmp_path / "bad-metadata.pt"
     torch.save(
