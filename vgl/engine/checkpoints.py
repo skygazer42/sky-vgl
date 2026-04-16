@@ -84,6 +84,10 @@ def build_checkpoint_payload(
         "trainer_state": trainer_state,
         "history_state": history_state,
     }
+    if trainer_state is not None:
+        from vgl.engine.trainer import _normalize_restored_trainer_state
+
+        optional_sections["trainer_state"] = _normalize_restored_trainer_state(trainer_state)
     for key, value in optional_sections.items():
         if value is not None:
             payload[key] = deepcopy(value)

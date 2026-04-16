@@ -100,7 +100,12 @@ def test_save_and_load_checkpoint_round_trip_with_training_state_sections(tmp_pa
             {"callback": "pkg.CallbackA", "index": 0, "state": {"records": [1]}},
             {"callback": "pkg.CallbackB", "index": 1, "state": {"shadow": 2}},
         ],
-        trainer_state={"global_step": 3, "best_epoch": 2},
+        trainer_state={
+            "global_step": 3,
+            "best_epoch": 2,
+            "best_metric": 1.0,
+            "best_state_dict": {"weight": torch.tensor([3.0])},
+        },
         history_state={
             "epochs": 5,
             "monitor": "val_loss",
@@ -123,7 +128,12 @@ def test_save_and_load_checkpoint_round_trip_with_training_state_sections(tmp_pa
             {"callback": "pkg.CallbackA", "index": 0, "state": {"records": [1]}},
             {"callback": "pkg.CallbackB", "index": 1, "state": {"shadow": 2}},
         ],
-        "trainer_state": {"global_step": 3, "best_epoch": 2},
+        "trainer_state": {
+            "global_step": 3,
+            "best_epoch": 2,
+            "best_metric": 1.0,
+            "best_state_dict": {"weight": torch.tensor([3.0])},
+        },
         "history_state": {
             "epochs": 5,
             "monitor": "val_loss",
@@ -256,6 +266,28 @@ def test_save_checkpoint_rejects_malformed_callback_states(tmp_path):
             checkpoint,
             {"weight": torch.tensor([1.0])},
             callback_states=[{"state": {}}],
+        )
+
+
+def test_save_checkpoint_rejects_trainer_state_best_epoch_without_best_metric(tmp_path):
+    checkpoint = tmp_path / "bad-save-trainer-state-best-metric.pt"
+
+    with pytest.raises(ValueError, match="best_metric"):
+        save_checkpoint(
+            checkpoint,
+            {"weight": torch.tensor([1.0])},
+            trainer_state={"best_epoch": 1},
+        )
+
+
+def test_save_checkpoint_rejects_non_string_trainer_state_active_monitor(tmp_path):
+    checkpoint = tmp_path / "bad-save-trainer-state-monitor.pt"
+
+    with pytest.raises(ValueError, match="active_monitor"):
+        save_checkpoint(
+            checkpoint,
+            {"weight": torch.tensor([1.0])},
+            trainer_state={"active_monitor": ["bad"]},
         )
 
 
