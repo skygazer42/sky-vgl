@@ -269,6 +269,86 @@ def test_load_checkpoint_rejects_non_mapping_history_state(tmp_path):
         load_checkpoint(checkpoint)
 
 
+def test_load_checkpoint_rejects_non_integer_history_epochs(tmp_path):
+    checkpoint = tmp_path / "bad-history-epochs.pt"
+    torch.save(
+        {
+            ARTIFACT_FORMAT_KEY: CHECKPOINT_FORMAT,
+            ARTIFACT_FORMAT_VERSION_KEY: CHECKPOINT_FORMAT_VERSION,
+            "model_state_dict": {"weight": torch.tensor([1.0])},
+            "metadata": {},
+            "history_state": {"epochs": "bad", "monitor": "train_loss"},
+        },
+        checkpoint,
+    )
+
+    with pytest.raises(ValueError, match="epochs"):
+        load_checkpoint(checkpoint)
+
+
+def test_load_checkpoint_rejects_non_string_history_monitor(tmp_path):
+    checkpoint = tmp_path / "bad-history-monitor.pt"
+    torch.save(
+        {
+            ARTIFACT_FORMAT_KEY: CHECKPOINT_FORMAT,
+            ARTIFACT_FORMAT_VERSION_KEY: CHECKPOINT_FORMAT_VERSION,
+            "model_state_dict": {"weight": torch.tensor([1.0])},
+            "metadata": {},
+            "history_state": {"epochs": 4, "monitor": ["bad"]},
+        },
+        checkpoint,
+    )
+
+    with pytest.raises(ValueError, match="monitor"):
+        load_checkpoint(checkpoint)
+
+
+def test_load_checkpoint_rejects_non_integer_history_completed_epochs(tmp_path):
+    checkpoint = tmp_path / "bad-history-completed-epochs.pt"
+    torch.save(
+        {
+            ARTIFACT_FORMAT_KEY: CHECKPOINT_FORMAT,
+            ARTIFACT_FORMAT_VERSION_KEY: CHECKPOINT_FORMAT_VERSION,
+            "model_state_dict": {"weight": torch.tensor([1.0])},
+            "metadata": {},
+            "history_state": {
+                "epochs": 4,
+                "monitor": "train_loss",
+                "completed_epochs": "bad",
+            },
+        },
+        checkpoint,
+    )
+
+    with pytest.raises(ValueError, match="completed_epochs"):
+        load_checkpoint(checkpoint)
+
+
+def test_load_checkpoint_rejects_non_numeric_history_best_metric(tmp_path):
+    checkpoint = tmp_path / "bad-history-best-metric.pt"
+    torch.save(
+        {
+            ARTIFACT_FORMAT_KEY: CHECKPOINT_FORMAT,
+            ARTIFACT_FORMAT_VERSION_KEY: CHECKPOINT_FORMAT_VERSION,
+            "model_state_dict": {"weight": torch.tensor([1.0])},
+            "metadata": {},
+            "history_state": {
+                "epochs": 4,
+                "monitor": "train_loss",
+                "completed_epochs": 2,
+                "train": [{"loss": 1.0}, {"loss": 0.5}],
+                "epoch_elapsed_seconds": [0.1, 0.2],
+                "best_epoch": 2,
+                "best_metric": "bad",
+            },
+        },
+        checkpoint,
+    )
+
+    with pytest.raises(ValueError, match="best_metric"):
+        load_checkpoint(checkpoint)
+
+
 def test_load_checkpoint_rejects_stop_reason_without_stopped_early_in_history_state(
     tmp_path,
 ):
