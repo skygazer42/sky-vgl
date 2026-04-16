@@ -201,8 +201,8 @@ def test_training_history_from_state_dict_rejects_stop_reason_without_stopped_ea
 def test_training_history_from_state_dict_copies_summary_mappings():
     train_entry = {"loss": 1.0}
     val_entry = {"loss": 0.8}
-    final_train = {"loss": 0.5}
-    final_val = {"loss": 0.4}
+    final_train = {"loss": 1.0}
+    final_val = {"loss": 0.8}
     history = TrainingHistory.from_state_dict(
         {
             "epochs": 3,
@@ -218,8 +218,8 @@ def test_training_history_from_state_dict_copies_summary_mappings():
 
     assert history["train"][0] == {"loss": 1.0}
     assert history["val"][0] == {"loss": 0.8}
-    assert history["final_train"] == {"loss": 0.5}
-    assert history["final_val"] == {"loss": 0.4}
+    assert history["final_train"] == {"loss": 1.0}
+    assert history["final_val"] == {"loss": 0.8}
     assert history["train"][0] is not train_entry
     assert history["val"][0] is not val_entry
     assert history["final_train"] is not final_train
@@ -418,6 +418,20 @@ def test_training_history_from_state_dict_rejects_final_val_without_val_history(
                 "train": [{"loss": 1.0}, {"loss": 0.5}],
                 "epoch_elapsed_seconds": [0.1, 0.2],
                 "final_val": {"loss": 0.4},
+            }
+        )
+
+
+def test_training_history_from_state_dict_rejects_final_train_mismatch_with_last_train_entry():
+    with pytest.raises(ValueError, match="final_train"):
+        TrainingHistory.from_state_dict(
+            {
+                "epochs": 3,
+                "monitor": "train_loss",
+                "completed_epochs": 2,
+                "train": [{"loss": 1.0}, {"loss": 0.5}],
+                "epoch_elapsed_seconds": [0.1, 0.2],
+                "final_train": {"loss": 0.25},
             }
         )
 

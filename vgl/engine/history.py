@@ -157,6 +157,8 @@ class TrainingHistory(dict):
         if completed_epochs == 0 and final_train is not None:
             raise ValueError("history_state final_train requires completed_epochs > 0")
         history["final_train"] = None if final_train is None else dict(final_train)
+        if history["final_train"] is not None and history["final_train"] != history["train"][-1]:
+            raise ValueError("history_state final_train must match the last train history entry")
         final_val = history.get("final_val")
         if final_val is not None and not isinstance(final_val, dict):
             raise ValueError("history_state final_val must be a mapping")
