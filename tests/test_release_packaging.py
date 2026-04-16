@@ -404,7 +404,7 @@ def test_install_release_extras_prints_selected_artifact_requirements(built_rele
 
     assert completed.returncode == 0, completed.stderr
     requirements = [line.strip() for line in completed.stdout.splitlines() if line.strip()]
-    assert requirements == ["torch-geometric>=2.5", "dgl>=2.1"]
+    assert requirements == ["torch-geometric>=2.5", "dgl<2,>=1.1.3"]
 
 
 def test_install_release_extras_rejects_unknown_extras(built_release_artifacts):
@@ -460,7 +460,7 @@ def test_install_release_extras_resolves_relative_artifact_dir_from_repo_root(
 
     assert completed.returncode == 0, completed.stderr
     requirements = [line.strip() for line in completed.stdout.splitlines() if line.strip()]
-    assert requirements == ["torch-geometric>=2.5", "dgl>=2.1"]
+    assert requirements == ["torch-geometric>=2.5", "dgl<2,>=1.1.3"]
 
 
 def test_generated_site_directory_is_ignored_and_not_tracked():

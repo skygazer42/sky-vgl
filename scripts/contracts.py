@@ -33,7 +33,7 @@ DEFAULT_LIGHTWEIGHT_EXTRAS = ("networkx", "scipy", "tensorboard")
 REAL_INTEROP_BACKENDS = ("pyg", "dgl")
 RELEASE_INTEROP_EXTRA_REQUIREMENTS = {
     "pyg": "torch-geometric>=2.5; extra == 'pyg'",
-    "dgl": "dgl>=2.1; extra == 'dgl'",
+    "dgl": "dgl<2,>=1.1.3; extra == 'dgl'",
 }
 INTEROP_SMOKE_SCRIPT = "scripts/interop_smoke.py"
 RELEASE_ARTIFACT_INTEROP_COMMAND = (
