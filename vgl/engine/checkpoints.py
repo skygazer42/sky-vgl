@@ -88,6 +88,14 @@ def build_checkpoint_payload(
         from vgl.engine.trainer import _normalize_restored_trainer_state
 
         optional_sections["trainer_state"] = _normalize_restored_trainer_state(trainer_state)
+    if trainer_state is None and history_state is not None:
+        from vgl.engine.history import TrainingHistory
+
+        normalized_history_state = TrainingHistory.from_state_dict(history_state).state_dict()
+        optional_sections["history_state"] = normalized_history_state
+        completed_epochs = int(normalized_history_state.get("completed_epochs", 0))
+        if completed_epochs > 0:
+            raise ValueError("trainer_state.global_step must be >= history_state.completed_epochs")
     if trainer_state is not None and history_state is not None:
         from vgl.engine.history import TrainingHistory
 

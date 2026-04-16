@@ -311,6 +311,23 @@ def test_save_checkpoint_rejects_missing_global_step_when_history_has_progress(t
         )
 
 
+def test_save_checkpoint_rejects_missing_trainer_state_when_history_has_progress(tmp_path):
+    checkpoint = tmp_path / "bad-save-trainer-state-missing.pt"
+
+    with pytest.raises(ValueError, match="global_step"):
+        save_checkpoint(
+            checkpoint,
+            {"weight": torch.tensor([1.0])},
+            history_state={
+                "epochs": 4,
+                "monitor": "train_loss",
+                "completed_epochs": 2,
+                "train": [{"loss": 1.0}, {"loss": 0.5}],
+                "epoch_elapsed_seconds": [0.1, 0.2],
+            },
+        )
+
+
 def test_save_checkpoint_rejects_global_step_behind_history_progress(tmp_path):
     checkpoint = tmp_path / "bad-save-global-step-range.pt"
 
@@ -415,6 +432,30 @@ def test_save_checkpoint_rejects_missing_trainer_best_metric_when_history_has_on
                 "epoch_elapsed_seconds": [0.1, 0.2],
                 "best_epoch": 2,
                 "best_metric": 1.0,
+            },
+        )
+
+
+def test_save_checkpoint_rejects_missing_history_best_metric_when_trainer_has_one(tmp_path):
+    checkpoint = tmp_path / "bad-save-missing-history-best-metric.pt"
+
+    with pytest.raises(ValueError, match="best_metric"):
+        save_checkpoint(
+            checkpoint,
+            {"weight": torch.tensor([1.0])},
+            trainer_state={
+                "global_step": 2,
+                "best_epoch": 2,
+                "best_metric": 1.0,
+                "best_state_dict": {"weight": torch.tensor([1.0])},
+            },
+            history_state={
+                "epochs": 4,
+                "monitor": "train_loss",
+                "completed_epochs": 2,
+                "train": [{"loss": 1.0}, {"loss": 0.5}],
+                "epoch_elapsed_seconds": [0.1, 0.2],
+                "best_epoch": 2,
             },
         )
 
