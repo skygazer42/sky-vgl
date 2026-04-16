@@ -1010,6 +1010,26 @@ def test_save_checkpoint_rejects_non_numeric_history_best_metric(tmp_path):
         )
 
 
+def test_save_checkpoint_rejects_val_monitor_without_full_val_history_in_history_state(
+    tmp_path,
+):
+    checkpoint = tmp_path / "bad-save-history-val-monitor.pt"
+
+    with pytest.raises(ValueError, match="val history"):
+        save_checkpoint(
+            checkpoint,
+            {"weight": torch.tensor([1.0])},
+            history_state={
+                "epochs": 4,
+                "monitor": "val_loss",
+                "completed_epochs": 2,
+                "train": [{"loss": 1.0}, {"loss": 0.5}],
+                "val": [{"loss": 0.8}],
+                "epoch_elapsed_seconds": [0.1, 0.2],
+            },
+        )
+
+
 def test_load_checkpoint_rejects_non_mapping_metadata_even_when_falsy(tmp_path):
     checkpoint = tmp_path / "bad-metadata.pt"
     torch.save(
