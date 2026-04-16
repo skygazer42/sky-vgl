@@ -500,6 +500,43 @@ def test_save_checkpoint_rejects_active_monitor_mismatch_with_history_state(tmp_
         )
 
 
+def test_save_checkpoint_rejects_stop_reason_without_stopped_early_in_history_state(
+    tmp_path,
+):
+    checkpoint = tmp_path / "bad-save-history-stop-reason.pt"
+
+    with pytest.raises(ValueError, match="stop_reason"):
+        save_checkpoint(
+            checkpoint,
+            {"weight": torch.tensor([1.0])},
+            history_state={
+                "epochs": 4,
+                "monitor": "train_loss",
+                "stop_reason": "requested stop",
+            },
+        )
+
+
+def test_save_checkpoint_rejects_final_val_without_val_history_in_history_state(
+    tmp_path,
+):
+    checkpoint = tmp_path / "bad-save-history-final-val.pt"
+
+    with pytest.raises(ValueError, match="final_val"):
+        save_checkpoint(
+            checkpoint,
+            {"weight": torch.tensor([1.0])},
+            history_state={
+                "epochs": 4,
+                "monitor": "val_loss",
+                "completed_epochs": 2,
+                "train": [{"loss": 1.0}, {"loss": 0.5}],
+                "epoch_elapsed_seconds": [0.1, 0.2],
+                "final_val": {"loss": 0.4},
+            },
+        )
+
+
 def test_load_checkpoint_rejects_non_mapping_metadata_even_when_falsy(tmp_path):
     checkpoint = tmp_path / "bad-metadata.pt"
     torch.save(
