@@ -209,6 +209,36 @@ def test_load_checkpoint_normalizes_training_state_sections(tmp_path):
     assert payload["trainer_state"]["fit_profile"]["train_step_count"] == "4"
 
 
+def test_load_checkpoint_preserves_raw_trainer_state_representation(tmp_path):
+    checkpoint = tmp_path / "raw-trainer-state.pt"
+    torch.save(
+        {
+            ARTIFACT_FORMAT_KEY: CHECKPOINT_FORMAT,
+            ARTIFACT_FORMAT_VERSION_KEY: CHECKPOINT_FORMAT_VERSION,
+            "model_state_dict": {"weight": torch.tensor([1.0])},
+            "metadata": {},
+            "trainer_state": {
+                "best_epoch": "2",
+                "best_metric": "1.0",
+                "best_state_dict": {"weight": torch.tensor([3.0])},
+                "global_step": "3",
+                "fit_elapsed_seconds": "1.5",
+                "fit_profile": {"forward_seconds_total": "2.0", "train_step_count": "4"},
+            },
+        },
+        checkpoint,
+    )
+
+    payload = load_checkpoint(checkpoint)
+
+    assert payload["trainer_state"]["best_epoch"] == "2"
+    assert payload["trainer_state"]["best_metric"] == "1.0"
+    assert payload["trainer_state"]["global_step"] == "3"
+    assert payload["trainer_state"]["fit_elapsed_seconds"] == "1.5"
+    assert payload["trainer_state"]["fit_profile"]["forward_seconds_total"] == "2.0"
+    assert payload["trainer_state"]["fit_profile"]["train_step_count"] == "4"
+
+
 def test_checkpoint_event_fields_include_checkpoint_artifact_metadata(tmp_path):
     checkpoint = tmp_path / "event.pt"
     save_checkpoint(checkpoint, {"weight": torch.tensor([1.0])})
