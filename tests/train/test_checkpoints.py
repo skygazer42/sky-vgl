@@ -293,6 +293,58 @@ def test_save_checkpoint_rejects_non_string_trainer_state_active_monitor(tmp_pat
         )
 
 
+def test_save_checkpoint_rejects_non_integer_trainer_state_global_step(tmp_path):
+    checkpoint = tmp_path / "bad-save-trainer-state-global-step-type.pt"
+
+    with pytest.raises(ValueError, match="global_step"):
+        save_checkpoint(
+            checkpoint,
+            {"weight": torch.tensor([1.0])},
+            trainer_state={"global_step": "bad"},
+        )
+
+
+def test_save_checkpoint_rejects_non_integer_trainer_state_best_epoch(tmp_path):
+    checkpoint = tmp_path / "bad-save-trainer-state-best-epoch-type.pt"
+
+    with pytest.raises(ValueError, match="best_epoch"):
+        save_checkpoint(
+            checkpoint,
+            {"weight": torch.tensor([1.0])},
+            trainer_state={
+                "best_epoch": "bad",
+                "best_metric": 1.0,
+                "best_state_dict": {"weight": torch.tensor([1.0])},
+            },
+        )
+
+
+def test_save_checkpoint_rejects_non_numeric_trainer_state_best_metric(tmp_path):
+    checkpoint = tmp_path / "bad-save-trainer-state-best-metric-type.pt"
+
+    with pytest.raises(ValueError, match="best_metric"):
+        save_checkpoint(
+            checkpoint,
+            {"weight": torch.tensor([1.0])},
+            trainer_state={
+                "best_epoch": 1,
+                "best_metric": "bad",
+                "best_state_dict": {"weight": torch.tensor([1.0])},
+            },
+        )
+
+
+def test_save_checkpoint_rejects_non_mapping_trainer_state_best_state_dict(tmp_path):
+    checkpoint = tmp_path / "bad-save-trainer-state-best-state.pt"
+
+    with pytest.raises(ValueError, match="best_state_dict"):
+        save_checkpoint(
+            checkpoint,
+            {"weight": torch.tensor([1.0])},
+            trainer_state={"best_state_dict": ["bad"]},
+        )
+
+
 def test_save_checkpoint_rejects_missing_global_step_when_history_has_progress(tmp_path):
     checkpoint = tmp_path / "bad-save-global-step-missing.pt"
 
