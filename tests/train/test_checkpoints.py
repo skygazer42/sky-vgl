@@ -594,6 +594,19 @@ def test_save_checkpoint_rejects_trainer_state_best_epoch_without_best_metric(tm
         )
 
 
+def test_save_checkpoint_rejects_trainer_state_best_epoch_without_best_state_dict(
+    tmp_path,
+):
+    checkpoint = tmp_path / "bad-save-trainer-state-best-state.pt"
+
+    with pytest.raises(ValueError, match="best_state_dict"):
+        save_checkpoint(
+            checkpoint,
+            {"weight": torch.tensor([1.0])},
+            trainer_state={"best_epoch": 1, "best_metric": 1.0},
+        )
+
+
 def test_save_checkpoint_rejects_non_string_trainer_state_active_monitor(tmp_path):
     checkpoint = tmp_path / "bad-save-trainer-state-monitor.pt"
 
