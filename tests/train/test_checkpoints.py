@@ -269,6 +269,23 @@ def test_load_checkpoint_rejects_non_mapping_history_state(tmp_path):
         load_checkpoint(checkpoint)
 
 
+def test_load_checkpoint_rejects_non_mapping_trainer_state(tmp_path):
+    checkpoint = tmp_path / "bad-trainer-state.pt"
+    torch.save(
+        {
+            ARTIFACT_FORMAT_KEY: CHECKPOINT_FORMAT,
+            ARTIFACT_FORMAT_VERSION_KEY: CHECKPOINT_FORMAT_VERSION,
+            "model_state_dict": {"weight": torch.tensor([1.0])},
+            "metadata": {},
+            "trainer_state": ["not", "a", "mapping"],
+        },
+        checkpoint,
+    )
+
+    with pytest.raises(ValueError, match="trainer_state must be a mapping"):
+        load_checkpoint(checkpoint)
+
+
 def test_load_checkpoint_rejects_non_integer_history_epochs(tmp_path):
     checkpoint = tmp_path / "bad-history-epochs.pt"
     torch.save(
@@ -541,6 +558,17 @@ def test_save_checkpoint_rejects_non_mapping_model_state_dict(tmp_path):
         save_checkpoint(
             checkpoint,
             ["bad"],
+        )
+
+
+def test_save_checkpoint_rejects_non_mapping_trainer_state(tmp_path):
+    checkpoint = tmp_path / "bad-save-trainer-state.pt"
+
+    with pytest.raises(ValueError, match="trainer_state must be a mapping"):
+        save_checkpoint(
+            checkpoint,
+            {"weight": torch.tensor([1.0])},
+            trainer_state=["bad"],
         )
 
 
