@@ -670,6 +670,62 @@ def test_save_checkpoint_rejects_final_val_mismatch_in_history_state(
         )
 
 
+def test_save_checkpoint_rejects_non_integer_history_epochs(tmp_path):
+    checkpoint = tmp_path / "bad-save-history-epochs-type.pt"
+
+    with pytest.raises(ValueError, match="epochs"):
+        save_checkpoint(
+            checkpoint,
+            {"weight": torch.tensor([1.0])},
+            history_state={"epochs": "bad", "monitor": "train_loss"},
+        )
+
+
+def test_save_checkpoint_rejects_non_string_history_monitor(tmp_path):
+    checkpoint = tmp_path / "bad-save-history-monitor-type.pt"
+
+    with pytest.raises(ValueError, match="monitor"):
+        save_checkpoint(
+            checkpoint,
+            {"weight": torch.tensor([1.0])},
+            history_state={"epochs": 4, "monitor": ["bad"]},
+        )
+
+
+def test_save_checkpoint_rejects_non_integer_history_completed_epochs(tmp_path):
+    checkpoint = tmp_path / "bad-save-history-completed-epochs.pt"
+
+    with pytest.raises(ValueError, match="completed_epochs"):
+        save_checkpoint(
+            checkpoint,
+            {"weight": torch.tensor([1.0])},
+            history_state={
+                "epochs": 4,
+                "monitor": "train_loss",
+                "completed_epochs": "bad",
+            },
+        )
+
+
+def test_save_checkpoint_rejects_non_numeric_history_best_metric(tmp_path):
+    checkpoint = tmp_path / "bad-save-history-best-metric-type.pt"
+
+    with pytest.raises(ValueError, match="best_metric"):
+        save_checkpoint(
+            checkpoint,
+            {"weight": torch.tensor([1.0])},
+            history_state={
+                "epochs": 4,
+                "monitor": "train_loss",
+                "completed_epochs": 2,
+                "train": [{"loss": 1.0}, {"loss": 0.5}],
+                "epoch_elapsed_seconds": [0.1, 0.2],
+                "best_epoch": 2,
+                "best_metric": "bad",
+            },
+        )
+
+
 def test_load_checkpoint_rejects_non_mapping_metadata_even_when_falsy(tmp_path):
     checkpoint = tmp_path / "bad-metadata.pt"
     torch.save(
