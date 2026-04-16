@@ -460,6 +460,29 @@ def test_save_checkpoint_rejects_missing_history_best_metric_when_trainer_has_on
         )
 
 
+def test_save_checkpoint_rejects_missing_history_best_epoch_when_trainer_has_one(tmp_path):
+    checkpoint = tmp_path / "bad-save-missing-history-best-epoch.pt"
+
+    with pytest.raises(ValueError, match="best_epoch"):
+        save_checkpoint(
+            checkpoint,
+            {"weight": torch.tensor([1.0])},
+            trainer_state={
+                "global_step": 2,
+                "best_epoch": 2,
+                "best_metric": 1.0,
+                "best_state_dict": {"weight": torch.tensor([1.0])},
+            },
+            history_state={
+                "epochs": 4,
+                "monitor": "train_loss",
+                "completed_epochs": 2,
+                "train": [{"loss": 1.0}, {"loss": 0.5}],
+                "epoch_elapsed_seconds": [0.1, 0.2],
+            },
+        )
+
+
 def test_save_checkpoint_rejects_missing_history_best_metric_when_trainer_has_best_state(tmp_path):
     checkpoint = tmp_path / "bad-save-missing-history-best-metric-2.pt"
 
