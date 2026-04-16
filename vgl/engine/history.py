@@ -167,6 +167,8 @@ class TrainingHistory(dict):
         if final_val is not None and not val_history:
             raise ValueError("history_state final_val requires val history")
         history["final_val"] = None if final_val is None else dict(final_val)
+        if history["final_val"] is not None and history["final_val"] != history["val"][-1]:
+            raise ValueError("history_state final_val must match the last val history entry")
         epoch_elapsed = history.get("epoch_elapsed_seconds", [])
         if len(epoch_elapsed) != completed_epochs:
             raise ValueError("history_state epoch_elapsed_seconds length must match completed_epochs")
