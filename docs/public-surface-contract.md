@@ -28,6 +28,8 @@ from vgl.tasks import GraphClassificationTask, NodeClassificationTask
 
 Legacy `vgl.data` and `vgl.train` paths still work, but new code should prefer the package layout above.
 
+`GraphBatch` is the canonical batched graph container for graph-level training inputs. `GraphView` is the canonical read-only graph projection for snapshot/window-style access. `NodeStore` and `EdgeStore` are lower-level storage-facing graph internals; prefer `Graph`, `GraphView`, and `GraphBatch` in application code.
+
 ## Artifact Metadata Contract
 
 Serialized graph and trainer-checkpoint artifacts carry explicit format metadata so releases can detect incompatible payload changes instead of guessing from file layout.

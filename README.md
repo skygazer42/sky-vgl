@@ -131,6 +131,8 @@ Use the editable install when developing locally or validating the latest branch
 
 > **Deep dive** — see the [Architecture overview](https://skygazer42.github.io/sky-vgl/architecture/).
 
+`GraphBatch` is the canonical batched graph container for graph-level training inputs. `GraphView` is the canonical read-only graph projection for snapshot/window-style access. `NodeStore` and `EdgeStore` are lower-level storage-facing graph internals; prefer `Graph`, `GraphView`, and `GraphBatch` in application code.
+
 ---
 
 ## Documentation
