@@ -28,6 +28,38 @@ from vgl.tasks import GraphClassificationTask, NodeClassificationTask
 
 Legacy `vgl.data` and `vgl.train` paths still work, but new code should prefer the package layout above.
 
+## Root Export Tiers
+
+`vgl root exports follow stable, compatibility, and internal tiers`.
+
+VGL treats `from vgl import ...` as a tiered contract so root exports stay intentional instead of growing by accident.
+
+- Stable root exports: the canonical quickstart names kept at the front of `vgl.__all__`. This tier is the public root-level contract for docs, smoke tests, and examples.
+- Compatibility-only root exports: additional root symbols kept for existing callers, but new code should prefer the owning domain module directly. Examples include `Loader`, `SampleRecord`, and `RandomWalkSampler`.
+- Internal APIs live outside the root namespace by design.
+- Internal modules are intentionally not re-exported from `vgl`. Import those APIs from their owning packages such as `vgl.ops`, `vgl.storage`, `vgl.distributed`, `vgl.transforms`, `vgl.metrics`, and `vgl.nn`.
+
+The stable root tier is:
+
+```python
+from vgl import (
+    DataLoader,
+    DatasetRegistry,
+    Graph,
+    GraphBatch,
+    GraphClassificationTask,
+    KarateClubDataset,
+    LinkPredictionTask,
+    MessagePassing,
+    NodeClassificationTask,
+    PlanetoidDataset,
+    TUDataset,
+    TemporalEventPredictionTask,
+    Trainer,
+    __version__,
+)
+```
+
 For public datasets and preprocessing, VGL now exposes:
 
 ```python

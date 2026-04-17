@@ -172,6 +172,7 @@ from scripts.contracts import (
     GOLDEN_PATH_ROOT_EXPORTS,
     RELEASE_VERSION,
     ROOT_COMPATIBILITY_EXPORTS,
+    ROOT_EXPORT_POLICY_DESCRIPTION,
     ROOT_STABLE_EXPORTS,
     root_export_specs,
 )
@@ -401,3 +402,30 @@ def test_root_export_tiers_match_contract_policy():
     assert tier_by_symbol["DataLoader"] == "stable"
     assert tier_by_symbol["Trainer"] == "stable"
     assert tier_by_symbol["Loader"] == "compatibility"
+
+
+def test_public_surface_contract_documents_root_api_tiers():
+    contract_path = Path(__file__).resolve().parents[1] / "docs" / "public-surface-contract.md"
+    contract_text = contract_path.read_text(encoding="utf-8")
+
+    assert ROOT_EXPORT_POLICY_DESCRIPTION in contract_text
+    assert "Stable root exports" in contract_text
+    assert "Compatibility-only root exports" in contract_text
+    assert "Internal APIs" in contract_text
+
+
+def test_root_export_policy_description_names_all_tiers():
+    assert ROOT_EXPORT_POLICY_DESCRIPTION == "vgl root exports follow stable, compatibility, and internal tiers"
+
+
+def test_public_surface_contract_documents_root_export_tiers():
+    contract_path = Path(__file__).resolve().parents[1] / "docs" / "public-surface-contract.md"
+    contract_text = contract_path.read_text(encoding="utf-8")
+
+    assert "## Root Export Tiers" in contract_text
+    assert "Stable root exports" in contract_text
+    assert "Compatibility-only root exports" in contract_text
+    assert "Internal modules are intentionally not re-exported from `vgl`." in contract_text
+    assert "`Loader`" in contract_text
+    assert "`SampleRecord`" in contract_text
+    assert "`RandomWalkSampler`" in contract_text

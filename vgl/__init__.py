@@ -1,3 +1,4 @@
+# Stable root exports: canonical quickstart imports that new docs and examples may rely on.
 from vgl.graph import Graph as Graph
 from vgl.graph import GraphBatch as GraphBatch
 from vgl.dataloading import DataLoader as DataLoader
@@ -12,6 +13,8 @@ from vgl.data import DatasetRegistry as DatasetRegistry
 from vgl.data import KarateClubDataset as KarateClubDataset
 from vgl.data import PlanetoidDataset as PlanetoidDataset
 from vgl.data import TUDataset as TUDataset
+# Compatibility-only root exports: supported for existing code, but new imports should prefer
+# the owning domain modules directly.
 from vgl.nn import AGNNConv as AGNNConv
 from vgl.nn import APPNPConv as APPNPConv
 from vgl.nn import ARMAConv as ARMAConv
@@ -173,6 +176,7 @@ from vgl.nn import global_max_pool as global_max_pool
 from vgl.nn import global_mean_pool as global_mean_pool
 from vgl.nn import global_sum_pool as global_sum_pool
 
+# Keep stable exports first, followed by compatibility-only exports.
 __all__ = [
     "Graph",
     "GraphBatch",

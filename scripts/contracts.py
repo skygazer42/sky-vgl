@@ -122,7 +122,7 @@ class RootExportSpec:
     tier: str
 
 
-ROOT_EXPORT_POLICY_DESCRIPTION = "vgl root exports follow stable-first module contract"
+ROOT_EXPORT_POLICY_DESCRIPTION = "vgl root exports follow stable, compatibility, and internal tiers"
 
 
 GOLDEN_PATH_ROOT_EXPORTS = (
