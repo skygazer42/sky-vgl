@@ -1,0 +1,83 @@
+SCAN 001 [root] vgl exports Graph from vgl.graph
+SCAN 002 [root] vgl exports GraphBatch from vgl.graph
+SCAN 003 [root] vgl exports DataLoader from vgl.dataloading
+SCAN 004 [root] vgl exports Trainer from vgl.engine
+SCAN 005 [root] vgl exports MessagePassing from vgl.nn
+SCAN 006 [root] vgl exports NodeClassificationTask from vgl.tasks
+SCAN 007 [root] vgl exports GraphClassificationTask from vgl.tasks
+SCAN 008 [root] vgl exports LinkPredictionTask from vgl.tasks
+SCAN 009 [root] vgl exports TemporalEventPredictionTask from vgl.tasks
+SCAN 010 [root] vgl exports __version__ from vgl.version
+SCAN 011 [root] vgl exports DatasetRegistry from vgl.data
+SCAN 012 [root] vgl exports KarateClubDataset from vgl.data
+SCAN 013 [root] vgl exports PlanetoidDataset from vgl.data
+SCAN 014 [root] vgl exports TUDataset from vgl.data
+SCAN 015 [data] vgl.data reexports DatasetRegistry from vgl.data.public
+SCAN 016 [data] vgl.data reexports KarateClubDataset from vgl.data.public
+SCAN 017 [data] vgl.data reexports PlanetoidDataset from vgl.data.public
+SCAN 018 [data] vgl.data reexports TUDataset from vgl.data.public
+SCAN 019 [dataloading] vgl.dataloading reexports RandomWalkSampler from vgl.dataloading.advanced
+SCAN 020 [dataloading] vgl.dataloading reexports Node2VecWalkSampler from vgl.dataloading.advanced
+SCAN 021 [dataloading] vgl.dataloading reexports GraphSAINTNodeSampler from vgl.dataloading.advanced
+SCAN 022 [dataloading] vgl.dataloading reexports ClusterData from vgl.dataloading.advanced
+SCAN 023 [dataloading] vgl.dataloading reexports ClusterLoader from vgl.dataloading.advanced
+SCAN 024 [dataloading] vgl.dataloading reexports ShaDowKHopSampler from vgl.dataloading.advanced
+SCAN 025 [dataloading] vgl.dataloading reexports GraphSAINTEdgeSampler from vgl.dataloading.advanced
+SCAN 026 [dataloading] vgl.dataloading reexports GraphSAINTRandomWalkSampler from vgl.dataloading.advanced
+SCAN 027 [legacy] vgl.train reexports Evaluator from vgl.engine
+SCAN 028 [legacy] vgl.train reexports TensorBoardLogger from vgl.engine
+SCAN 029 [legacy] vgl.train reexports Trainer from vgl.engine
+SCAN 030 [legacy] vgl.train reexports ModelCheckpoint from vgl.engine
+SCAN 031 [legacy] vgl.train reexports HitsAtK from vgl.metrics
+SCAN 032 [legacy] vgl.train reexports FloodingTask from vgl.tasks
+SCAN 033 [legacy] vgl.train reexports SAM from vgl.engine
+SCAN 034 [legacy] vgl.core reexports Graph from vgl.graph
+SCAN 035 [legacy] vgl.core reexports EdgeStore from vgl.graph
+SCAN 036 [legacy] vgl.core reexports NodeStore from vgl.graph
+SCAN 037 [legacy] vgl.core reexports GNNError from vgl.graph
+SCAN 038 [legacy] vgl.core reexports SchemaError from vgl.graph
+SCAN 039 [legacy] vgl.data reexports LinkNeighborSampler from vgl.dataloading
+SCAN 040 [legacy] vgl.data reexports PlanStage from vgl.dataloading
+SCAN 041 [legacy] vgl.data reexports SamplingPlan from vgl.dataloading
+SCAN 042 [legacy] vgl.data reexports PlanExecutor from vgl.dataloading
+SCAN 043 [legacy] vgl.data reexports MaterializationContext from vgl.dataloading
+SCAN 044 [legacy] vgl.data reexports GraphSeedRequest from vgl.dataloading
+SCAN 045 [legacy] vgl.data reexports NodeSeedRequest from vgl.dataloading
+SCAN 046 [legacy] vgl.data reexports materialize_context from vgl.dataloading
+SCAN 047 [legacy] vgl.data reexports materialize_batch from vgl.dataloading
+SCAN 048 [legacy] vgl.data.plan reexports PlanStage from vgl.dataloading.plan
+SCAN 049 [legacy] vgl.data.executor reexports PlanExecutor from vgl.dataloading.executor
+SCAN 050 [legacy] vgl.data.requests reexports NodeSeedRequest from vgl.dataloading.requests
+SCAN 051 [legacy] vgl.data.materialize reexports materialize_batch from vgl.dataloading.materialize
+SCAN 052 [legacy] vgl.data.sampler reexports LinkNeighborSampler from vgl.dataloading.sampler
+SCAN 053 [legacy] vgl.data.sampler reexports RandomWalkSampler from vgl.dataloading.advanced
+SCAN 054 [legacy] vgl.data.sampler reexports GraphSAINTEdgeSampler from vgl.dataloading.advanced
+SCAN 055 [legacy] vgl.data.sampler reexports Node2VecWalkSampler from vgl.dataloading.advanced
+SCAN 056 [legacy] vgl.data.transform reexports BaseTransform from vgl.transforms
+SCAN 057 [legacy] vgl.data.transform reexports NormalizeFeatures from vgl.transforms
+SCAN 058 [legacy] vgl.data.transform reexports RandomNodeSplit from vgl.transforms
+SCAN 059 [legacy] vgl.data.transform reexports RandomLinkSplit from vgl.transforms
+SCAN 060 [legacy] vgl.data reexports ClusterData from vgl.dataloading
+SCAN 061 [legacy] vgl.data reexports ClusterLoader from vgl.dataloading
+SCAN 062 [legacy] vgl.data reexports RandomWalkSampler from vgl.dataloading
+SCAN 063 [legacy] vgl.data reexports Node2VecWalkSampler from vgl.dataloading
+SCAN 064 [legacy] vgl.data reexports GraphSAINTNodeSampler from vgl.dataloading
+SCAN 065 [legacy] vgl.data reexports GraphSAINTEdgeSampler from vgl.dataloading
+SCAN 066 [legacy] vgl.data reexports GraphSAINTRandomWalkSampler from vgl.dataloading
+SCAN 067 [legacy] vgl.data reexports ShaDowKHopSampler from vgl.dataloading
+SCAN 068 [example] examples/hetero/graph_classification.py has __main__ guard
+SCAN 069 [example] examples/hetero/link_prediction.py has __main__ guard
+SCAN 070 [example] examples/hetero/node_classification.py has __main__ guard
+SCAN 071 [example] examples/homo/cluster_gcn_node_classification.py has __main__ guard
+SCAN 072 [example] examples/homo/conv_zoo.py has __main__ guard
+SCAN 073 [example] examples/homo/graph_classification.py has __main__ guard
+SCAN 074 [example] examples/homo/graph_saint_node_classification.py has __main__ guard
+SCAN 075 [example] examples/homo/link_prediction.py has __main__ guard
+SCAN 076 [example] examples/homo/node_classification.py has __main__ guard
+SCAN 077 [example] examples/homo/planetoid_node_classification.py has __main__ guard
+SCAN 078 [example] examples/homo/tu_graph_classification.py has __main__ guard
+SCAN 079 [example] examples/temporal/event_prediction.py has __main__ guard
+SCAN 080 [example] examples/temporal/memory_event_prediction.py has __main__ guard
+SCAN 081 [root] vgl root exports follow stable, compatibility, and internal tiers
+SCAN 082 [imports] examples avoids legacy import paths
+SCAN 083 [imports] tests/integration avoids legacy import paths
