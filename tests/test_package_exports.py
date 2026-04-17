@@ -178,6 +178,60 @@ from scripts.contracts import (
 )
 
 
+def _named_assignments(tree: ast.Module) -> dict[str, ast.AST]:
+    assignments: dict[str, ast.AST] = {}
+    for node in tree.body:
+        if isinstance(node, ast.Assign):
+            for target in node.targets:
+                if isinstance(target, ast.Name):
+                    assignments[target.id] = node.value
+            continue
+        if isinstance(node, ast.AnnAssign) and node.value is not None and isinstance(node.target, ast.Name):
+            assignments[node.target.id] = node.value
+    return assignments
+
+
+def _ordered_string_literals(
+    node: ast.AST,
+    assignments: dict[str, ast.AST] | None = None,
+    seen: set[str] | None = None,
+) -> tuple[str, ...]:
+    if seen is None:
+        seen = set()
+    if isinstance(node, ast.Name):
+        if assignments is None or node.id not in assignments:
+            return ()
+        if node.id in seen:
+            raise RuntimeError(f"recursive string sequence reference in test AST helper: {node.id}")
+        return _ordered_string_literals(assignments[node.id], assignments, seen | {node.id})
+    if isinstance(node, ast.BinOp) and isinstance(node.op, ast.Add):
+        return _ordered_string_literals(node.left, assignments, seen) + _ordered_string_literals(
+            node.right,
+            assignments,
+            seen,
+        )
+    if isinstance(node, ast.Call) and isinstance(node.func, ast.Name) and len(node.args) == 1 and not node.keywords:
+        values = _ordered_string_literals(node.args[0], assignments, seen)
+        if node.func.id == "sorted":
+            return tuple(sorted(values))
+        if node.func.id in {"tuple", "list"}:
+            return values
+        return ()
+    if not isinstance(node, (ast.List, ast.Tuple, ast.Set)):
+        return ()
+
+    values: list[str] = []
+    for item in node.elts:
+        if isinstance(item, ast.Starred):
+            values.extend(_ordered_string_literals(item.value, assignments, seen))
+            continue
+        if isinstance(item, ast.Constant) and isinstance(item.value, str):
+            values.append(item.value)
+            continue
+        values.extend(_ordered_string_literals(item, assignments, seen))
+    return tuple(values)
+
+
 def test_package_exposes_broad_vgl_root_surface():
     assert AGNNConv.__name__ == "AGNNConv"
     assert ASAM.__name__ == "ASAM"
@@ -363,6 +417,7 @@ def test_root_compat_exports_are_stably_ordered_after_golden_path():
 def _root_surface_contract():
     module_path = Path(__file__).resolve().parents[1] / "vgl" / "__init__.py"
     tree = ast.parse(module_path.read_text(encoding="utf-8"), filename=str(module_path))
+    assignments = _named_assignments(tree)
     imports: list[tuple[str, str]] = []
     exports: tuple[str, ...] = ()
 
@@ -374,11 +429,7 @@ def _root_surface_contract():
         if isinstance(node, ast.Assign):
             for target in node.targets:
                 if isinstance(target, ast.Name) and target.id == "__all__":
-                    exports = tuple(
-                        element.value
-                        for element in node.value.elts
-                        if isinstance(element, ast.Constant) and isinstance(element.value, str)
-                    )
+                    exports = _ordered_string_literals(node.value, assignments)
                     break
     return imports, exports
 
