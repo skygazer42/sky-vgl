@@ -3,6 +3,7 @@ from copy import deepcopy
 import torch
 
 from vgl.metrics.base import Metric
+from vgl.metrics.base import MetricProtocol, MetricSpec
 
 
 def _as_python_int(value) -> int:
@@ -42,8 +43,8 @@ class Accuracy(Metric):
         return self.correct / self.total
 
 
-def build_metric(metric):
-    if isinstance(metric, Metric):
+def build_metric(metric: MetricSpec) -> MetricProtocol:
+    if isinstance(metric, MetricProtocol):
         return deepcopy(metric)
     if metric == "accuracy":
         return Accuracy()

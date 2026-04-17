@@ -21,6 +21,8 @@ from vgl.engine.logging import ConsoleLogger
 from vgl.engine.monitoring import extract_monitor_value, is_improvement, resolve_monitor
 from vgl.graph import Graph, GraphBatch, GraphView, LinkPredictionBatch, NodeBatch, TemporalEventBatch
 from vgl.metrics import build_metric
+from vgl.metrics.base import MetricProtocol, MetricSpec
+from vgl.tasks.base import TaskProtocol
 import torch
 from torch.optim.lr_scheduler import ReduceLROnPlateau
 
@@ -342,14 +344,19 @@ class Trainer:
         TemporalEventBatch,
     )
 
+    @staticmethod
+    def _task_metric_specs(task: TaskProtocol) -> list[MetricSpec]:
+        metric_specs = getattr(task, "metrics", None)
+        return list(metric_specs or [])
+
     def __init__(
         self,
         model,
-        task,
+        task: TaskProtocol,
         optimizer,
         lr,
         max_epochs,
-        metrics=None,
+        metrics: list[MetricSpec] | tuple[MetricSpec, ...] | None = None,
         monitor=None,
         monitor_mode=None,
         save_best_path=None,
@@ -433,8 +440,7 @@ class Trainer:
             lr=lr,
         )
         self.max_epochs = max_epochs
-        metric_specs = getattr(task, "metrics", None) if metrics is None else metrics
-        self.metric_specs = list(metric_specs or [])
+        self.metric_specs = self._task_metric_specs(task) if metrics is None else list(metrics)
         self.monitor = monitor
         self.monitor_mode = monitor_mode
         self.callbacks = list(callbacks or [])
@@ -523,7 +529,7 @@ class Trainer:
             return data
         return [data]
 
-    def _metrics(self):
+    def _metrics(self) -> list[MetricProtocol]:
         return [build_metric(metric) for metric in self.metric_specs]
 
     def _model_device_type(self):

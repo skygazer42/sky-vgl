@@ -5,6 +5,8 @@ from pathlib import Path
 
 from vgl import Graph
 from vgl.engine import trainer as trainer_module
+from vgl.metrics.base import MetricProtocol
+from vgl.tasks.base import TaskProtocol
 from vgl.train.tasks import NodeClassificationTask
 from vgl.train.trainer import Trainer
 
@@ -16,6 +18,37 @@ class LinearNodeModel(nn.Module):
 
     def forward(self, graph):
         return self.linear(graph.x)
+
+
+class DuckMetric:
+    name = "duck"
+
+    def reset(self):
+        return None
+
+    def update(self, predictions, targets, **kwargs):
+        del predictions, targets, kwargs
+        return None
+
+    def compute(self):
+        return 1.0
+
+
+class DuckTask:
+    def __init__(self):
+        self.metrics = [DuckMetric()]
+
+    def loss(self, graph, predictions, stage):
+        del stage
+        return torch.nn.functional.cross_entropy(predictions, graph.y)
+
+    def targets(self, batch, stage):
+        del stage
+        return batch.y
+
+    def predictions_for_metrics(self, batch, predictions, stage):
+        del batch, stage
+        return predictions
 
 
 def test_trainer_runs_single_epoch():
@@ -44,6 +77,37 @@ def test_trainer_runs_single_epoch():
 
     assert history["epochs"] == 1
     assert len(history["train"]) == 1
+
+
+def test_trainer_accepts_protocol_typed_task_and_metric_specs():
+    graph = Graph.homo(
+        edge_index=torch.tensor([[0, 1], [1, 0]]),
+        x=torch.randn(2, 4),
+        y=torch.tensor([0, 1]),
+        train_mask=torch.tensor([True, True]),
+        val_mask=torch.tensor([True, True]),
+        test_mask=torch.tensor([True, True]),
+    )
+    task = DuckTask()
+
+    assert isinstance(task, TaskProtocol)
+    assert isinstance(task.metrics[0], MetricProtocol)
+
+    trainer = Trainer(
+        model=LinearNodeModel(),
+        task=task,
+        optimizer=torch.optim.Adam,
+        lr=1e-2,
+        max_epochs=1,
+    )
+
+    metrics = trainer._metrics()
+    history = trainer.fit(graph)
+
+    assert len(metrics) == 1
+    assert metrics[0] is not task.metrics[0]
+    assert isinstance(metrics[0], MetricProtocol)
+    assert history["epochs"] == 1
 
 
 def test_validate_init_config_accepts_supported_values():
