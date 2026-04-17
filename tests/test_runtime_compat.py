@@ -57,9 +57,9 @@ def test_import_vgl_does_not_require_numpy():
 
 def test_legacy_namespace_imports_do_not_repeat_after_reload():
     expectations = {
-        "vgl.core": "vgl.core is a legacy compatibility namespace; prefer `vgl.graph` for graph containers and related errors.",
-        "vgl.data": "vgl.data is a legacy compatibility namespace; prefer `vgl.dataloading` for loaders, samplers, plans, and materialization helpers; dataset and catalog APIs remain under `vgl.data`.",
-        "vgl.train": "vgl.train is a legacy compatibility namespace; prefer `vgl.engine`, `vgl.tasks`, and `vgl.metrics`.",
+        "vgl.core": "vgl.core is a legacy compatibility namespace; prefer `vgl.graph` for graph containers and related errors. See `docs/migration-guide.md` for import rewrite examples.",
+        "vgl.data": "vgl.data is a legacy compatibility namespace; prefer `vgl.dataloading` for loaders, samplers, plans, and materialization helpers; dataset and catalog APIs remain under `vgl.data`. See `docs/migration-guide.md` for import rewrite examples.",
+        "vgl.train": "vgl.train is a legacy compatibility namespace; prefer `vgl.engine`, `vgl.tasks`, and `vgl.metrics`. See `docs/migration-guide.md` for import rewrite examples.",
     }
 
     for module_name, expected_message in expectations.items():
@@ -88,6 +88,7 @@ def test_legacy_namespace_imports_do_not_repeat_after_reload():
         assert completed.returncode == 0, completed.stderr
         lines = [line for line in completed.stdout.splitlines() if line]
         legacy_messages = lines[1:]
+        assert lines[0] == "1"
         assert expected_message in legacy_messages
         assert len(legacy_messages) == len(set(legacy_messages))
 

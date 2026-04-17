@@ -13,6 +13,8 @@ The preferred import layout is now domain-based:
 
 The older `vgl.core`, `vgl.data`, and `vgl.train` modules still work as compatibility layers, but new code should avoid them.
 
+On first import, each legacy namespace now emits a single `FutureWarning` that points back to this guide. The warning is intentionally brief: it tells you which modern module to prefer, then uses this page for concrete rewrite examples.
+
 Common import rewrites:
 
 - `from vgl.data.loader import Loader` -> `from vgl.dataloading import DataLoader`

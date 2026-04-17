@@ -3,6 +3,7 @@ import warnings
 
 
 _warned_namespaces: set[str] = set()
+_MIGRATION_GUIDE_SUFFIX = " See `docs/migration-guide.md` for import rewrite examples."
 
 
 def warn_legacy_namespace(
@@ -19,7 +20,7 @@ def warn_legacy_namespace(
             return
     _warned_namespaces.add(namespace)
     warnings.warn(
-        f"{namespace} is a legacy compatibility namespace; {guidance}",
+        f"{namespace} is a legacy compatibility namespace; {guidance}{_MIGRATION_GUIDE_SUFFIX}",
         FutureWarning,
         stacklevel=2,
     )
