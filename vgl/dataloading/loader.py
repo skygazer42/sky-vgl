@@ -102,6 +102,8 @@ class Loader:
             raise ValueError("prefetch is only supported with num_workers == 0; use prefetch_factor for worker prefetch")
         if self.prefetch_factor is not None and self.num_workers <= 0:
             raise ValueError("prefetch_factor requires num_workers > 0")
+        if self.prefetch_factor is not None and self.prefetch_factor < 1:
+            raise ValueError("prefetch_factor must be >= 1")
         if self.persistent_workers and self.num_workers <= 0:
             raise ValueError("persistent_workers requires num_workers > 0")
         if self.num_workers > 0 and not self._is_map_style_dataset():

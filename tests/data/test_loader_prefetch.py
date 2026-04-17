@@ -133,3 +133,33 @@ def test_loader_prefetch_accepts_tensor_scalar_without_tensor_int(monkeypatch):
     labels = [batch.labels.tolist() for batch in loader]
 
     assert labels == [[1, 0], [1, 0]]
+
+
+def test_loader_prefetch_refills_only_to_batch_plus_prefetch_after_each_yield():
+    dataset = ListDataset([
+        _sample("a", 1),
+        _sample("b", 0),
+        _sample("c", 1),
+        _sample("d", 0),
+        _sample("e", 1),
+    ])
+    sampler = CountingSampler()
+    loader = Loader(
+        dataset=dataset,
+        sampler=sampler,
+        batch_size=2,
+        label_source="metadata",
+        label_key="label",
+        prefetch=1,
+    )
+
+    iterator = iter(loader)
+    first_batch = next(iterator)
+
+    assert torch.equal(first_batch.labels, torch.tensor([1, 0]))
+    assert sampler.calls == ["a", "b", "c"]
+
+    second_batch = next(iterator)
+
+    assert torch.equal(second_batch.labels, torch.tensor([1, 0]))
+    assert sampler.calls == ["a", "b", "c", "d", "e"]
