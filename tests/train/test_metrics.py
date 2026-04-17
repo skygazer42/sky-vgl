@@ -5,6 +5,20 @@ from vgl.metrics import build_metric as domain_build_metric
 from vgl.train.metrics import Accuracy, FilteredHitsAtK, FilteredMRR, HitsAtK, MRR, build_metric
 
 
+class _StagePrefixedMetric:
+    name = "val_accuracy"
+
+    def reset(self):
+        return None
+
+    def update(self, predictions, targets, **kwargs):
+        del predictions, targets, kwargs
+        return None
+
+    def compute(self):
+        return 1.0
+
+
 def test_legacy_train_package_reexports_build_metric():
     from vgl.train import build_metric as legacy_build_metric
 
@@ -293,3 +307,8 @@ def test_build_metric_supports_ranking_metrics():
     assert build_metric("hits@10").name == "hits@10"
     assert build_metric("filtered_mrr").name == "filtered_mrr"
     assert build_metric("filtered_hits@10").name == "filtered_hits@10"
+
+
+def test_build_metric_rejects_stage_prefixed_metric_names():
+    with pytest.raises(ValueError, match="reserved stage prefixes"):
+        build_metric(_StagePrefixedMetric())

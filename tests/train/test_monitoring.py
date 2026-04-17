@@ -1,6 +1,12 @@
 import pytest
 
-from vgl.engine.monitoring import extract_monitor_value, is_improvement, resolve_monitor, resolve_monitor_mode
+from vgl.engine.monitoring import (
+    extract_monitor_value,
+    is_improvement,
+    resolve_monitor,
+    resolve_monitor_mode,
+    validate_metric_name,
+)
 
 
 def test_resolve_monitor_defaults_to_val_loss_when_validation_data_exists():
@@ -61,3 +67,16 @@ def test_is_improvement_respects_mode_and_min_delta():
     assert is_improvement(0.90, 1.00, "min", min_delta=0.05) is True
     assert is_improvement(0.97, 1.00, "min", min_delta=0.05) is False
     assert is_improvement(0.80, None, "max", min_delta=0.10) is True
+
+
+def test_validate_metric_name_rejects_stage_prefixed_names():
+    assert validate_metric_name("accuracy") == "accuracy"
+
+    with pytest.raises(ValueError, match="reserved stage prefixes"):
+        validate_metric_name("train_accuracy")
+
+    with pytest.raises(ValueError, match="reserved stage prefixes"):
+        validate_metric_name("val_loss")
+
+    with pytest.raises(ValueError, match="reserved stage prefixes"):
+        validate_metric_name("test_mrr")
