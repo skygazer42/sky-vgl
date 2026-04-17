@@ -70,14 +70,16 @@ def test_artifact_smoke_backend_available_uses_release_smoke_backend_module_name
         def _outer_site_packages() -> list[Path]:
             return []
 
+        @staticmethod
+        def _check_backend_availability(module_name: str, dependency_paths: list[Path]) -> bool:
+            bootstrap = "".join(f"site.addsitedir({str(path)!r})\n" for path in dependency_paths)
+            script = "import site\n" + bootstrap + f"import {module_name}\n"
+            captured["script"] = script
+            return True
+
     captured = {}
 
-    def fake_run(args, **kwargs):
-        captured["script"] = args[2]
-        return subprocess.CompletedProcess(args=args, returncode=0, stdout="", stderr="")
-
     monkeypatch.setattr(sys.modules[__name__], "_load_release_smoke_module", lambda: _ReleaseSmokeStub)
-    monkeypatch.setattr(subprocess, "run", fake_run)
 
     assert _artifact_smoke_backend_available("pyg") is True
     assert "import torch_geometric" in captured["script"]
@@ -491,7 +493,8 @@ def test_install_release_extras_resolves_relative_artifact_dir_from_repo_root(
             text=True,
         )
     finally:
-        shutil.rmtree(artifact_dir)
+        if artifact_dir.exists():
+            shutil.rmtree(artifact_dir)
 
     assert completed.returncode == 0, completed.stderr
     requirements = [line.strip() for line in completed.stdout.splitlines() if line.strip()]
@@ -629,7 +632,8 @@ def test_release_smoke_resolves_relative_artifact_dir_from_repo_root(
             text=True,
         )
     finally:
-        shutil.rmtree(artifact_dir)
+        if artifact_dir.exists():
+            shutil.rmtree(artifact_dir)
 
     assert completed.returncode == 0, completed.stderr
     assert f"wheel smoke check passed for {wheel_path.name}" in completed.stdout
