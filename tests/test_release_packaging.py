@@ -52,18 +52,35 @@ def _load_install_release_extras_module(module_name: str = "install_release_extr
 
 def _artifact_smoke_backend_available(name: str) -> bool:
     release_smoke = _load_release_smoke_module()
-    bootstrap = "".join(
-        f"site.addsitedir({str(path)!r})\n" for path in release_smoke._outer_site_packages()
-    )
-    script = "import site\n" + bootstrap + f"import {name}\n"
-    completed = subprocess.run(
-        [sys.executable, "-c", script],
-        cwd=REPO_ROOT,
-        capture_output=True,
-        text=True,
-        check=False,
-    )
-    return completed.returncode == 0
+    module_name = name
+    if name in release_smoke.REAL_INTEROP_BACKENDS:
+        module_name = release_smoke._backend_import_module_name(name)
+    return release_smoke._check_backend_availability(module_name, release_smoke._outer_site_packages())
+
+
+def test_artifact_smoke_backend_available_uses_release_smoke_backend_module_name(monkeypatch):
+    class _ReleaseSmokeStub:
+        REAL_INTEROP_BACKENDS = ("pyg", "dgl")
+
+        @staticmethod
+        def _backend_import_module_name(name: str) -> str:
+            return {"pyg": "torch_geometric", "dgl": "dgl"}[name]
+
+        @staticmethod
+        def _outer_site_packages() -> list[Path]:
+            return []
+
+    captured = {}
+
+    def fake_run(args, **kwargs):
+        captured["script"] = args[2]
+        return subprocess.CompletedProcess(args=args, returncode=0, stdout="", stderr="")
+
+    monkeypatch.setattr(sys.modules[__name__], "_load_release_smoke_module", lambda: _ReleaseSmokeStub)
+    monkeypatch.setattr(subprocess, "run", fake_run)
+
+    assert _artifact_smoke_backend_available("pyg") is True
+    assert "import torch_geometric" in captured["script"]
 
 
 def _build_release_artifacts(tmp_path_factory):
@@ -296,6 +313,24 @@ def test_release_artifacts_exclude_internal_repo_only_content(built_release_arti
     assert any(name.endswith("/scripts/install_release_extras.py") for name in sdist_names)
     assert any(name.endswith("/scripts/release_artifact_metadata.py") for name in sdist_names)
     assert any(name.endswith("/scripts/repo_script_imports.py") for name in sdist_names)
+
+
+def test_release_artifacts_include_release_smoke_contract_dependencies(built_release_artifacts):
+    _, sdist_path = built_release_artifacts
+
+    with tarfile.open(sdist_path) as archive:
+        sdist_names = archive.getnames()
+
+    assert any(name.endswith("/scripts/contracts.py") for name in sdist_names)
+    assert any(name.endswith("/scripts/workflow_contracts.py") for name in sdist_names)
+
+
+def test_release_artifacts_fit_release_smoke_size_budgets(built_release_artifacts):
+    release_smoke = _load_release_smoke_module()
+    wheel_path, sdist_path = built_release_artifacts
+
+    assert wheel_path.stat().st_size <= release_smoke._artifact_size_budget("wheel")
+    assert sdist_path.stat().st_size <= release_smoke._artifact_size_budget("sdist")
 
 
 def test_release_workflows_exist_for_ci_and_pypi_publish():
@@ -548,6 +583,27 @@ def test_release_smoke_script_accepts_import_time_threshold(built_release_artifa
     assert "IMPORT_BUDGET_OK vgl " in completed.stdout
 
 
+def test_release_built_wheel_fits_size_budget(built_release_artifacts):
+    wheel_path, _ = built_release_artifacts
+    release_smoke = _load_release_smoke_module()
+
+    assert wheel_path.stat().st_size <= release_smoke.MAX_WHEEL_BYTES
+
+
+def test_release_smoke_metadata_preflight_accepts_built_wheel(built_release_artifacts):
+    wheel_path, _ = built_release_artifacts
+    release_smoke = _load_release_smoke_module()
+
+    release_smoke._preflight_artifact("wheel", wheel_path)
+
+
+def test_release_smoke_preflight_accepts_built_sdist(built_release_artifacts):
+    _, sdist_path = built_release_artifacts
+    release_smoke = _load_release_smoke_module()
+
+    release_smoke._preflight_artifact("sdist", sdist_path)
+
+
 def test_release_smoke_resolves_relative_artifact_dir_from_repo_root(
     built_release_artifacts,
     tmp_path: Path,
@@ -731,8 +787,16 @@ def test_release_smoke_script_supports_sdist_artifact_interop_backend_dgl(built_
 def test_release_smoke_script_reports_missing_backend_for_all_artifact_interop(
     built_release_artifacts,
 ):
+    release_smoke = _load_release_smoke_module()
+    if release_smoke._check_backend_availability("torch_geometric", release_smoke._outer_site_packages()):
+        pytest.skip("pyg is available from outer site-packages in this environment")
+    if not release_smoke._check_backend_availability("dgl", release_smoke._outer_site_packages()):
+        pytest.skip("dgl is unavailable from outer site-packages in this environment")
+
     wheel_path, _ = built_release_artifacts
     smoke_script = REPO_ROOT / "scripts" / "release_smoke.py"
+    env = os.environ.copy()
+    env.pop(RELEASE_SMOKE_EXTRA_SITE_DIRS_ENV, None)
 
     completed = subprocess.run(
         [
@@ -748,6 +812,7 @@ def test_release_smoke_script_reports_missing_backend_for_all_artifact_interop(
         cwd=REPO_ROOT,
         capture_output=True,
         text=True,
+        env=env,
     )
 
     assert completed.returncode != 0

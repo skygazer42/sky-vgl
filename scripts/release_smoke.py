@@ -8,7 +8,9 @@ import repo_script_imports
 import site
 import subprocess
 import sys
+import tarfile
 import tempfile
+import zipfile
 from pathlib import Path
 from typing import Sequence
 
@@ -43,6 +45,30 @@ def _preferred_import_smokes() -> tuple[tuple[str, str], ...]:
     return tuple(_contracts_module().PREFERRED_IMPORT_SMOKES)
 
 
+def _optional_extras() -> tuple[str, ...]:
+    return tuple(_contracts_module().OPTIONAL_EXTRAS)
+
+
+def _interop_extra_requirements() -> tuple[str, ...]:
+    return tuple(_contracts_module().RELEASE_INTEROP_EXTRA_REQUIREMENTS.values())
+
+
+def _wheel_required_files() -> tuple[str, ...]:
+    return tuple(_contracts_module().WHEEL_REQUIRED_FILES)
+
+
+def _wheel_excluded_substrings() -> tuple[str, ...]:
+    return tuple(_contracts_module().WHEEL_EXCLUDED_SUBSTRINGS)
+
+
+def _sdist_required_suffixes() -> tuple[str, ...]:
+    return tuple(_contracts_module().SDIST_REQUIRED_SUFFIXES)
+
+
+def _sdist_excluded_substrings() -> tuple[str, ...]:
+    return tuple(_contracts_module().SDIST_EXCLUDED_SUBSTRINGS)
+
+
 def _legacy_import_smokes() -> tuple[tuple[str, str, str], ...]:
     return (
         ("vgl.core", "Graph", "LegacyCoreGraph"),
@@ -74,6 +100,8 @@ INTEROP_BACKEND_IMPORT_MODULES = {
     "dgl": "dgl",
 }
 RELEASE_INTEROP_EXTRA_SITE_DIRS_ENV = "RELEASE_INTEROP_EXTRA_SITE_DIRS"
+MAX_WHEEL_BYTES = 5 * 1024 * 1024
+MAX_SDIST_BYTES = 10 * 1024 * 1024
 
 
 def _parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
@@ -112,11 +140,33 @@ def _parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
             "When set, the command fails if the root `vgl` import exceeds this limit."
         ),
     )
+    parser.add_argument(
+        "--max-wheel-bytes",
+        type=int,
+        default=None,
+        help=(
+            "Optional upper bound for the built wheel size in bytes. "
+            "When unset, the default wheel budget is used."
+        ),
+    )
+    parser.add_argument(
+        "--max-sdist-bytes",
+        type=int,
+        default=None,
+        help=(
+            "Optional upper bound for the built source distribution size in bytes. "
+            "When unset, the default sdist budget is used."
+        ),
+    )
     args = parser.parse_args(argv)
     if args.interop_backend not in _interop_backends():
         parser.error(f"argument --interop-backend: invalid choice: {args.interop_backend!r}")
     if args.max_import_seconds is not None and args.max_import_seconds <= 0:
         parser.error("argument --max-import-seconds: must be > 0")
+    if args.max_wheel_bytes is not None and args.max_wheel_bytes <= 0:
+        parser.error("argument --max-wheel-bytes: must be > 0")
+    if args.max_sdist_bytes is not None and args.max_sdist_bytes <= 0:
+        parser.error("argument --max-sdist-bytes: must be > 0")
     return args
 
 
@@ -128,6 +178,145 @@ def _find_single(artifact_dir: Path, pattern: str) -> Path:
             f"found {len(matches)}"
         )
     return matches[0]
+
+
+def _artifact_size_budget(
+    kind: str,
+    *,
+    max_wheel_bytes: int | None = None,
+    max_sdist_bytes: int | None = None,
+) -> int:
+    if kind == "wheel":
+        return MAX_WHEEL_BYTES if max_wheel_bytes is None else int(max_wheel_bytes)
+    if kind == "sdist":
+        return MAX_SDIST_BYTES if max_sdist_bytes is None else int(max_sdist_bytes)
+    raise ValueError(f"unsupported artifact kind: {kind}")
+
+
+def _validate_artifact_size_budget(kind: str, artifact: Path, *, max_bytes: int) -> None:
+    artifact_bytes = artifact.stat().st_size
+    if artifact_bytes > max_bytes:
+        raise SystemExit(
+            f"{artifact.name} exceeds {kind} size budget: "
+            f"{artifact_bytes} > {max_bytes} bytes"
+        )
+
+
+def _validate_artifact_size(
+    kind: str,
+    artifact: Path,
+    *,
+    max_wheel_bytes: int | None = None,
+    max_sdist_bytes: int | None = None,
+) -> None:
+    max_bytes = _artifact_size_budget(
+        kind,
+        max_wheel_bytes=max_wheel_bytes,
+        max_sdist_bytes=max_sdist_bytes,
+    )
+    _validate_artifact_size_budget(kind, artifact, max_bytes=max_bytes)
+
+
+def _validate_wheel_metadata(wheel_path: Path) -> None:
+    metadata_helper = load_repo_module("scripts.release_artifact_metadata")
+    metadata, detail = metadata_helper.read_wheel_metadata(wheel_path)
+    if metadata is None:
+        raise SystemExit(detail)
+    project_name = _contracts_module().PROJECT_NAME
+    if metadata.get("Name") != project_name:
+        raise SystemExit(
+            f"wheel metadata name mismatch for {wheel_path.name}: "
+            f"{metadata.get('Name')!r} != {project_name!r}"
+        )
+    requires_python = _contracts_module().REQUIRES_PYTHON
+    if metadata.get("Requires-Python") != requires_python:
+        raise SystemExit(
+            f"wheel metadata Requires-Python mismatch for {wheel_path.name}: "
+            f"{metadata.get('Requires-Python')!r} != {requires_python!r}"
+        )
+    extras = set(metadata.get_all("Provides-Extra", []))
+    missing_extras = [extra for extra in _optional_extras() if extra not in extras]
+    if missing_extras:
+        raise SystemExit(
+            f"wheel metadata missing extras for {wheel_path.name}: {', '.join(missing_extras)}"
+        )
+    requires_dist = set(metadata.get_all("Requires-Dist", []))
+    missing_requirements = [
+        requirement for requirement in _interop_extra_requirements() if requirement not in requires_dist
+    ]
+    if missing_requirements:
+        raise SystemExit(
+            f"wheel metadata missing interop requirements for {wheel_path.name}: "
+            + ", ".join(missing_requirements)
+        )
+    if not detail.endswith("METADATA"):
+        raise SystemExit(f"unexpected wheel metadata path for {wheel_path.name}: {detail}")
+
+
+def _validate_wheel_contents(wheel_path: Path) -> None:
+    with zipfile.ZipFile(wheel_path) as archive:
+        names = archive.namelist()
+
+    missing = [name for name in _wheel_required_files() if name not in names]
+    if missing:
+        raise SystemExit(
+            f"missing required wheel files for {wheel_path.name}: " + ", ".join(missing)
+        )
+
+    offenders = sorted(
+        name
+        for name in names
+        if any(fragment in name for fragment in _wheel_excluded_substrings())
+    )
+    if offenders:
+        raise SystemExit(
+            f"wheel contains excluded content for {wheel_path.name}: " + ", ".join(offenders[:5])
+        )
+
+
+def _validate_sdist_contents(sdist_path: Path) -> None:
+    with tarfile.open(sdist_path, "r:gz") as archive:
+        names = archive.getnames()
+
+    missing = [
+        suffix
+        for suffix in _sdist_required_suffixes()
+        if not any(name.endswith(suffix) for name in names)
+    ]
+    if missing:
+        raise SystemExit(
+            f"missing required sdist files for {sdist_path.name}: " + ", ".join(missing)
+        )
+
+    offenders = sorted(
+        name
+        for name in names
+        if any(fragment in name for fragment in _sdist_excluded_substrings())
+    )
+    if offenders:
+        raise SystemExit(
+            f"sdist contains excluded content for {sdist_path.name}: " + ", ".join(offenders[:5])
+        )
+
+
+def _preflight_artifact(
+    kind: str,
+    artifact: Path,
+    *,
+    max_wheel_bytes: int | None = None,
+    max_sdist_bytes: int | None = None,
+) -> None:
+    _validate_artifact_size(
+        kind,
+        artifact,
+        max_wheel_bytes=max_wheel_bytes,
+        max_sdist_bytes=max_sdist_bytes,
+    )
+    if kind == "wheel":
+        _validate_wheel_contents(artifact)
+        _validate_wheel_metadata(artifact)
+    elif kind == "sdist":
+        _validate_sdist_contents(artifact)
 
 
 def _run(command: list[str], *, cwd: Path | None = None) -> None:
@@ -390,7 +579,15 @@ def _smoke_install(
     repo_root: Path,
     interop_backend: str,
     max_import_seconds: float | None = None,
+    max_wheel_bytes: int | None = None,
+    max_sdist_bytes: int | None = None,
 ) -> None:
+    _preflight_artifact(
+        kind,
+        artifact,
+        max_wheel_bytes=max_wheel_bytes,
+        max_sdist_bytes=max_sdist_bytes,
+    )
     with tempfile.TemporaryDirectory(prefix=f"vgl-release-{kind}-") as tmp:
         tmp_dir = Path(tmp)
         venv_dir = tmp_dir / "venv"
@@ -448,6 +645,8 @@ def main() -> None:
             repo_root=repo_root,
             interop_backend=args.interop_backend,
             max_import_seconds=args.max_import_seconds,
+            max_wheel_bytes=args.max_wheel_bytes,
+            max_sdist_bytes=args.max_sdist_bytes,
         )
     if args.kind in {"sdist", "all"}:
         _smoke_install(
@@ -456,6 +655,8 @@ def main() -> None:
             repo_root=repo_root,
             interop_backend=args.interop_backend,
             max_import_seconds=args.max_import_seconds,
+            max_wheel_bytes=args.max_wheel_bytes,
+            max_sdist_bytes=args.max_sdist_bytes,
         )
 
 
