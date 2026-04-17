@@ -3,12 +3,64 @@ from dataclasses import dataclass
 import torch
 
 from vgl._artifact import build_artifact_metadata
+from vgl.graph.errors import GraphConstructionError
 from vgl.graph.schema import GraphSchema
 from vgl.graph.stores import EdgeStore, NodeStore
 from vgl.graph.view import GraphView, _as_python_int
 
 GRAPH_FORMAT = "vgl.graph"
 GRAPH_FORMAT_VERSION = 1
+
+
+def _infer_row_count(values: dict[str, object]) -> int | None:
+    for value in values.values():
+        if isinstance(value, torch.Tensor) and value.ndim > 0:
+            return int(value.size(0))
+    return None
+
+
+def _validate_edge_index(edge_index: torch.Tensor) -> torch.Tensor:
+    edge_index = torch.as_tensor(edge_index, dtype=torch.long)
+    if edge_index.ndim != 2 or edge_index.size(0) != 2:
+        raise GraphConstructionError("edge_index must have shape (2, num_edges)")
+    return edge_index
+
+
+def _validate_node_features(node_type: str, node_data: dict[str, object]) -> None:
+    node_count = _infer_row_count(node_data)
+    if node_count is None:
+        return
+    for name, value in node_data.items():
+        if isinstance(value, torch.Tensor) and value.ndim > 0 and int(value.size(0)) != node_count:
+            raise GraphConstructionError(
+                f"node feature {name!r} must match node count {node_count} for node type {node_type!r}"
+            )
+
+
+def _validate_edge_features(edge_type: tuple[str, str, str], edge_data: dict[str, object]) -> None:
+    edge_index = edge_data["edge_index"]
+    edge_count = int(edge_index.size(1))
+    for name, value in edge_data.items():
+        if name == "edge_index":
+            continue
+        if isinstance(value, torch.Tensor) and value.ndim > 0 and int(value.size(0)) != edge_count:
+            raise GraphConstructionError(
+                f"edge feature {name!r} must match edge count {edge_count} for edge type {edge_type!r}"
+            )
+
+
+def _validate_edge_types_against_nodes(
+    node_stores: dict[str, NodeStore],
+    edge_stores: dict[tuple[str, str, str], EdgeStore],
+) -> None:
+    node_types = set(node_stores)
+    for edge_type in edge_stores:
+        src_type, _, dst_type = edge_type
+        for endpoint in (src_type, dst_type):
+            if endpoint not in node_types:
+                raise GraphConstructionError(
+                    f"edge type {edge_type!r} references unknown node type {endpoint!r}"
+                )
 
 
 @dataclass(slots=True)
@@ -96,14 +148,27 @@ class Graph:
 
     @classmethod
     def homo(cls, *, edge_index, edge_data=None, **node_data):
-        nodes = {"node": NodeStore("node", dict(node_data))}
+        edge_index = _validate_edge_index(edge_index)
+        validated_node_data = {
+            key: torch.as_tensor(value) if isinstance(value, (list, tuple)) else value
+            for key, value in dict(node_data).items()
+        }
+        _validate_node_features("node", validated_node_data)
+        nodes = {"node": NodeStore("node", validated_node_data)}
         edge_type = ("node", "to", "node")
-        homo_edge_data = {"edge_index": edge_index, **dict(edge_data or {})}
+        homo_edge_data = {
+            "edge_index": edge_index,
+            **{
+                key: torch.as_tensor(value) if isinstance(value, (list, tuple)) else value
+                for key, value in dict(edge_data or {}).items()
+            },
+        }
+        _validate_edge_features(edge_type, homo_edge_data)
         edges = {edge_type: EdgeStore(edge_type, homo_edge_data)}
         schema = GraphSchema(
             node_types=("node",),
             edge_types=(edge_type,),
-            node_features={"node": tuple(node_data.keys())},
+            node_features={"node": tuple(validated_node_data.keys())},
             edge_features={edge_type: tuple(homo_edge_data.keys())},
         )
         return cls(schema=schema, nodes=nodes, edges=edges)
@@ -111,13 +176,34 @@ class Graph:
     @classmethod
     def hetero(cls, *, nodes, edges, time_attr=None):
         node_stores = {
-            node_type: NodeStore(node_type, dict(data))
+            node_type: NodeStore(
+                node_type,
+                {
+                    key: torch.as_tensor(value) if isinstance(value, (list, tuple)) else value
+                    for key, value in dict(data).items()
+                },
+            )
             for node_type, data in nodes.items()
         }
+        for node_type, store in node_stores.items():
+            _validate_node_features(node_type, dict(store.data))
         edge_stores = {
-            edge_type: EdgeStore(edge_type, dict(data))
+            edge_type: EdgeStore(
+                edge_type,
+                {
+                    "edge_index": _validate_edge_index(dict(data)["edge_index"]),
+                    **{
+                        key: torch.as_tensor(value) if isinstance(value, (list, tuple)) else value
+                        for key, value in dict(data).items()
+                        if key != "edge_index"
+                    },
+                },
+            )
             for edge_type, data in edges.items()
         }
+        _validate_edge_types_against_nodes(node_stores, edge_stores)
+        for edge_type, store in edge_stores.items():
+            _validate_edge_features(edge_type, dict(store.data))
         schema = GraphSchema(
             node_types=tuple(sorted(node_stores)),
             edge_types=tuple(sorted(edge_stores)),
