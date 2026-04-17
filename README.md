@@ -84,6 +84,10 @@ pip install "sky-vgl[pyg]"               # PyTorch Geometric interoperability
 
 > **From source, dev deps, and extras** — see the [Installation guide](https://skygazer42.github.io/sky-vgl/getting-started/installation/).
 
+## Compatibility Policy
+
+Legacy compatibility namespaces stay supported through the current 0.x line. New code should migrate to `vgl.graph`, `vgl.dataloading`, `vgl.engine`, `vgl.tasks`, and `vgl.metrics` now. Breaking removals will be announced in the changelog before they ship.
+
 ### Source Install
 
 ```bash

@@ -15,6 +15,8 @@ The older `vgl.core`, `vgl.data`, and `vgl.train` modules still work as compatib
 
 On first import, each legacy namespace now emits a single `FutureWarning` that points back to this guide. The warning is intentionally brief: it tells you which modern module to prefer, then uses this page for concrete rewrite examples.
 
+Legacy compatibility namespaces stay supported through the current 0.x line. New code should migrate to `vgl.graph`, `vgl.dataloading`, `vgl.engine`, `vgl.tasks`, and `vgl.metrics` now. Breaking removals will be announced in the changelog before they ship.
+
 Common import rewrites:
 
 - `from vgl.data.loader import Loader` -> `from vgl.dataloading import DataLoader`
