@@ -104,6 +104,8 @@ pip install "sky-vgl[pyg]"               # PyTorch Geometric interoperability
 
 > **From source, dev deps, and extras** — see the [Installation guide](https://skygazer42.github.io/sky-vgl/getting-started/installation/).
 
+Compatibility changes and migration notes are tracked in `docs/changelog.md`. Performance-impacting changes should summarize benchmark method or artifact changes in `docs/changelog.md`.
+
 ### Source Install
 
 ```bash

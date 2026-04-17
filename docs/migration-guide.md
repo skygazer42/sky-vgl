@@ -13,6 +13,8 @@ The preferred import layout is now domain-based:
 
 The older `vgl.core`, `vgl.data`, and `vgl.train` modules still work as compatibility layers, but new code should avoid them.
 
+Follow `docs/changelog.md` when compatibility behavior changes. Use the `Migration` section for deprecation and removal notices, and the `Interop` section for adapter-specific caveats.
+
 Common import rewrites:
 
 - `from vgl.data.loader import Loader` -> `from vgl.dataloading import DataLoader`
