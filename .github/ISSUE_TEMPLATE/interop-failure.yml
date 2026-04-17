@@ -15,7 +15,7 @@ body:
     id: smoke_output
     attributes:
       label: Smoke output
-      description: Paste the output from `python scripts/interop_smoke.py --backend ...` or `python scripts/release_smoke.py --artifact-dir dist --kind wheel --interop-backend ...`.
+      description: Paste the output from `python scripts/interop_smoke.py --backend ...` or `python scripts/release_smoke.py --artifact-dir dist --kind wheel --interop-backend ...`. If the failure came from CI or publish, include whether it happened before or after the uploaded `release-dists` artifact step.
     validations:
       required: true
   - type: textarea

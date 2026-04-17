@@ -22,6 +22,6 @@ body:
     id: payload
     attributes:
       label: Supporting artifacts
-      description: Include any relevant `graph payload format/version` details, `manifest.json` content, or stack traces.
+      description: Include any relevant `graph payload format/version` details, `manifest.json` content, partition metadata, or stack traces.
     validations:
       required: true

@@ -96,8 +96,11 @@ def test_issue_templates_cover_performance_interop_and_dataset_intake():
     assert "scripts/release_smoke.py" in interop
     assert "sky-vgl[pyg]" in interop
     assert "sky-vgl[dgl]" in interop
+    assert "benchmark-hotpaths" in performance
+    assert "release-dists" in interop
     assert "graph payload format/version" in dataset
     assert "Minimal Reproduction" in dataset
+    assert "manifest.json" in dataset
 
 
 def test_ci_and_publish_build_jobs_gate_all_backend_artifact_interop():
