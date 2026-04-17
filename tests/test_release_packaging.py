@@ -854,6 +854,9 @@ def test_release_readme_documents_public_install_paths():
     assert "pip install sky-vgl" in quickstart
     assert 'pip install "sky-vgl[full]"' in quickstart
     assert "installed release version" in installation
+    assert "main CI only installs the lightweight extras (`networkx`, `scipy`, `tensorboard`)" in installation
+    assert "`pyg` and `dgl` are exercised separately in `interop-smoke.yml`" in installation
+    assert "`--backend all` only works when both backend extras are installed and otherwise fails early" in installation
     assert "sky-vgl project name" in releasing
     assert "sky-vgl` works in a clean environment" in releasing
     assert "pending publisher" in releasing
