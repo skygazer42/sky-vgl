@@ -1,6 +1,7 @@
 import pytest
 import torch
 
+from vgl.dataloading.records import LinkPredictionRecord, SampleRecord, TemporalEventRecord
 from vgl.dataloading.requests import GraphSeedRequest, LinkSeedRequest, NodeSeedRequest, TemporalSeedRequest
 
 
@@ -135,3 +136,56 @@ def test_graph_seed_request_normalizes_graph_classification_inputs():
 
     assert torch.equal(normalized.graph_ids, torch.tensor([3, 1]))
     assert torch.equal(normalized.labels, torch.tensor([1, 0]))
+
+
+def test_seed_requests_expose_uniform_seed_field_contract():
+    node_request = NodeSeedRequest(node_ids=torch.tensor([2, 0]), node_type="paper")
+    link_request = LinkSeedRequest(src_ids=torch.tensor([0]), dst_ids=torch.tensor([1]), edge_type=EDGE_TYPE)
+    temporal_request = TemporalSeedRequest(
+        src_ids=torch.tensor([0]),
+        dst_ids=torch.tensor([1]),
+        timestamps=torch.tensor([10]),
+        edge_type=EDGE_TYPE,
+    )
+    graph_request = GraphSeedRequest(graph_ids=torch.tensor([3, 1]))
+
+    assert node_request.optional_field_names == ("metadata", "sample_id", "query_id")
+    assert node_request.seed_field_names == ("node_ids",)
+    assert tuple(node_request.seed_fields) == ("node_ids",)
+    assert torch.equal(node_request.seed_fields["node_ids"], node_request.node_ids)
+
+    assert link_request.optional_field_names == ("metadata", "sample_id", "query_id")
+    assert link_request.seed_field_names == ("src_ids", "dst_ids")
+    assert tuple(link_request.seed_fields) == ("src_ids", "dst_ids")
+    assert torch.equal(link_request.seed_fields["src_ids"], link_request.src_ids)
+    assert torch.equal(link_request.seed_fields["dst_ids"], link_request.dst_ids)
+
+    assert temporal_request.optional_field_names == ("metadata", "sample_id", "query_id")
+    assert temporal_request.seed_field_names == ("src_ids", "dst_ids", "timestamps")
+    assert tuple(temporal_request.seed_fields) == ("src_ids", "dst_ids", "timestamps")
+    assert torch.equal(temporal_request.seed_fields["timestamps"], temporal_request.timestamps)
+
+    assert graph_request.optional_field_names == ("metadata", "sample_id", "query_id")
+    assert graph_request.seed_field_names == ("graph_ids",)
+    assert tuple(graph_request.seed_fields) == ("graph_ids",)
+    assert torch.equal(graph_request.seed_fields["graph_ids"], graph_request.graph_ids)
+
+
+def test_sample_records_expose_uniform_seed_field_contract():
+    graph = object()
+    sample_record = SampleRecord(graph=graph, subgraph_seed=torch.tensor([0, 1]))
+    link_record = LinkPredictionRecord(graph=graph, src_index=0, dst_index=1, label=1)
+    temporal_record = TemporalEventRecord(graph=graph, src_index=0, dst_index=1, timestamp=10, label=1)
+
+    assert sample_record.optional_field_names == ("metadata", "sample_id", "query_id")
+    assert sample_record.seed_field_names == ("subgraph_seed",)
+    assert tuple(sample_record.seed_fields) == ("subgraph_seed",)
+    assert torch.equal(sample_record.seed_fields["subgraph_seed"], sample_record.subgraph_seed)
+
+    assert link_record.optional_field_names == ("metadata", "sample_id", "query_id")
+    assert link_record.seed_field_names == ("src_index", "dst_index")
+    assert link_record.seed_fields == {"src_index": 0, "dst_index": 1}
+
+    assert temporal_record.optional_field_names == ("metadata", "sample_id", "query_id")
+    assert temporal_record.seed_field_names == ("src_index", "dst_index", "timestamp")
+    assert temporal_record.seed_fields == {"src_index": 0, "dst_index": 1, "timestamp": 10}

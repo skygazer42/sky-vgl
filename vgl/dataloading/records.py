@@ -1,6 +1,8 @@
 from dataclasses import dataclass, field
 from typing import Any
 
+_COMMON_OPTIONAL_FIELD_NAMES = ("metadata", "sample_id", "query_id")
+
 
 def _resolved_metadata_value(explicit_value, metadata: dict[str, Any], *, key: str):
     if explicit_value is not None:
@@ -8,8 +10,17 @@ def _resolved_metadata_value(explicit_value, metadata: dict[str, Any], *, key: s
     return metadata.get(key)
 
 
+class _SampleRecordContract:
+    optional_field_names = _COMMON_OPTIONAL_FIELD_NAMES
+    seed_field_names: tuple[str, ...] = ()
+
+    @property
+    def seed_fields(self) -> dict[str, Any]:
+        return {name: getattr(self, name) for name in self.seed_field_names}
+
+
 @dataclass(slots=True)
-class SampleRecord:
+class SampleRecord(_SampleRecordContract):
     graph: Any
     metadata: dict[str, Any] = field(default_factory=dict)
     sample_id: str | None = None
@@ -17,6 +28,7 @@ class SampleRecord:
     source_graph_id: str | None = None
     subgraph_seed: Any | None = None
     blocks: list[Any] | None = None
+    seed_field_names = ("subgraph_seed",)
 
     @property
     def kind(self) -> str:
@@ -39,7 +51,7 @@ class SampleRecord:
 
 
 @dataclass(slots=True)
-class LinkPredictionRecord:
+class LinkPredictionRecord(_SampleRecordContract):
     graph: Any
     src_index: int
     dst_index: int
@@ -54,6 +66,7 @@ class LinkPredictionRecord:
     query_id: Any | None = None
     filter_ranking: bool = False
     blocks: list[Any] | None = None
+    seed_field_names = ("src_index", "dst_index")
 
     @property
     def kind(self) -> str:
@@ -76,7 +89,7 @@ class LinkPredictionRecord:
 
 
 @dataclass(slots=True)
-class TemporalEventRecord:
+class TemporalEventRecord(_SampleRecordContract):
     graph: Any
     src_index: int
     dst_index: int
@@ -87,6 +100,7 @@ class TemporalEventRecord:
     sample_id: str | None = None
     query_id: Any | None = None
     edge_type: Any | None = None
+    seed_field_names = ("src_index", "dst_index", "timestamp")
 
     @property
     def kind(self) -> str:
