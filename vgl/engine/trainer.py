@@ -1,7 +1,7 @@
 from collections.abc import Iterable
 from contextlib import nullcontext
 from copy import deepcopy
-from dataclasses import fields, is_dataclass
+from dataclasses import dataclass, fields, is_dataclass
 from pathlib import Path
 from time import perf_counter
 
@@ -27,6 +27,30 @@ from torch.optim.lr_scheduler import ReduceLROnPlateau
 
 _SUPPORTED_PRECISIONS = {"32", "bf16-mixed", "fp16-mixed"}
 _SUPPORTED_SCHEDULER_INTERVALS = {"epoch", "step"}
+
+
+@dataclass(frozen=True)
+class _TrainerInitConfig:
+    device: torch.device | None
+    move_batch_to_device: bool
+    non_blocking: bool | None
+    default_root_dir: Path | None
+    run_name: str | None
+    fast_dev_run: bool
+    fast_dev_run_batches: int | None
+    limit_train_batches: int | float
+    limit_val_batches: int | float
+    limit_test_batches: int | float
+    val_check_interval: int | float
+    num_sanity_val_steps: int
+    profiler: str | None
+    log_every_n_steps: int
+    accumulate_grad_batches: int
+    gradient_clip_val: float | None
+    console_flush_every_n_steps: int | None
+    scheduler_monitor: str | None
+    lr_scheduler_interval: str
+    precision: str
 
 
 def _validate_init_config(
@@ -65,6 +89,141 @@ def _validate_init_config(
         raise ValueError("num_sanity_val_steps must be >= 0")
     if profiler not in {None, "simple"}:
         raise ValueError("profiler must be None or 'simple'")
+
+
+def _normalize_fast_dev_run(fast_dev_run):
+    if isinstance(fast_dev_run, bool):
+        return 1 if fast_dev_run else None
+    if isinstance(fast_dev_run, int):
+        if fast_dev_run < 1:
+            raise ValueError("fast_dev_run must be >= 1")
+        return int(fast_dev_run)
+    raise TypeError("fast_dev_run must be a bool or an integer")
+
+
+def _normalize_batch_limit(value, *, name):
+    if isinstance(value, bool):
+        raise TypeError(f"{name} must be an int or float")
+    if isinstance(value, int):
+        if value < 1:
+            raise ValueError(f"{name} must be >= 1")
+        return int(value)
+    if isinstance(value, float):
+        if value <= 0.0 or value > 1.0:
+            raise ValueError(f"{name} must be in (0.0, 1.0]")
+        return float(value)
+    raise TypeError(f"{name} must be an int or float")
+
+
+def _normalize_val_check_interval(value):
+    if isinstance(value, bool):
+        raise TypeError("val_check_interval must be an int or float")
+    if isinstance(value, int):
+        if value < 1:
+            raise ValueError("val_check_interval must be >= 1")
+        return int(value)
+    if isinstance(value, float):
+        if value <= 0.0 or value > 1.0:
+            raise ValueError("val_check_interval must be in (0.0, 1.0]")
+        return float(value)
+    raise TypeError("val_check_interval must be an int or float")
+
+
+def _normalize_init_config(
+    *,
+    accumulate_grad_batches,
+    log_every_n_steps,
+    gradient_clip_val,
+    console_flush_every_n_steps,
+    scheduler_monitor,
+    lr_scheduler,
+    lr_scheduler_interval,
+    precision,
+    device,
+    move_batch_to_device,
+    non_blocking,
+    default_root_dir,
+    run_name,
+    fast_dev_run,
+    limit_train_batches,
+    limit_val_batches,
+    limit_test_batches,
+    val_check_interval,
+    num_sanity_val_steps,
+    profiler,
+):
+    _validate_init_config(
+        accumulate_grad_batches=accumulate_grad_batches,
+        log_every_n_steps=log_every_n_steps,
+        gradient_clip_val=gradient_clip_val,
+        console_flush_every_n_steps=console_flush_every_n_steps,
+        scheduler_monitor=scheduler_monitor,
+        lr_scheduler=lr_scheduler,
+        lr_scheduler_interval=lr_scheduler_interval,
+        precision=precision,
+        non_blocking=non_blocking,
+        num_sanity_val_steps=num_sanity_val_steps,
+        profiler=profiler,
+    )
+
+    normalized_device = None if device is None else torch.device(device)
+    normalized_move_batch_to_device = bool(move_batch_to_device)
+    if not normalized_move_batch_to_device and non_blocking is not None:
+        raise ValueError("non_blocking requires move_batch_to_device=True")
+
+    fast_dev_run_batches = _normalize_fast_dev_run(fast_dev_run)
+    return _TrainerInitConfig(
+        device=normalized_device,
+        move_batch_to_device=normalized_move_batch_to_device,
+        non_blocking=non_blocking,
+        default_root_dir=None if default_root_dir is None else Path(default_root_dir),
+        run_name=None if run_name is None else str(run_name),
+        fast_dev_run=fast_dev_run_batches is not None,
+        fast_dev_run_batches=fast_dev_run_batches,
+        limit_train_batches=_normalize_batch_limit(limit_train_batches, name="limit_train_batches"),
+        limit_val_batches=_normalize_batch_limit(limit_val_batches, name="limit_val_batches"),
+        limit_test_batches=_normalize_batch_limit(limit_test_batches, name="limit_test_batches"),
+        val_check_interval=_normalize_val_check_interval(val_check_interval),
+        num_sanity_val_steps=int(num_sanity_val_steps),
+        profiler=profiler,
+        log_every_n_steps=int(log_every_n_steps),
+        accumulate_grad_batches=int(accumulate_grad_batches),
+        gradient_clip_val=None if gradient_clip_val is None else float(gradient_clip_val),
+        console_flush_every_n_steps=None
+        if console_flush_every_n_steps is None
+        else int(console_flush_every_n_steps),
+        scheduler_monitor=scheduler_monitor,
+        lr_scheduler_interval=lr_scheduler_interval,
+        precision=precision,
+    )
+
+
+def _build_init_config(**kwargs):
+    kwargs = dict(kwargs)
+    kwargs.pop("model", None)
+    config = _normalize_init_config(**kwargs)
+    return {
+        "device": config.device,
+        "move_batch_to_device": config.move_batch_to_device,
+        "non_blocking": config.non_blocking,
+        "default_root_dir": config.default_root_dir,
+        "run_name": config.run_name,
+        "fast_dev_run": config.fast_dev_run,
+        "fast_dev_run_batches": config.fast_dev_run_batches,
+        "limit_train_batches": config.limit_train_batches,
+        "limit_val_batches": config.limit_val_batches,
+        "limit_test_batches": config.limit_test_batches,
+        "val_check_interval": config.val_check_interval,
+        "num_sanity_val_steps": config.num_sanity_val_steps,
+        "profiler": config.profiler,
+        "log_every_n_steps": config.log_every_n_steps,
+        "accumulate_grad_batches": config.accumulate_grad_batches,
+        "gradient_clip_val": config.gradient_clip_val,
+        "console_flush_every_n_steps": config.console_flush_every_n_steps,
+        "scheduler_monitor": config.scheduler_monitor,
+        "lr_scheduler_interval": config.lr_scheduler_interval,
+        "precision": config.precision,
+    }
 
 
 def _normalize_restored_trainer_state(state):
@@ -213,7 +372,7 @@ class Trainer:
         num_sanity_val_steps=0,
         profiler=None,
     ):
-        _validate_init_config(
+        init_config = _normalize_init_config(
             accumulate_grad_batches=accumulate_grad_batches,
             log_every_n_steps=log_every_n_steps,
             gradient_clip_val=gradient_clip_val,
@@ -222,31 +381,39 @@ class Trainer:
             lr_scheduler=lr_scheduler,
             lr_scheduler_interval=lr_scheduler_interval,
             precision=precision,
+            device=device,
+            move_batch_to_device=move_batch_to_device,
             non_blocking=non_blocking,
+            default_root_dir=default_root_dir,
+            run_name=run_name,
+            fast_dev_run=fast_dev_run,
+            limit_train_batches=limit_train_batches,
+            limit_val_batches=limit_val_batches,
+            limit_test_batches=limit_test_batches,
+            val_check_interval=val_check_interval,
             num_sanity_val_steps=num_sanity_val_steps,
             profiler=profiler,
         )
 
         self.model = model
-        self.device = None if device is None else torch.device(device)
-        self.move_batch_to_device = bool(move_batch_to_device)
-        self.non_blocking = non_blocking
-        if not self.move_batch_to_device and self.non_blocking is not None:
-            raise ValueError("non_blocking requires move_batch_to_device=True")
+        self.device = init_config.device
+        self.move_batch_to_device = init_config.move_batch_to_device
+        self.non_blocking = init_config.non_blocking
         if self.device is not None:
             self.model.to(self.device)
         self.task = task
-        self.default_root_dir = None if default_root_dir is None else Path(default_root_dir)
-        self.run_name = None if run_name is None else str(run_name)
-        self._fast_dev_run_batches = self._normalize_fast_dev_run(fast_dev_run)
-        self.fast_dev_run = self._fast_dev_run_batches is not None
-        self.limit_train_batches = self._normalize_batch_limit(limit_train_batches, name="limit_train_batches")
-        self.limit_val_batches = self._normalize_batch_limit(limit_val_batches, name="limit_val_batches")
-        self.limit_test_batches = self._normalize_batch_limit(limit_test_batches, name="limit_test_batches")
-        self.val_check_interval = self._normalize_val_check_interval(val_check_interval)
-        self.num_sanity_val_steps = int(num_sanity_val_steps)
-        self.profiler = profiler
-        if precision == "fp16-mixed" and self._resolved_device_type() != "cuda":
+        self.default_root_dir = init_config.default_root_dir
+        self.run_name = init_config.run_name
+        self._fast_dev_run_batches = init_config.fast_dev_run_batches
+        self.fast_dev_run = init_config.fast_dev_run
+        self.limit_train_batches = init_config.limit_train_batches
+        self.limit_val_batches = init_config.limit_val_batches
+        self.limit_test_batches = init_config.limit_test_batches
+        self.val_check_interval = init_config.val_check_interval
+        self.num_sanity_val_steps = init_config.num_sanity_val_steps
+        self.profiler = init_config.profiler
+        self.precision = init_config.precision
+        if self.precision == "fp16-mixed" and self._resolved_device_type() != "cuda":
             raise ValueError("precision='fp16-mixed' requires a CUDA model/device")
         self.optimizer = optimizer(
             self._build_optimizer_param_groups(optimizer_param_groups, lr),
@@ -259,12 +426,12 @@ class Trainer:
         self.monitor_mode = monitor_mode
         self.callbacks = list(callbacks or [])
         self._resolve_callback_artifact_locations(self.callbacks)
-        self.log_every_n_steps = int(log_every_n_steps)
+        self.log_every_n_steps = init_config.log_every_n_steps
         self.loggers = self._build_loggers(
             loggers,
             enable_console_logging=enable_console_logging,
             enable_progress_bar=enable_progress_bar,
-            console_flush_every_n_steps=console_flush_every_n_steps,
+            console_flush_every_n_steps=init_config.console_flush_every_n_steps,
             console_mode=console_mode,
             console_metric_names=console_metric_names,
             console_show_learning_rate=console_show_learning_rate,
@@ -279,12 +446,11 @@ class Trainer:
         self.best_metric = None
         self.active_monitor = None
         self.global_step = 0
-        self.accumulate_grad_batches = int(accumulate_grad_batches)
-        self.gradient_clip_val = None if gradient_clip_val is None else float(gradient_clip_val)
+        self.accumulate_grad_batches = init_config.accumulate_grad_batches
+        self.gradient_clip_val = init_config.gradient_clip_val
         self.lr_scheduler = self._build_lr_scheduler(lr_scheduler)
-        self.scheduler_monitor = scheduler_monitor
-        self.lr_scheduler_interval = lr_scheduler_interval
-        self.precision = precision
+        self.scheduler_monitor = init_config.scheduler_monitor
+        self.lr_scheduler_interval = init_config.lr_scheduler_interval
         self.grad_scaler = self._build_grad_scaler(grad_scaler)
         self._validate_scheduler_configuration()
         self._validate_optimizer_configuration()
@@ -482,39 +648,13 @@ class Trainer:
         return optimizer_param_groups
 
     def _normalize_fast_dev_run(self, fast_dev_run):
-        if isinstance(fast_dev_run, bool):
-            return 1 if fast_dev_run else None
-        if isinstance(fast_dev_run, int):
-            if fast_dev_run < 1:
-                raise ValueError("fast_dev_run must be >= 1")
-            return int(fast_dev_run)
-        raise TypeError("fast_dev_run must be a bool or an integer")
+        return _normalize_fast_dev_run(fast_dev_run)
 
     def _normalize_batch_limit(self, value, *, name):
-        if isinstance(value, bool):
-            raise TypeError(f"{name} must be an int or float")
-        if isinstance(value, int):
-            if value < 1:
-                raise ValueError(f"{name} must be >= 1")
-            return int(value)
-        if isinstance(value, float):
-            if value <= 0.0 or value > 1.0:
-                raise ValueError(f"{name} must be in (0.0, 1.0]")
-            return float(value)
-        raise TypeError(f"{name} must be an int or float")
+        return _normalize_batch_limit(value, name=name)
 
     def _normalize_val_check_interval(self, value):
-        if isinstance(value, bool):
-            raise TypeError("val_check_interval must be an int or float")
-        if isinstance(value, int):
-            if value < 1:
-                raise ValueError("val_check_interval must be >= 1")
-            return int(value)
-        if isinstance(value, float):
-            if value <= 0.0 or value > 1.0:
-                raise ValueError("val_check_interval must be in (0.0, 1.0]")
-            return float(value)
-        raise TypeError("val_check_interval must be an int or float")
+        return _normalize_val_check_interval(value)
 
     def _resolve_artifact_path(self, path):
         if path is None:
