@@ -198,10 +198,23 @@ def _normalize_init_config(
     )
 
 
-def _build_init_config(**kwargs):
-    kwargs = dict(kwargs)
-    kwargs.pop("model", None)
+def _resolve_init_device_type(model, device):
+    if device is not None:
+        return device.type
+    parameter = next(model.parameters(), None)
+    if parameter is not None:
+        return parameter.device.type
+    buffer = next(model.buffers(), None)
+    if buffer is not None:
+        return buffer.device.type
+    return "cpu"
+
+
+def _build_init_config(*, model, **kwargs):
     config = _normalize_init_config(**kwargs)
+    resolved_device_type = _resolve_init_device_type(model, config.device)
+    if config.precision == "fp16-mixed" and resolved_device_type != "cuda":
+        raise ValueError("precision='fp16-mixed' requires a CUDA model/device")
     return {
         "device": config.device,
         "move_batch_to_device": config.move_batch_to_device,
@@ -223,6 +236,7 @@ def _build_init_config(**kwargs):
         "scheduler_monitor": config.scheduler_monitor,
         "lr_scheduler_interval": config.lr_scheduler_interval,
         "precision": config.precision,
+        "resolved_device_type": resolved_device_type,
     }
 
 
@@ -372,7 +386,8 @@ class Trainer:
         num_sanity_val_steps=0,
         profiler=None,
     ):
-        init_config = _normalize_init_config(
+        init_config = _build_init_config(
+            model=model,
             accumulate_grad_batches=accumulate_grad_batches,
             log_every_n_steps=log_every_n_steps,
             gradient_clip_val=gradient_clip_val,
@@ -396,25 +411,23 @@ class Trainer:
         )
 
         self.model = model
-        self.device = init_config.device
-        self.move_batch_to_device = init_config.move_batch_to_device
-        self.non_blocking = init_config.non_blocking
+        self.device = init_config["device"]
+        self.move_batch_to_device = init_config["move_batch_to_device"]
+        self.non_blocking = init_config["non_blocking"]
         if self.device is not None:
             self.model.to(self.device)
         self.task = task
-        self.default_root_dir = init_config.default_root_dir
-        self.run_name = init_config.run_name
-        self._fast_dev_run_batches = init_config.fast_dev_run_batches
-        self.fast_dev_run = init_config.fast_dev_run
-        self.limit_train_batches = init_config.limit_train_batches
-        self.limit_val_batches = init_config.limit_val_batches
-        self.limit_test_batches = init_config.limit_test_batches
-        self.val_check_interval = init_config.val_check_interval
-        self.num_sanity_val_steps = init_config.num_sanity_val_steps
-        self.profiler = init_config.profiler
-        self.precision = init_config.precision
-        if self.precision == "fp16-mixed" and self._resolved_device_type() != "cuda":
-            raise ValueError("precision='fp16-mixed' requires a CUDA model/device")
+        self.default_root_dir = init_config["default_root_dir"]
+        self.run_name = init_config["run_name"]
+        self._fast_dev_run_batches = init_config["fast_dev_run_batches"]
+        self.fast_dev_run = init_config["fast_dev_run"]
+        self.limit_train_batches = init_config["limit_train_batches"]
+        self.limit_val_batches = init_config["limit_val_batches"]
+        self.limit_test_batches = init_config["limit_test_batches"]
+        self.val_check_interval = init_config["val_check_interval"]
+        self.num_sanity_val_steps = init_config["num_sanity_val_steps"]
+        self.profiler = init_config["profiler"]
+        self.precision = init_config["precision"]
         self.optimizer = optimizer(
             self._build_optimizer_param_groups(optimizer_param_groups, lr),
             lr=lr,
@@ -426,12 +439,12 @@ class Trainer:
         self.monitor_mode = monitor_mode
         self.callbacks = list(callbacks or [])
         self._resolve_callback_artifact_locations(self.callbacks)
-        self.log_every_n_steps = init_config.log_every_n_steps
+        self.log_every_n_steps = init_config["log_every_n_steps"]
         self.loggers = self._build_loggers(
             loggers,
             enable_console_logging=enable_console_logging,
             enable_progress_bar=enable_progress_bar,
-            console_flush_every_n_steps=init_config.console_flush_every_n_steps,
+            console_flush_every_n_steps=init_config["console_flush_every_n_steps"],
             console_mode=console_mode,
             console_metric_names=console_metric_names,
             console_show_learning_rate=console_show_learning_rate,
@@ -446,11 +459,11 @@ class Trainer:
         self.best_metric = None
         self.active_monitor = None
         self.global_step = 0
-        self.accumulate_grad_batches = init_config.accumulate_grad_batches
-        self.gradient_clip_val = init_config.gradient_clip_val
+        self.accumulate_grad_batches = init_config["accumulate_grad_batches"]
+        self.gradient_clip_val = init_config["gradient_clip_val"]
         self.lr_scheduler = self._build_lr_scheduler(lr_scheduler)
-        self.scheduler_monitor = init_config.scheduler_monitor
-        self.lr_scheduler_interval = init_config.lr_scheduler_interval
+        self.scheduler_monitor = init_config["scheduler_monitor"]
+        self.lr_scheduler_interval = init_config["lr_scheduler_interval"]
         self.grad_scaler = self._build_grad_scaler(grad_scaler)
         self._validate_scheduler_configuration()
         self._validate_optimizer_configuration()
