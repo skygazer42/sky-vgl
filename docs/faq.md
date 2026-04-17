@@ -36,6 +36,16 @@ pip install "sky-vgl[full]"
 
 VGL 使用一个统一的 `Graph` 类同时表示同构图、异构图和时序图，而不是为每种图类型使用不同的类。这简化了 API 并确保了一致的行为。
 
+### 应该如何在 VGL、PyG 和 DGL 之间选择？
+
+优先看你的首要约束，而不是先看“谁功能更多”：
+
+- 如果你想用一套公共 API 统一覆盖同构图、异构图、时序图，并直接接上 Trainer / Task / Metric / sampling / interop，优先考虑 **VGL**。
+- 如果你已经在 PyTorch 生态里，希望优先获得成熟的 heterogeneous modeling、`NeighborLoader` / `HGTLoader`、`to_hetero()`，以及可选的 compiled extensions，优先考虑 **PyG**。官方入口可直接看 [PyG README](https://github.com/pyg-team/pytorch_geometric) 和 [heterogeneous graph docs](https://pytorch-geometric.readthedocs.io/en/stable/notes/heterogeneous.html)。
+- 如果你把 stage-based dataloading、GraphBolt，或者 `DistGraph` 一类的分布式图训练 / 采样能力当成刚需，优先考虑 **DGL**。官方入口可直接看 [DGL README](https://github.com/dmlc/dgl)、[GraphBolt docs](https://www.dgl.ai/dgl_docs/api/python/dgl.graphbolt.html) 和 [distributed docs](https://www.dgl.ai/dgl_docs/api/python/dgl.distributed.html)。
+
+VGL 当前更强的是统一抽象和内建训练栈；当前更薄的是外部生态深度以及分布式 runtime 成熟度。换句话说，VGL 更像是一套强调一致性和内建 workflow 的图学习框架，而不是要在每个方向上都一比一取代 PyG 或 DGL。
+
 ### 如何从 DGL 或 PyG 迁移？
 
 参见 [迁移指南](migration-guide.md)。核心的迁移方式是：
