@@ -1,5 +1,6 @@
 import importlib.util
 import os
+import subprocess
 import sys
 import textwrap
 from pathlib import Path
@@ -190,6 +191,40 @@ def test_build_import_check_script_also_uses_legacy_compat_import_paths():
     assert "from vgl.core import Graph as LegacyCoreGraph" in script
     assert "from vgl.train import Trainer as LegacyTrainer" in script
     assert "from vgl.data import Loader as LegacyLoader" in script
+
+
+def test_build_import_check_script_asserts_root_preferred_and_legacy_identity():
+    release_smoke = _load_release_smoke_module()
+
+    script = release_smoke._build_import_check_script(
+        repo_root=Path("/tmp/repo"),
+        dependency_paths=[],
+    )
+
+    assert "assert Graph is LegacyCoreGraph" in script
+    assert "assert Graph is PreferredGraph" in script
+    assert "assert Trainer is LegacyTrainer" in script
+    assert "assert Trainer is PreferredTrainer" in script
+    assert "assert PlanetoidDataset is PreferredPlanetoidDataset" in script
+    assert "assert NodeClassificationTask is PreferredNodeClassificationTask" in script
+
+
+def test_generated_import_smoke_script_executes_root_preferred_and_legacy_paths_together():
+    release_smoke = _load_release_smoke_module()
+
+    script = release_smoke._build_import_check_script(
+        repo_root=Path("/tmp/non-repo-root"),
+        dependency_paths=[],
+    )
+    completed = subprocess.run(
+        [sys.executable, "-c", script],
+        cwd=REPO_ROOT,
+        capture_output=True,
+        text=True,
+    )
+
+    assert completed.returncode == 0, completed.stderr
+    assert "IMPORT_TIMING vgl " in completed.stdout
 
 
 def test_backend_import_module_name_returns_expected_names():

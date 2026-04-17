@@ -244,13 +244,29 @@ def _build_import_check_script(
     )
     wheel_import_symbols = _wheel_import_symbols()
     root_imports = ", ".join(wheel_import_symbols)
+    preferred_aliases = {
+        "Graph": "PreferredGraph",
+        "Trainer": "PreferredTrainer",
+        "PlanetoidDataset": "PreferredPlanetoidDataset",
+        "NodeClassificationTask": "PreferredNodeClassificationTask",
+    }
     preferred_imports = "".join(
-        f"from {module_name} import {symbol}\n"
+        f"from {module_name} import {symbol} as {preferred_aliases.get(symbol, symbol)}\n"
         for module_name, symbol in _preferred_import_smokes()
     )
     legacy_imports = "".join(
         f"from {module_name} import {symbol} as {alias}\n"
         for module_name, symbol, alias in _legacy_import_smokes()
+    )
+    identity_assertions = "".join(
+        (
+            "assert Graph is PreferredGraph\n"
+            "assert Graph is LegacyCoreGraph\n"
+            "assert Trainer is PreferredTrainer\n"
+            "assert Trainer is LegacyTrainer\n"
+            "assert PlanetoidDataset is PreferredPlanetoidDataset\n"
+            "assert NodeClassificationTask is PreferredNodeClassificationTask\n"
+        )
     )
     symbol_prints = "".join(f"print({symbol})\n" for symbol in wheel_import_symbols)
     return (
@@ -268,6 +284,7 @@ def _build_import_check_script(
         f"repo_root = Path({str(repo_root)!r}).resolve()\n"
         "module_path = Path(vgl.__file__).resolve()\n"
         "assert repo_root not in module_path.parents, module_path\n"
+        f"{identity_assertions}"
         "print('IMPORT_TIMING vgl ' + format(root_elapsed, '.6f'))\n"
         "print(vgl.__version__)\n"
         f"{import_module_checks}"
