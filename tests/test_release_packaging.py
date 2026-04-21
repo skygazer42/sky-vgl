@@ -185,6 +185,17 @@ def test_changelog_unreleased_reserves_api_performance_interop_and_migration_sec
     assert "### Migration" in changelog
 
 
+def test_public_surface_contract_documents_graph_and_checkpoint_artifact_metadata():
+    contract = (REPO_ROOT / "docs" / "public-surface-contract.md").read_text(encoding="utf-8")
+
+    assert 'format="vgl.graph"' in contract
+    assert 'format_version=1' in contract
+    assert 'format="vgl.trainer_checkpoint"' in contract
+    assert 'format="legacy.state_dict"' in contract
+    assert "Graph.artifact_metadata()" in contract
+    assert "save_checkpoint(...)" in contract
+
+
 def test_index_and_faq_link_to_support_and_release_guidance():
     index_text = (REPO_ROOT / "docs" / "index.md").read_text(encoding="utf-8")
     faq_text = (REPO_ROOT / "docs" / "faq.md").read_text(encoding="utf-8")

@@ -28,6 +28,76 @@ from vgl.tasks import GraphClassificationTask, NodeClassificationTask
 
 Legacy `vgl.train` paths still work, and legacy loader/sampler-style `vgl.data.*` module paths remain available for compatibility, but new code should prefer the package layout above.
 
+`GraphBatch` is the canonical batched graph container for graph-level training inputs. `GraphView` is the canonical read-only graph projection for snapshot/window-style access. `NodeStore` and `EdgeStore` are lower-level storage-facing graph internals; prefer `Graph`, `GraphView`, and `GraphBatch` in application code.
+
+## Artifact Metadata Contract
+
+Serialized graph and trainer-checkpoint artifacts carry explicit format metadata so releases can detect incompatible payload changes instead of guessing from file layout.
+
+- `Graph.artifact_metadata()` emits `format="vgl.graph"` and `format_version=1`.
+- `save_checkpoint(...)` emits `format="vgl.trainer_checkpoint"` and `format_version=1`.
+- Legacy raw `state_dict` checkpoints still normalize through `load_checkpoint(...)` / `restore_checkpoint(...)` as `format="legacy.state_dict"` with `format_version=0`.
+- Format metadata keys are reserved; callers may add extra metadata, but they must not overwrite `format` or `format_version`.
+
+Minimal checkpoint round-trip:
+
+```python
+from vgl.engine import (
+    CHECKPOINT_FORMAT,
+    CHECKPOINT_FORMAT_VERSION,
+    load_checkpoint,
+    save_checkpoint,
+)
+
+save_checkpoint("artifacts/best.pt", model.state_dict(), metadata={"epoch": 3})
+payload = load_checkpoint("artifacts/best.pt")
+assert payload["format"] == CHECKPOINT_FORMAT
+assert payload["format_version"] == CHECKPOINT_FORMAT_VERSION
+```
+
+Minimal graph artifact metadata:
+
+```python
+from vgl import Graph
+
+graph = Graph.homo(edge_index=edge_index, x=x)
+metadata = graph.artifact_metadata()
+assert metadata["format"] == "vgl.graph"
+assert metadata["format_version"] == 1
+```
+
+## Root Export Tiers
+
+`vgl root exports follow stable, compatibility, and internal tiers`.
+
+VGL treats `from vgl import ...` as a tiered contract so root exports stay intentional instead of growing by accident.
+
+- Stable root exports: the canonical quickstart names kept at the front of `vgl.__all__`. This tier is the public root-level contract for docs, smoke tests, and examples.
+- Compatibility-only root exports: additional root symbols kept for existing callers, but new code should prefer the owning domain module directly. Examples include `Loader`, `SampleRecord`, and `RandomWalkSampler`.
+- Internal APIs live outside the root namespace by design.
+- Internal modules are intentionally not re-exported from `vgl`. Import those APIs from their owning packages such as `vgl.ops`, `vgl.storage`, `vgl.distributed`, `vgl.transforms`, `vgl.metrics`, and `vgl.nn`.
+
+The stable root tier is:
+
+```python
+from vgl import (
+    DataLoader,
+    DatasetRegistry,
+    Graph,
+    GraphBatch,
+    GraphClassificationTask,
+    KarateClubDataset,
+    LinkPredictionTask,
+    MessagePassing,
+    NodeClassificationTask,
+    PlanetoidDataset,
+    TUDataset,
+    TemporalEventPredictionTask,
+    Trainer,
+    __version__,
+)
+```
+
 For public datasets and preprocessing, VGL now exposes:
 
 ```python

@@ -111,6 +111,7 @@ class ScanContext:
             return cached
 
         tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
+        assignments = _named_assignments(tree)
         imports: dict[str, str] = {}
         exports: set[str] = set()
         ordered_exports: tuple[str, ...] = ()
@@ -126,7 +127,7 @@ class ScanContext:
             if isinstance(node, ast.Assign):
                 for target in node.targets:
                     if isinstance(target, ast.Name) and target.id == "__all__":
-                        ordered_exports = _ordered_string_literals(node.value)
+                        ordered_exports = _resolve_ordered_string_literals(node.value, assignments)
                         exports = set(ordered_exports)
                         break
 
@@ -163,12 +164,47 @@ def _string_sequence(node: ast.AST) -> set[str]:
 
 
 def _ordered_string_literals(node: ast.AST) -> tuple[str, ...]:
+    return _resolve_ordered_string_literals(node, None, None)
+
+
+def _resolve_ordered_string_literals(
+    node: ast.AST,
+    assignments: dict[str, ast.AST] | None = None,
+    seen: set[str] | None = None,
+) -> tuple[str, ...]:
+    if seen is None:
+        seen = set()
+    if isinstance(node, ast.Name):
+        if assignments is None or node.id not in assignments:
+            return ()
+        if node.id in seen:
+            raise RuntimeError(f"recursive string sequence reference in module surface: {node.id}")
+        return _resolve_ordered_string_literals(assignments[node.id], assignments, seen | {node.id})
+    if isinstance(node, ast.BinOp) and isinstance(node.op, ast.Add):
+        return _resolve_ordered_string_literals(node.left, assignments, seen) + _resolve_ordered_string_literals(
+            node.right,
+            assignments,
+            seen,
+        )
+    if isinstance(node, ast.Call) and isinstance(node.func, ast.Name) and len(node.args) == 1 and not node.keywords:
+        values = _resolve_ordered_string_literals(node.args[0], assignments, seen)
+        if node.func.id == "sorted":
+            return tuple(sorted(values))
+        if node.func.id in {"tuple", "list"}:
+            return values
+        return ()
     if not isinstance(node, (ast.List, ast.Tuple, ast.Set)):
         return ()
+
     values: list[str] = []
     for item in node.elts:
+        if isinstance(item, ast.Starred):
+            values.extend(_resolve_ordered_string_literals(item.value, assignments, seen))
+            continue
         if isinstance(item, ast.Constant) and isinstance(item.value, str):
             values.append(item.value)
+            continue
+        values.extend(_resolve_ordered_string_literals(item, assignments, seen))
     return tuple(values)
 
 

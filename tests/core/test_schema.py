@@ -1,6 +1,8 @@
 import pytest
 
 from vgl.core.schema import GraphSchema
+from vgl.graph import Graph
+from vgl.graph.errors import GraphConstructionError
 
 
 def test_schema_tracks_node_edge_and_time_metadata():
@@ -27,3 +29,14 @@ def test_schema_rejects_unknown_time_field():
             time_attr="timestamp",
         )
 
+
+def test_hetero_graph_rejects_edge_types_with_unknown_node_types():
+    with pytest.raises(GraphConstructionError, match="unknown node type"):
+        Graph.hetero(
+            nodes={"paper": {"x": [1.0]}},
+            edges={
+                ("author", "writes", "paper"): {
+                    "edge_index": [[0], [0]],
+                }
+            },
+        )

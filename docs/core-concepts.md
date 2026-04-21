@@ -62,6 +62,8 @@ graph = Graph.temporal(
 
 `GraphView` 是已有图的轻量投影，用于 `snapshot()` 和 `window()` 等时序操作。视图继承基础图的运行时上下文。
 
+`GraphView` is the canonical read-only graph projection for snapshot/window-style access.
+
 ## Block 和 HeteroBlock
 
 `Block` 是 `to_block()` 返回的紧凑关系局部消息流容器。它包装一个二部图加上显式的源/目标节点 ID 元数据。
@@ -74,8 +76,12 @@ graph = Graph.temporal(
 
 `GraphBatch` 将多个图分组为一个训练输入，跟踪节点到图的成员关系：
 
+`GraphBatch` is the canonical batched graph container for graph-level training inputs.
+
 - 同构图：`graph_index` 和 `graph_ptr`
 - 异构/时序图：`graph_index_by_type` 和 `graph_ptr_by_type`
+
+`NodeStore` and `EdgeStore` are lower-level storage-facing graph internals; prefer `Graph`, `GraphView`, and `GraphBatch` in application code.
 
 ## MessagePassing
 

@@ -10,6 +10,7 @@ from scripts.contracts import PUBLIC_EXAMPLE_MODULES, ROOT_EXPORT_POLICY_DESCRIP
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 SCAN_SCRIPT = REPO_ROOT / "scripts" / "public_surface_scan.py"
+LIST_SNAPSHOT = REPO_ROOT / "tests" / "fixtures" / "public_surface_scan_list_snapshot.txt"
 
 
 def _load_public_surface_scan(module_name: str = "public_surface_scan"):
@@ -79,6 +80,18 @@ def test_public_surface_scan_lists_stable_catalog():
     assert any("vgl.core reexports EdgeStore from vgl.graph" in line for line in listed)
     assert any("vgl.core reexports SchemaError from vgl.graph" in line for line in listed)
     assert any(ROOT_EXPORT_POLICY_DESCRIPTION in line for line in listed)
+
+
+def test_public_surface_scan_list_matches_snapshot():
+    completed = subprocess.run(
+        [sys.executable, str(SCAN_SCRIPT), "--list"],
+        cwd=REPO_ROOT,
+        capture_output=True,
+        text=True,
+    )
+
+    assert completed.returncode == 0, completed.stderr
+    assert completed.stdout.strip().splitlines() == LIST_SNAPSHOT.read_text(encoding="utf-8").strip().splitlines()
 
 
 def test_public_surface_scan_list_catalog_follows_public_surface_specs_function(tmp_path: Path):
@@ -309,6 +322,58 @@ def test_public_surface_scan_list_catalog_supports_annotated_assignments(tmp_pat
         "examples avoids legacy import paths",
         "tests/integration avoids legacy import paths",
     ]
+
+
+def test_module_surface_expands_named_root_export_sequences(tmp_path: Path):
+    repo_root = tmp_path / "repo"
+    module_path = repo_root / "demo" / "__init__.py"
+    module_path.parent.mkdir(parents=True)
+    module_path.write_text(
+        textwrap.dedent(
+            """
+            _STABLE_EXPORTS = ("Graph", "Trainer")
+            _COMPATIBILITY_EXPORTS = ("Metric", "Task")
+
+            __all__ = [*_STABLE_EXPORTS, *_COMPATIBILITY_EXPORTS]
+            """
+        ).strip()
+        + "\n",
+        encoding="utf-8",
+    )
+
+    scan = _load_public_surface_scan("public_surface_scan_named_exports_probe")
+    try:
+        surface = scan.ScanContext(repo_root).module_surface("demo/__init__.py")
+    finally:
+        sys.modules.pop("public_surface_scan_named_exports_probe", None)
+
+    assert surface.ordered_exports == ("Graph", "Trainer", "Metric", "Task")
+
+
+def test_module_surface_preserves_sorted_export_calls(tmp_path: Path):
+    repo_root = tmp_path / "repo"
+    module_path = repo_root / "demo" / "__init__.py"
+    module_path.parent.mkdir(parents=True)
+    module_path.write_text(
+        textwrap.dedent(
+            """
+            _STABLE_EXPORTS = ("Graph", "Trainer")
+            _COMPATIBILITY_EXPORTS = tuple(sorted({"Task", "Metric"}))
+
+            __all__ = [*_STABLE_EXPORTS, *_COMPATIBILITY_EXPORTS]
+            """
+        ).strip()
+        + "\n",
+        encoding="utf-8",
+    )
+
+    scan = _load_public_surface_scan("public_surface_scan_sorted_exports_probe")
+    try:
+        surface = scan.ScanContext(repo_root).module_surface("demo/__init__.py")
+    finally:
+        sys.modules.pop("public_surface_scan_sorted_exports_probe", None)
+
+    assert surface.ordered_exports == ("Graph", "Trainer", "Metric", "Task")
 
 
 def test_public_surface_scan_passes_on_repository():

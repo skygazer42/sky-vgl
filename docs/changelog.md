@@ -16,7 +16,9 @@
 
 ### Migration
 
-- 暂无条目。
+- Legacy compatibility namespaces stay supported through the current 0.x line.
+- New code should migrate to `vgl.graph`, `vgl.dataloading`, `vgl.engine`, `vgl.tasks`, and `vgl.metrics` now.
+- Breaking removals will be announced in the changelog before they ship.
 
 ### Docs
 

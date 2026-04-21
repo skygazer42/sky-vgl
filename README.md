@@ -84,6 +84,10 @@ pip install "sky-vgl[pyg]"               # PyTorch Geometric interoperability
 
 > **From source, dev deps, and extras** — see the [Installation guide](https://skygazer42.github.io/sky-vgl/getting-started/installation/).
 
+## Compatibility Policy
+
+Legacy compatibility namespaces stay supported through the current 0.x line. New code should migrate to `vgl.graph`, `vgl.dataloading`, `vgl.engine`, `vgl.tasks`, and `vgl.metrics` now. Breaking removals will be announced in the changelog before they ship.
+
 ### Source Install
 
 ```bash
@@ -126,6 +130,8 @@ Use the editable install when developing locally or validating the latest branch
 | `vgl.compat` | DGL, PyG, NetworkX, CSV interoperability adapters |
 
 > **Deep dive** — see the [Architecture overview](https://skygazer42.github.io/sky-vgl/architecture/).
+
+`GraphBatch` is the canonical batched graph container for graph-level training inputs. `GraphView` is the canonical read-only graph projection for snapshot/window-style access. `NodeStore` and `EdgeStore` are lower-level storage-facing graph internals; prefer `Graph`, `GraphView`, and `GraphBatch` in application code.
 
 ---
 

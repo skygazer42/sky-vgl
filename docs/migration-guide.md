@@ -27,6 +27,10 @@ The older `vgl.core`, `vgl.train`, and the legacy loader/sampler-style `vgl.data
 
     `vgl.data` 的数据集/目录入口保持公开可用;其余 legacy 命名空间只做 re-export,不提供单独的 API 参考页;所有公共符号都能从 `vgl.graph` / `vgl.engine` / `vgl.tasks` / `vgl.metrics` / `vgl.data` 直接解析。
 
+On first import, each legacy namespace now emits a single `FutureWarning` that points back to this guide. The warning is intentionally brief: it tells you which modern module to prefer, then uses this page for concrete rewrite examples.
+
+Legacy compatibility namespaces stay supported through the current 0.x line. New code should migrate to `vgl.graph`, `vgl.dataloading`, `vgl.engine`, `vgl.tasks`, and `vgl.metrics` now. Breaking removals will be announced in the changelog before they ship.
+
 Common import rewrites:
 
 - `from vgl.data.loader import Loader` -> `from vgl.dataloading import DataLoader`
