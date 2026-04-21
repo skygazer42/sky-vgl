@@ -147,6 +147,7 @@ for batch in loader:
 
 - `prefetch` 只用于 `num_workers == 0` 的单线程路径
 - `prefetch_factor` 只用于 `num_workers > 0` 的 worker 预取
+- `prefetch_factor` 必须是正整数（`>= 1`）
 - `persistent_workers=True` 也只适用于 `num_workers > 0`
 
 如果你在 worker 模式下同时传 `prefetch > 0`，构造器会直接报错：
@@ -173,6 +174,8 @@ loader = DataLoader(
     prefetch=2,
 )
 ```
+
+每次消费一个 batch 之后，loader 只会回填到这个上限，不会无限向前采样；这就是单线程路径里的 backpressure 边界。
 
 多 worker 路径下，用 `prefetch_factor` 和 `persistent_workers` 做吞吐调优：
 

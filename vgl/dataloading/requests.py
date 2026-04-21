@@ -3,6 +3,8 @@ from typing import Any
 
 import torch
 
+_COMMON_OPTIONAL_FIELD_NAMES = ("metadata", "sample_id", "query_id")
+
 
 def _resolved_metadata_value(explicit_value, metadata: dict[str, Any], *, key: str):
     if explicit_value is not None:
@@ -27,13 +29,25 @@ def _require_same_length(*values: torch.Tensor) -> None:
         raise ValueError("seed tensors must have the same length")
 
 
+class _SeedRequestContract:
+    optional_field_names = _COMMON_OPTIONAL_FIELD_NAMES
+    seed_field_names: tuple[str, ...] = ()
+
+    @property
+    def seed_fields(self) -> dict[str, Any]:
+        return {name: getattr(self, name) for name in self.seed_field_names}
+
+
 @dataclass(slots=True)
-class NodeSeedRequest:
+class NodeSeedRequest(_SeedRequestContract):
+    """Node seed request with shared sample identity fields."""
+
     node_ids: torch.Tensor
     node_type: str | None = None
     metadata: dict[str, Any] = field(default_factory=dict)
     sample_id: str | None = None
     query_id: Any | None = None
+    seed_field_names = ("node_ids",)
 
     def __post_init__(self) -> None:
         self.node_ids = _as_rank1_tensor(self.node_ids, name="node_ids")
@@ -63,7 +77,9 @@ class NodeSeedRequest:
 
 
 @dataclass(slots=True)
-class LinkSeedRequest:
+class LinkSeedRequest(_SeedRequestContract):
+    """Link seed request with shared sample identity fields."""
+
     src_ids: torch.Tensor
     dst_ids: torch.Tensor
     edge_type: Any = None
@@ -71,6 +87,7 @@ class LinkSeedRequest:
     metadata: dict[str, Any] = field(default_factory=dict)
     sample_id: str | None = None
     query_id: Any | None = None
+    seed_field_names = ("src_ids", "dst_ids")
 
     def __post_init__(self) -> None:
         self.src_ids = _as_rank1_tensor(self.src_ids, name="src_ids")
@@ -106,7 +123,9 @@ class LinkSeedRequest:
 
 
 @dataclass(slots=True)
-class TemporalSeedRequest:
+class TemporalSeedRequest(_SeedRequestContract):
+    """Temporal seed request with shared sample identity fields."""
+
     src_ids: torch.Tensor
     dst_ids: torch.Tensor
     timestamps: torch.Tensor
@@ -114,6 +133,7 @@ class TemporalSeedRequest:
     metadata: dict[str, Any] = field(default_factory=dict)
     sample_id: str | None = None
     query_id: Any | None = None
+    seed_field_names = ("src_ids", "dst_ids", "timestamps")
 
     def __post_init__(self) -> None:
         self.src_ids = _as_rank1_tensor(self.src_ids, name="src_ids")
@@ -146,12 +166,15 @@ class TemporalSeedRequest:
 
 
 @dataclass(slots=True)
-class GraphSeedRequest:
+class GraphSeedRequest(_SeedRequestContract):
+    """Graph seed request with shared sample identity fields."""
+
     graph_ids: torch.Tensor
     labels: torch.Tensor | None = None
     metadata: dict[str, Any] = field(default_factory=dict)
     sample_id: str | None = None
     query_id: Any | None = None
+    seed_field_names = ("graph_ids",)
 
     def __post_init__(self) -> None:
         self.graph_ids = _as_rank1_tensor(self.graph_ids, name="graph_ids")
