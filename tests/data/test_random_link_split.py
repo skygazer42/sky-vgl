@@ -10,6 +10,13 @@ def _record_edges(records):
     return {(int(record.src_index), int(record.dst_index)) for record in records}
 
 
+def _graph_without_x():
+    return Graph.homo(
+        edge_index=torch.tensor([[0, 0, 1, 2, 3], [1, 2, 2, 3, 0]]),
+        y=torch.tensor([0, 1, 0, 1]),
+    )
+
+
 def test_random_link_split_returns_train_val_test_link_prediction_datasets():
     graph = Graph.homo(
         edge_index=torch.tensor([[0, 0, 1, 2, 3], [1, 2, 2, 3, 0]]),
@@ -29,6 +36,33 @@ def test_random_link_split_returns_train_val_test_link_prediction_datasets():
     assert {record.metadata["split"] for record in train_records} == {"train"}
     assert {record.metadata["split"] for record in val_records} == {"val"}
     assert {record.metadata["split"] for record in test_records} == {"test"}
+
+
+def test_random_link_split_supports_homo_graph_without_x():
+    train_dataset, val_dataset, test_dataset = RandomLinkSplit(num_val=1, num_test=1, seed=7)(_graph_without_x())
+
+    train_records = list(train_dataset)
+    val_records = list(val_dataset)
+    test_records = list(test_dataset)
+
+    assert len(train_records) == 3
+    assert len(val_records) == 1
+    assert len(test_records) == 1
+    assert all(record.graph._node_count("node") == 4 for record in train_records + val_records + test_records)
+
+
+def test_random_link_split_preserves_public_edge_ids_on_emitted_records():
+    graph = Graph.homo(
+        edge_index=torch.tensor([[0, 0, 1, 2], [1, 2, 2, 0]]),
+        n_id=torch.tensor([0, 1, 2]),
+        edge_data={"e_id": torch.tensor([200, 201, 202, 203])},
+    )
+
+    train_dataset, val_dataset, test_dataset = RandomLinkSplit(num_val=1, num_test=1, seed=0)(graph)
+
+    records = list(train_dataset) + list(val_dataset) + list(test_dataset)
+
+    assert sorted(record.metadata["edge_id"] for record in records) == [200, 201, 202, 203]
 
 
 def test_random_link_split_uses_train_graph_for_validation_and_train_plus_val_for_test():

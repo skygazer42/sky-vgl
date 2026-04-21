@@ -132,10 +132,22 @@ def test_partition_manifest_round_trips_feature_shape_metadata(tmp_path):
                             "n_id": [2],
                         },
                     },
+                    "node_feature_dtypes": {
+                        "author": {
+                            "x": "float32",
+                            "n_id": "int64",
+                        },
+                    },
                     "edge_feature_shapes": {
                         writes: {
                             "weight": [2],
                             "e_id": [2],
+                        },
+                    },
+                    "edge_feature_dtypes": {
+                        writes: {
+                            "weight": "float32",
+                            "e_id": "int64",
                         },
                     },
                 },
@@ -148,5 +160,9 @@ def test_partition_manifest_round_trips_feature_shape_metadata(tmp_path):
 
     assert loaded.partitions[0].metadata["node_feature_shapes"]["author"]["x"] == (2, 8)
     assert loaded.partitions[0].metadata["node_feature_shapes"]["author"]["n_id"] == (2,)
+    assert loaded.partitions[0].metadata["node_feature_dtypes"]["author"]["x"] == "float32"
+    assert loaded.partitions[0].metadata["node_feature_dtypes"]["author"]["n_id"] == "int64"
     assert loaded.partitions[0].metadata["edge_feature_shapes"][writes]["weight"] == (2,)
     assert loaded.partitions[0].metadata["edge_feature_shapes"][writes]["e_id"] == (2,)
+    assert loaded.partitions[0].metadata["edge_feature_dtypes"][writes]["weight"] == "float32"
+    assert loaded.partitions[0].metadata["edge_feature_dtypes"][writes]["e_id"] == "int64"

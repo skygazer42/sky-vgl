@@ -837,6 +837,24 @@ def test_model_checkpoint_accepts_tensor_scalar_counts_without_tensor_int(tmp_pa
     assert callback.every_n_epochs == 2
 
 
+def test_model_checkpoint_rejects_restored_paths_outside_managed_dir(tmp_path):
+    managed_dir = tmp_path / "checkpoints"
+    managed_dir.mkdir()
+    outside = tmp_path / "outside.ckpt"
+    outside.write_text("checkpoint")
+
+    callback = ModelCheckpoint(managed_dir, save_top_k=1, save_last=False)
+
+    with pytest.raises(ValueError, match="dirpath"):
+        callback.load_state_dict(
+            {
+                "best_k_models": [
+                    {"path": str(outside), "score": 1.0},
+                ],
+            }
+        )
+
+
 def test_model_checkpoint_saves_top_k_and_last(tmp_path):
     callback = ModelCheckpoint(
         tmp_path / "checkpoints",

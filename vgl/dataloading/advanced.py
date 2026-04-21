@@ -102,6 +102,66 @@ def _normalize_bounded_ids(value, *, upper_bound: int, field_name: str) -> list[
     return ids
 
 
+def _require_nodes_for_random_walk_sampling(*, num_nodes: int, context: str) -> None:
+    if int(num_nodes) == 0:
+        raise ValueError(f"{context} cannot sample random walks from an empty graph")
+
+
+def _public_homo_node_id_tensor(graph: Graph) -> torch.Tensor | None:
+    public_ids = graph.nodes["node"].data.get("n_id")
+    if isinstance(public_ids, torch.Tensor) and public_ids.ndim > 0 and int(public_ids.size(0)) == graph._node_count("node"):
+        return public_ids.to(dtype=torch.long)
+    return None
+
+
+def _export_homo_node_ids(graph: Graph, node_ids) -> list[int]:
+    node_tensor = torch.as_tensor(node_ids, dtype=torch.long).view(-1)
+    public_ids = _public_homo_node_id_tensor(graph)
+    if public_ids is None or node_tensor.numel() == 0:
+        return _tensor_to_int_list(node_tensor)
+    exported = public_ids[node_tensor.to(dtype=torch.long, device=public_ids.device)]
+    return _tensor_to_int_list(exported)
+
+
+def _export_homo_walks(graph: Graph, walks: list[list[int]]) -> list[list[int]]:
+    public_ids = _public_homo_node_id_tensor(graph)
+    if public_ids is None:
+        return [[int(node_id) for node_id in walk] for walk in walks]
+    exported_walks = []
+    for walk in walks:
+        exported_walk = []
+        for node_id in walk:
+            node_value = int(node_id)
+            if node_value < 0:
+                exported_walk.append(node_value)
+            else:
+                exported_walk.append(_as_python_int(public_ids[node_value]))
+        exported_walks.append(exported_walk)
+    return exported_walks
+
+
+def _seed_metadata_value(seed_ids: list[int]):
+    if len(seed_ids) == 1:
+        return int(seed_ids[0])
+    return [int(seed_id) for seed_id in seed_ids]
+
+
+def _public_homo_edge_id_tensor(graph: Graph) -> torch.Tensor | None:
+    public_ids = graph.edges[graph._default_edge_type()].data.get("e_id")
+    if isinstance(public_ids, torch.Tensor) and public_ids.ndim > 0 and int(public_ids.size(0)) == int(graph.edge_index.size(1)):
+        return public_ids.to(dtype=torch.long)
+    return None
+
+
+def _export_homo_edge_ids(graph: Graph, edge_ids) -> list[int]:
+    edge_tensor = torch.as_tensor(edge_ids, dtype=torch.long).view(-1)
+    public_ids = _public_homo_edge_id_tensor(graph)
+    if public_ids is None or edge_tensor.numel() == 0:
+        return _tensor_to_int_list(edge_tensor)
+    exported = public_ids[edge_tensor.to(dtype=torch.long, device=public_ids.device)]
+    return _tensor_to_int_list(exported)
+
+
 def _induced_edge_ids(graph: Graph, node_ids: list[int]) -> torch.Tensor:
     node_tensor = torch.as_tensor(node_ids, dtype=torch.long, device=graph.edge_index.device).view(-1)
     if node_tensor.numel() == 0:
@@ -117,15 +177,15 @@ def _induced_edge_ids(graph: Graph, node_ids: list[int]) -> torch.Tensor:
 
 
 def _slice_homo_graph(graph: Graph, node_ids: list[int], edge_pairs: list[tuple[int, int]] | None = None) -> Graph:
-    node_index = torch.as_tensor(node_ids, dtype=torch.long, device=graph.x.device).view(-1)
+    node_index = torch.as_tensor(node_ids, dtype=torch.long, device=_homo_graph_device(graph)).view(-1)
     node_data = {}
-    num_nodes = int(graph.x.size(0))
+    num_nodes = graph._node_count("node")
     for key, value in graph.nodes["node"].data.items():
         if isinstance(value, torch.Tensor) and value.ndim > 0 and int(value.size(0)) == num_nodes:
             node_data[key] = value[node_index]
         else:
             node_data[key] = value
-    node_data["n_id"] = node_index
+    node_data.setdefault("n_id", node_index)
 
     if edge_pairs is None:
         subgraph = node_subgraph(graph, node_index)
@@ -225,13 +285,23 @@ def _sampled_edge_ids(graph: Graph) -> list[int] | None:
 def _enrich_sample_metadata(metadata: dict, sample_graph: Graph) -> dict:
     payload = dict(metadata)
     payload.setdefault("sampled_node_ids", _sampled_node_ids(sample_graph))
-    payload["sampled_num_nodes"] = int(sample_graph.x.size(0))
+    payload["sampled_num_nodes"] = sample_graph._node_count("node")
     payload["sampled_num_edges"] = int(sample_graph.edge_index.size(1))
     edge_ids = _sampled_edge_ids(sample_graph)
     if edge_ids is not None:
         payload.setdefault("sampled_edge_ids", edge_ids)
         payload["subgraph_edge_ids"] = edge_ids
     return payload
+
+
+def _homo_graph_device(graph: Graph) -> torch.device:
+    for value in graph.nodes["node"].data.values():
+        if isinstance(value, torch.Tensor):
+            return value.device
+    for value in graph.edges[graph._default_edge_type()].data.values():
+        if isinstance(value, torch.Tensor):
+            return value.device
+    return torch.device("cpu")
 
 
 def _seeded_sample_records(
@@ -298,20 +368,22 @@ class RandomWalkSampler(Sampler):
             self._generator.manual_seed(_as_python_int(seed))
 
     def _sample_start(self, graph: Graph) -> int:
-        num_nodes = int(graph.x.size(0))
+        num_nodes = graph._node_count("node")
+        _require_nodes_for_random_walk_sampling(num_nodes=num_nodes, context=self.__class__.__name__)
         if self._generator is None:
             return _as_python_int(torch.randint(num_nodes, (1,)))
         return _as_python_int(torch.randint(num_nodes, (1,), generator=self._generator))
 
     def _seed_ids_from_metadata(self, graph: Graph, metadata: dict) -> list[int]:
         seed = metadata.get("seed")
+        num_nodes = graph._node_count("node")
         if seed is None:
+            _require_nodes_for_random_walk_sampling(num_nodes=num_nodes, context=self.__class__.__name__)
             seeds = [self._sample_start(graph) for _ in range(self.num_walks)]
         else:
             seeds = _normalize_seed_values(seed)
             if len(seeds) == 1 and self.num_walks > 1:
                 seeds = seeds * self.num_walks
-        num_nodes = int(graph.x.size(0))
         for seed_id in seeds:
             if seed_id < 0 or seed_id >= num_nodes:
                 raise ValueError("seed must fall within the graph node range")
@@ -330,28 +402,33 @@ class RandomWalkSampler(Sampler):
         walks = self._sample_walks(graph, seed_ids)
         sample_graph = _path_graph_from_walks(graph, walks)
         sampled_node_ids = _sampled_node_ids(sample_graph)
+        has_public_ids = _public_homo_node_id_tensor(graph) is not None
+        exported_seed_ids = _export_homo_node_ids(graph, seed_ids)
+        exported_walks = _export_homo_walks(graph, walks)
         sample_metadata = _finalize_metadata(
             metadata,
             sampler_name=self.__class__.__name__,
             sample_id=sample_id,
-            seed_ids=seed_ids,
+            seed_ids=exported_seed_ids,
             sampling_config={"walk_length": self.walk_length, "num_walks": self.num_walks, "edge_type": self.edge_type},
         )
-        if "seed" not in sample_metadata and len(seed_ids) == 1:
-            sample_metadata["seed"] = seed_ids[0]
-        if len(walks) == 1:
-            sample_metadata["walk"] = walks[0]
+        if has_public_ids and "seed" in metadata:
+            sample_metadata["seed"] = _seed_metadata_value(_export_homo_node_ids(graph, _normalize_seed_values(metadata["seed"])))
+        elif "seed" not in sample_metadata and len(exported_seed_ids) == 1:
+            sample_metadata["seed"] = exported_seed_ids[0]
+        if len(exported_walks) == 1:
+            sample_metadata["walk"] = exported_walks[0]
         else:
             sample_metadata.pop("walk", None)
-        sample_metadata["walk_starts"] = [int(node_id) for node_id in seed_ids]
+        sample_metadata["walk_starts"] = [int(node_id) for node_id in exported_seed_ids]
         sample_metadata["walk_nodes"] = sampled_node_ids
         sample_metadata["walk_start_positions"] = _walk_start_positions(sampled_node_ids, sample_metadata["walk_starts"])
-        sample_metadata["walks"] = walks
-        sample_metadata["sampled_num_walks"] = len(walks)
-        sample_metadata["walk_lengths"] = _walk_lengths(walks)
-        sample_metadata["walk_ended_early"] = _walk_ended_early(walks, walk_length=self.walk_length)
-        sample_metadata["num_walks_ended_early"] = _num_walks_ended_early(walks, walk_length=self.walk_length)
-        sample_metadata["walk_edge_pairs"] = _walk_edge_pairs(walks)
+        sample_metadata["walks"] = exported_walks
+        sample_metadata["sampled_num_walks"] = len(exported_walks)
+        sample_metadata["walk_lengths"] = _walk_lengths(exported_walks)
+        sample_metadata["walk_ended_early"] = _walk_ended_early(exported_walks, walk_length=self.walk_length)
+        sample_metadata["num_walks_ended_early"] = _num_walks_ended_early(exported_walks, walk_length=self.walk_length)
+        sample_metadata["walk_edge_pairs"] = _walk_edge_pairs(exported_walks)
         sample_metadata.setdefault("walk_length", self.walk_length)
         sample_metadata["sampled_node_ids"] = sampled_node_ids
         sample_metadata = _enrich_sample_metadata(sample_metadata, sample_graph)
@@ -361,7 +438,7 @@ class RandomWalkSampler(Sampler):
                 metadata=sample_metadata,
                 sample_id=sample_id,
                 source_graph_id=source_graph_id,
-                seed_ids=explicit_seed_ids,
+                seed_ids=exported_seed_ids,
                 sampled_node_ids=sampled_node_ids,
             )
         return SampleRecord(
@@ -453,11 +530,14 @@ class Node2VecWalkSampler(RandomWalkSampler):
 
         sample_graph = _path_graph_from_walks(graph, walks)
         sampled_node_ids = _sampled_node_ids(sample_graph)
+        has_public_ids = _public_homo_node_id_tensor(graph) is not None
+        exported_seed_ids = _export_homo_node_ids(graph, seed_ids)
+        exported_walks = _export_homo_walks(graph, walks)
         sample_metadata = _finalize_metadata(
             metadata,
             sampler_name=self.__class__.__name__,
             sample_id=sample_id,
-            seed_ids=seed_ids,
+            seed_ids=exported_seed_ids,
             sampling_config={
                 "walk_length": self.walk_length,
                 "num_walks": self.num_walks,
@@ -466,21 +546,23 @@ class Node2VecWalkSampler(RandomWalkSampler):
                 "edge_type": self.edge_type,
             },
         )
-        if "seed" not in sample_metadata and len(seed_ids) == 1:
-            sample_metadata["seed"] = seed_ids[0]
-        if len(walks) == 1:
-            sample_metadata["walk"] = walks[0]
+        if has_public_ids and "seed" in metadata:
+            sample_metadata["seed"] = _seed_metadata_value(_export_homo_node_ids(graph, _normalize_seed_values(metadata["seed"])))
+        elif "seed" not in sample_metadata and len(exported_seed_ids) == 1:
+            sample_metadata["seed"] = exported_seed_ids[0]
+        if len(exported_walks) == 1:
+            sample_metadata["walk"] = exported_walks[0]
         else:
             sample_metadata.pop("walk", None)
-        sample_metadata["walk_starts"] = [int(node_id) for node_id in seed_ids]
+        sample_metadata["walk_starts"] = [int(node_id) for node_id in exported_seed_ids]
         sample_metadata["walk_nodes"] = sampled_node_ids
         sample_metadata["walk_start_positions"] = _walk_start_positions(sampled_node_ids, sample_metadata["walk_starts"])
-        sample_metadata["walks"] = walks
-        sample_metadata["sampled_num_walks"] = len(walks)
-        sample_metadata["walk_lengths"] = _walk_lengths(walks)
-        sample_metadata["walk_ended_early"] = _walk_ended_early(walks, walk_length=self.walk_length)
-        sample_metadata["num_walks_ended_early"] = _num_walks_ended_early(walks, walk_length=self.walk_length)
-        sample_metadata["walk_edge_pairs"] = _walk_edge_pairs(walks)
+        sample_metadata["walks"] = exported_walks
+        sample_metadata["sampled_num_walks"] = len(exported_walks)
+        sample_metadata["walk_lengths"] = _walk_lengths(exported_walks)
+        sample_metadata["walk_ended_early"] = _walk_ended_early(exported_walks, walk_length=self.walk_length)
+        sample_metadata["num_walks_ended_early"] = _num_walks_ended_early(exported_walks, walk_length=self.walk_length)
+        sample_metadata["walk_edge_pairs"] = _walk_edge_pairs(exported_walks)
         sample_metadata["p"] = self.p
         sample_metadata["q"] = self.q
         sample_metadata["sampled_node_ids"] = sampled_node_ids
@@ -491,7 +573,7 @@ class Node2VecWalkSampler(RandomWalkSampler):
                 metadata=sample_metadata,
                 sample_id=sample_id,
                 source_graph_id=source_graph_id,
-                seed_ids=explicit_seed_ids,
+                seed_ids=exported_seed_ids,
                 sampled_node_ids=sampled_node_ids,
             )
         return SampleRecord(
@@ -515,7 +597,7 @@ class GraphSAINTNodeSampler(Sampler):
     def sample(self, item):
         graph, metadata, sample_id, source_graph_id = _parse_graph_item(item, context=self.__class__.__name__)
         _require_homo_graph(graph, context=self.__class__.__name__)
-        num_nodes = int(graph.x.size(0))
+        num_nodes = graph._node_count("node")
         count = min(self.num_sampled_nodes, num_nodes)
         selected = _tensor_to_int_list(torch.randperm(num_nodes, generator=self._generator)[:count])
         seed_ids = None
@@ -526,14 +608,18 @@ class GraphSAINTNodeSampler(Sampler):
         else:
             selected = _ordered_unique(selected)
         sample_graph = _slice_homo_graph(graph, selected)
+        sampled_node_ids = _sampled_node_ids(sample_graph)
+        exported_seed_ids = _export_homo_node_ids(graph, seed_ids if seed_ids is not None else selected)
         sample_metadata = _finalize_metadata(
             metadata,
             sampler_name=self.__class__.__name__,
             sample_id=sample_id,
-            seed_ids=seed_ids if seed_ids is not None else selected,
+            seed_ids=exported_seed_ids,
             sampling_config={"num_sampled_nodes": self.num_sampled_nodes},
         )
-        sample_metadata["sampled_node_ids"] = [int(node_id) for node_id in selected]
+        if "seed" in metadata:
+            sample_metadata["seed"] = _seed_metadata_value(exported_seed_ids)
+        sample_metadata["sampled_node_ids"] = sampled_node_ids
         sample_metadata["seed_positions"] = _seed_positions(sample_metadata["sampled_node_ids"], sample_metadata["seed_ids"])
         sample_metadata = _enrich_sample_metadata(sample_metadata, sample_graph)
         if seed_ids is not None:
@@ -542,7 +628,7 @@ class GraphSAINTNodeSampler(Sampler):
                 metadata=sample_metadata,
                 sample_id=sample_id,
                 source_graph_id=source_graph_id,
-                seed_ids=seed_ids,
+                seed_ids=exported_seed_ids,
                 sampled_node_ids=sample_metadata["sampled_node_ids"],
             )
         return SampleRecord(graph=sample_graph, metadata=sample_metadata, sample_id=sample_id, source_graph_id=source_graph_id)
@@ -593,15 +679,17 @@ class GraphSAINTEdgeSampler(Sampler):
         edge_ids = torch.tensor(selected_edge_ids, dtype=torch.long, device=graph.edge_index.device)
         endpoints = _tensor_to_int_list(_ordered_unique_tensor(graph.edge_index[:, edge_ids].reshape(-1)))
         sample_graph = _slice_homo_graph(graph, endpoints)
+        sampled_node_ids = _sampled_node_ids(sample_graph)
+        exported_endpoints = _export_homo_node_ids(graph, endpoints)
         sample_metadata = _finalize_metadata(
             metadata,
             sampler_name=self.__class__.__name__,
             sample_id=sample_id,
-            seed_ids=endpoints,
+            seed_ids=exported_endpoints,
             sampling_config={"num_sampled_edges": self.num_sampled_edges},
         )
-        sample_metadata["sampled_node_ids"] = [int(node_id) for node_id in endpoints]
-        sample_metadata["sampled_edge_ids"] = [int(edge_id) for edge_id in selected_edge_ids]
+        sample_metadata["sampled_node_ids"] = sampled_node_ids
+        sample_metadata["sampled_edge_ids"] = _export_homo_edge_ids(graph, selected_edge_ids)
         sample_metadata["seed_positions"] = _seed_positions(sample_metadata["sampled_node_ids"], sample_metadata["seed_ids"])
         sample_metadata = _enrich_sample_metadata(sample_metadata, sample_graph)
         return SampleRecord(graph=sample_graph, metadata=sample_metadata, sample_id=sample_id, source_graph_id=source_graph_id)
@@ -624,7 +712,7 @@ class GraphSAINTRandomWalkSampler(Sampler):
     def sample(self, item):
         graph, metadata, sample_id, source_graph_id = _parse_graph_item(item, context=self.__class__.__name__)
         _require_homo_graph(graph, context=self.__class__.__name__)
-        num_nodes = int(graph.x.size(0))
+        num_nodes = graph._node_count("node")
         explicit_seed_ids = None
         if "seed" in metadata:
             explicit_seed_ids = _normalize_bounded_ids(metadata["seed"], upper_bound=num_nodes, field_name="seed")
@@ -633,24 +721,32 @@ class GraphSAINTRandomWalkSampler(Sampler):
             else:
                 starts = list(explicit_seed_ids)
         else:
+            _require_nodes_for_random_walk_sampling(num_nodes=num_nodes, context=self.__class__.__name__)
             starts = _tensor_to_int_list(torch.randint(num_nodes, (self.num_walks,), generator=self._generator))
         walks = random_walk(graph, starts, length=self.walk_length)
         walk_nodes = _tensor_to_int_list(_ordered_unique_tensor(walks.reshape(-1)[walks.reshape(-1) >= 0]))
         sample_graph = _slice_homo_graph(graph, walk_nodes)
+        sampled_node_ids = _sampled_node_ids(sample_graph)
+        has_public_ids = _public_homo_node_id_tensor(graph) is not None
+        exported_seed_ids = _export_homo_node_ids(graph, explicit_seed_ids if explicit_seed_ids is not None else starts)
+        exported_starts = _export_homo_node_ids(graph, starts)
+        exported_walks = _export_homo_walks(graph, _tensor_rows_to_int_lists(walks))
         sample_metadata = _finalize_metadata(
             metadata,
             sampler_name=self.__class__.__name__,
             sample_id=sample_id,
-            seed_ids=explicit_seed_ids if explicit_seed_ids is not None else starts,
+            seed_ids=exported_seed_ids,
             sampling_config={"num_walks": self.num_walks, "walk_length": self.walk_length},
         )
-        if "seed" not in sample_metadata and len(starts) == 1:
-            sample_metadata["seed"] = starts[0]
-        sample_metadata["walk_starts"] = [int(node_id) for node_id in starts]
-        sample_metadata["walk_nodes"] = walk_nodes
-        sample_metadata["sampled_node_ids"] = walk_nodes
-        sample_metadata["walk_start_positions"] = _walk_start_positions(walk_nodes, sample_metadata["walk_starts"])
-        sample_metadata["walks"] = _tensor_rows_to_int_lists(walks)
+        if has_public_ids and "seed" in metadata:
+            sample_metadata["seed"] = _seed_metadata_value(_export_homo_node_ids(graph, _normalize_seed_values(metadata["seed"])))
+        elif "seed" not in sample_metadata and len(starts) == 1:
+            sample_metadata["seed"] = exported_starts[0]
+        sample_metadata["walk_starts"] = [int(node_id) for node_id in exported_starts]
+        sample_metadata["walk_nodes"] = sampled_node_ids
+        sample_metadata["sampled_node_ids"] = sampled_node_ids
+        sample_metadata["walk_start_positions"] = _walk_start_positions(sampled_node_ids, sample_metadata["walk_starts"])
+        sample_metadata["walks"] = exported_walks
         sample_metadata["sampled_num_walks"] = len(sample_metadata["walks"])
         sample_metadata["walk_lengths"] = _walk_lengths(sample_metadata["walks"])
         sample_metadata["walk_ended_early"] = _walk_ended_early(sample_metadata["walks"], walk_length=self.walk_length)
@@ -663,7 +759,7 @@ class GraphSAINTRandomWalkSampler(Sampler):
                 metadata=sample_metadata,
                 sample_id=sample_id,
                 source_graph_id=source_graph_id,
-                seed_ids=explicit_seed_ids,
+                seed_ids=exported_seed_ids,
                 sampled_node_ids=sample_metadata["sampled_node_ids"],
             )
         return SampleRecord(graph=sample_graph, metadata=sample_metadata, sample_id=sample_id, source_graph_id=source_graph_id)
@@ -684,24 +780,25 @@ class ClusterData(ListDataset):
         generator = torch.Generator()
         if self.seed is not None:
             generator.manual_seed(_as_python_int(self.seed))
-        permutation = torch.randperm(int(self.graph.x.size(0)), generator=generator)
+        permutation = torch.randperm(self.graph._node_count("node"), generator=generator)
         samples = []
         for cluster_id, part in enumerate(torch.chunk(permutation, self.num_parts)):
             if part.numel() == 0:
                 continue
             node_ids = _tensor_to_int_list(part)
             subgraph = _slice_homo_graph(self.graph, node_ids)
+            sampled_node_ids = _sampled_node_ids(subgraph)
             metadata = _finalize_metadata(
                 {
                     "cluster_id": cluster_id,
                     "partition_id": cluster_id,
                     "num_parts": self.num_parts,
-                    "node_ids": node_ids,
-                    "sampled_node_ids": list(node_ids),
+                    "node_ids": list(sampled_node_ids),
+                    "sampled_node_ids": list(sampled_node_ids),
                 },
                 sampler_name=self.__class__.__name__,
                 sample_id=f"cluster:{cluster_id}",
-                seed_ids=node_ids,
+                seed_ids=sampled_node_ids,
                 sampling_config={"num_parts": self.num_parts},
             )
             metadata = _enrich_sample_metadata(metadata, subgraph)
@@ -735,18 +832,21 @@ class ShaDowKHopSampler(Sampler):
         _require_homo_graph(graph, context=self.__class__.__name__)
         if "seed" not in metadata:
             raise ValueError("ShaDowKHopSampler requires metadata['seed']")
-        seed_ids = _normalize_bounded_ids(metadata["seed"], upper_bound=int(graph.x.size(0)), field_name="seed")
+        seed_ids = _normalize_bounded_ids(metadata["seed"], upper_bound=graph._node_count("node"), field_name="seed")
         node_ids = khop_nodes(graph, seed_ids, num_hops=self.num_hops, direction=self.direction, edge_type=self.edge_type)
         node_ids_list = _tensor_to_int_list(node_ids)
         subgraph = _slice_homo_graph(graph, node_ids_list)
+        sampled_node_ids = _sampled_node_ids(subgraph)
+        exported_seed_ids = _export_homo_node_ids(graph, seed_ids)
         sample_metadata = _finalize_metadata(
             metadata,
             sampler_name=self.__class__.__name__,
             sample_id=sample_id,
-            seed_ids=seed_ids,
+            seed_ids=exported_seed_ids,
             sampling_config={"num_hops": self.num_hops, "direction": self.direction, "edge_type": self.edge_type},
         )
-        sample_metadata["sampled_node_ids"] = list(node_ids_list)
+        sample_metadata["seed"] = _seed_metadata_value(exported_seed_ids)
+        sample_metadata["sampled_node_ids"] = list(sampled_node_ids)
         sample_metadata["seed_positions"] = _seed_positions(sample_metadata["sampled_node_ids"], sample_metadata["seed_ids"])
         sample_metadata = _enrich_sample_metadata(sample_metadata, subgraph)
         if len(seed_ids) > 1:
@@ -755,8 +855,8 @@ class ShaDowKHopSampler(Sampler):
                 metadata=sample_metadata,
                 sample_id=sample_id,
                 source_graph_id=source_graph_id,
-                seed_ids=seed_ids,
-                sampled_node_ids=node_ids_list,
+                seed_ids=exported_seed_ids,
+                sampled_node_ids=sampled_node_ids,
             )
         return SampleRecord(
             graph=subgraph,

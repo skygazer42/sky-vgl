@@ -43,6 +43,19 @@ def _graph():
     )
 
 
+def _graph_without_x():
+    return Graph.temporal(
+        nodes={"node": {"y": torch.tensor([0, 1, 0, 1])}},
+        edges={
+            EDGE_TYPE: {
+                "edge_index": torch.tensor([[0, 1, 2], [1, 2, 0]]),
+                "timestamp": torch.tensor([1, 3, 5]),
+            }
+        },
+        time_attr="timestamp",
+    )
+
+
 def test_temporal_neighbor_sampler_extracts_strict_history_subgraph():
     graph = _graph()
     sampler = TemporalNeighborSampler(num_neighbors=[-1])
@@ -55,6 +68,21 @@ def test_temporal_neighbor_sampler_extracts_strict_history_subgraph():
     assert torch.equal(record.graph.n_id, torch.tensor([0, 1, 2]))
     assert torch.equal(record.graph.edges[edge_type].edge_index, torch.tensor([[0], [1]]))
     assert torch.equal(record.graph.edges[edge_type].timestamp, torch.tensor([1]))
+    assert record.src_index == 1
+    assert record.dst_index == 2
+
+
+def test_temporal_neighbor_sampler_supports_homo_graph_without_x():
+    sampler = TemporalNeighborSampler(num_neighbors=[-1])
+
+    record = sampler.sample(
+        TemporalEventRecord(graph=_graph_without_x(), src_index=1, dst_index=2, timestamp=3, label=1)
+    )
+
+    assert torch.equal(record.graph.n_id, torch.tensor([0, 1, 2]))
+    assert torch.equal(record.graph.y, torch.tensor([0, 1, 0]))
+    assert torch.equal(record.graph.edges[EDGE_TYPE].edge_index, torch.tensor([[0], [1]]))
+    assert torch.equal(record.graph.edges[EDGE_TYPE].timestamp, torch.tensor([1]))
     assert record.src_index == 1
     assert record.dst_index == 2
 
@@ -75,6 +103,29 @@ def test_temporal_neighbor_sampler_homo_local_record_avoids_tensor_item(monkeypa
     assert torch.equal(record.graph.n_id, torch.tensor([0, 1, 2]))
     assert record.src_index == 1
     assert record.dst_index == 2
+
+
+def test_temporal_neighbor_sampler_preserves_record_level_ids_on_local_records():
+    graph = _graph()
+    sampler = TemporalNeighborSampler(num_neighbors=[-1])
+
+    record = sampler.sample(
+        TemporalEventRecord(
+            graph=graph,
+            src_index=1,
+            dst_index=2,
+            timestamp=3,
+            label=1,
+            sample_id="evt-3",
+            query_id="q-3",
+        )
+    )
+
+    assert record.sample_id == "evt-3"
+    assert record.query_id == "q-3"
+    assert record.metadata["sample_id"] == "evt-3"
+    assert record.metadata["query_id"] == "q-3"
+    assert record.metadata["edge_type"] == EDGE_TYPE
 
 
 def test_temporal_neighbor_sampler_homo_local_record_avoids_tensor_int(monkeypatch):
@@ -774,6 +825,63 @@ def test_stitched_homo_temporal_plan_execution_avoids_tensor_int(monkeypatch, tm
     assert sampled_record.dst_index == 1
     assert sampled_record.timestamp == 3
     assert sampled_record.label == 1
+
+
+def test_stitched_homo_temporal_plan_execution_with_max_events_matches_full_graph_sampler(tmp_path):
+    graph = Graph.temporal(
+        nodes={"node": {"x": torch.arange(6, dtype=torch.float32).view(6, 1)}},
+        edges={
+            EDGE_TYPE: {
+                "edge_index": torch.tensor([[0, 0, 0, 2, 1, 5, 5, 2], [2, 4, 1, 4, 0, 4, 5, 1]]),
+                "timestamp": torch.tensor([6, 6, 5, 7, 4, 0, 0, 5]),
+            }
+        },
+        time_attr="timestamp",
+    )
+    sampler = TemporalNeighborSampler(num_neighbors=[-1], strict_history=False, max_events=3)
+    direct_record = sampler.sample(
+        TemporalEventRecord(graph=graph, src_index=0, dst_index=2, timestamp=6, label=1)
+    )
+
+    write_partitioned_graph(graph, tmp_path, num_partitions=2)
+    shard = LocalGraphShard.from_partition_dir(tmp_path, partition_id=0)
+    coordinator = LocalSamplingCoordinator(
+        {
+            0: shard,
+            1: LocalGraphShard.from_partition_dir(tmp_path, partition_id=1),
+        }
+    )
+    stage = PlanStage(
+        "sample_temporal_neighbors",
+        params={
+            "sampler": sampler,
+                "record": TemporalEventRecord(
+                    graph=shard.graph,
+                    src_index=0,
+                    dst_index=2,
+                    timestamp=6,
+                    label=1,
+                    edge_type=EDGE_TYPE,
+                ),
+            },
+    )
+    context = MaterializationContext(
+        request=TemporalSeedRequest(
+            src_ids=torch.tensor([0]),
+            dst_ids=torch.tensor([2]),
+            timestamps=torch.tensor([6]),
+            edge_type=EDGE_TYPE,
+        ),
+        feature_store=coordinator,
+    )
+
+    sampled_context = PlanExecutor._sample_temporal_neighbors(stage, context)
+    stitched_record = sampled_context.state["record"]
+
+    assert torch.equal(stitched_record.graph.n_id, direct_record.graph.n_id)
+    assert torch.equal(stitched_record.graph.edges[EDGE_TYPE].data["e_id"], direct_record.graph.edges[EDGE_TYPE].data["e_id"])
+    assert torch.equal(stitched_record.graph.edges[EDGE_TYPE].timestamp, direct_record.graph.edges[EDGE_TYPE].timestamp)
+
 
 def test_temporal_neighbor_sampler_prefetch_option_materializes_features_into_record_graph():
     graph = Graph.temporal(
@@ -1507,6 +1615,96 @@ def test_temporal_neighbor_sampler_stitched_hetero_temporal_sampling_crosses_par
     assert torch.equal(batch.graph.edges[HETERO_EDGE_TYPE].e_id, torch.tensor([0, 1]))
     assert torch.equal(batch.graph.edges[HETERO_EDGE_TYPE].timestamp, torch.tensor([1, 3]))
     assert torch.equal(batch.graph.edges[HETERO_EDGE_TYPE].edge_weight, torch.tensor([10.0, 20.0]))
+
+
+def test_temporal_neighbor_sampler_supports_hetero_graph_without_x():
+    graph = Graph.temporal(
+        nodes={
+            "author": {"role": torch.tensor([1, 2])},
+            "paper": {"y": torch.tensor([0, 1, 0])},
+        },
+        edges={
+            HETERO_EDGE_TYPE: {
+                "edge_index": torch.tensor([[0, 1], [1, 2]]),
+                "timestamp": torch.tensor([1, 3]),
+            }
+        },
+        time_attr="timestamp",
+    )
+
+    record = TemporalNeighborSampler(num_neighbors=[-1]).sample(
+        TemporalEventRecord(graph=graph, src_index=0, dst_index=1, timestamp=2, label=1, edge_type=HETERO_EDGE_TYPE)
+    )
+
+    assert torch.equal(record.graph.nodes["author"].n_id, torch.tensor([0]))
+    assert torch.equal(record.graph.nodes["paper"].n_id, torch.tensor([1]))
+    assert torch.equal(record.graph.edges[HETERO_EDGE_TYPE].timestamp, torch.tensor([1]))
+    assert record.src_index == 0
+    assert record.dst_index == 0
+
+
+def test_stitched_hetero_temporal_plan_execution_with_float_timestamps_and_max_events_matches_full_graph_sampler(tmp_path):
+    graph = Graph.temporal(
+        nodes={
+            "author": {"x": torch.tensor([[10.0], [20.0]])},
+            "paper": {"x": torch.tensor([[1.0]])},
+        },
+        edges={
+            HETERO_EDGE_TYPE: {
+                "edge_index": torch.tensor([[0, 1], [0, 0]]),
+                "timestamp": torch.tensor([1.8, 1.2], dtype=torch.float32),
+            }
+        },
+        time_attr="timestamp",
+    )
+    sampler = TemporalNeighborSampler(num_neighbors=[-1], strict_history=False, max_events=1)
+    direct_record = sampler.sample(
+        TemporalEventRecord(
+            graph=graph,
+            src_index=0,
+            dst_index=0,
+            timestamp=2,
+            label=1,
+            edge_type=HETERO_EDGE_TYPE,
+        )
+    )
+
+    write_partitioned_graph(graph, tmp_path, num_partitions=2)
+    shards = {
+        0: LocalGraphShard.from_partition_dir(tmp_path, partition_id=0),
+        1: LocalGraphShard.from_partition_dir(tmp_path, partition_id=1),
+    }
+    coordinator = LocalSamplingCoordinator(shards)
+    stage = PlanStage(
+        "sample_temporal_neighbors",
+        params={
+            "sampler": sampler,
+            "record": TemporalEventRecord(
+                graph=shards[0].graph,
+                src_index=0,
+                dst_index=0,
+                timestamp=2,
+                label=1,
+                edge_type=HETERO_EDGE_TYPE,
+            ),
+        },
+    )
+    context = MaterializationContext(
+        request=TemporalSeedRequest(
+            src_ids=torch.tensor([0]),
+            dst_ids=torch.tensor([0]),
+            timestamps=torch.tensor([2]),
+            edge_type=HETERO_EDGE_TYPE,
+        ),
+        feature_store=coordinator,
+    )
+
+    stitched_record = PlanExecutor._sample_temporal_neighbors(stage, context).state["record"]
+
+    assert torch.equal(stitched_record.graph.nodes["author"].n_id, direct_record.graph.nodes["author"].n_id)
+    assert torch.equal(stitched_record.graph.nodes["paper"].n_id, direct_record.graph.nodes["paper"].n_id)
+    assert torch.equal(stitched_record.graph.edges[HETERO_EDGE_TYPE].data["e_id"], direct_record.graph.edges[HETERO_EDGE_TYPE].data["e_id"])
+    assert torch.equal(stitched_record.graph.edges[HETERO_EDGE_TYPE].timestamp, direct_record.graph.edges[HETERO_EDGE_TYPE].timestamp)
 
 
 def test_temporal_neighbor_sampler_stitched_hetero_temporal_materialization_avoids_tensor_item(

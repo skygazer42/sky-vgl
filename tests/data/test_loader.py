@@ -1,3 +1,5 @@
+from dataclasses import dataclass
+
 import pytest
 import torch
 
@@ -31,6 +33,11 @@ class IterableOnlyDataset:
 
     def __iter__(self):
         return iter(self._items)
+
+
+@dataclass(frozen=True)
+class FrozenBatch:
+    target: torch.Tensor
 
 
 def test_loader_returns_graph_batch_for_list_dataset():
@@ -173,6 +180,20 @@ def test_loader_can_pin_built_batch_tensors():
     batch = next(iter(loader))
 
     assert_tensor_pin_state(batch.graphs[0].x)
+
+
+def test_loader_rebuilds_frozen_dataclass_batches_when_pinning(monkeypatch):
+    loader = Loader(dataset=SequenceDataset([]), sampler=FullGraphSampler(), batch_size=1, pin_memory=True)
+    batch = FrozenBatch(target=torch.tensor([1.0], dtype=torch.float32))
+
+    monkeypatch.setattr("vgl.dataloading.loader.pin_tensor", lambda tensor: tensor + 1.0)
+
+    pinned = loader._pin_memory_value(batch)
+
+    assert isinstance(pinned, FrozenBatch)
+    assert pinned is not batch
+    assert torch.equal(pinned.target, torch.tensor([2.0], dtype=torch.float32))
+    assert torch.equal(batch.target, torch.tensor([1.0], dtype=torch.float32))
 
 
 class PlanBackedGraphSampler:

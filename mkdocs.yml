@@ -163,6 +163,8 @@ nav:
   - 示例:
     - examples/index.md
     - 卷积层速查: examples/conv-zoo.md
+    - 跨分区采样: examples/distributed-partition.md
+    - 框架互操作: examples/interop.md
   - 架构概览: architecture.md
   - 核心概念: core-concepts.md
   - 迁移指南: migration-guide.md

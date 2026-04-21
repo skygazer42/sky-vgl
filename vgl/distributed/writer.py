@@ -146,6 +146,14 @@ def write_partitioned_graph(graph: Graph, root, *, num_partitions: int) -> Parti
             }
             for node_type in shard_graph.nodes
         }
+        node_feature_dtypes = {
+            str(node_type): {
+                name: str(value.dtype).removeprefix("torch.")
+                for name, value in shard_graph.nodes[str(node_type)].data.items()
+                if isinstance(value, torch.Tensor)
+            }
+            for node_type in shard_graph.nodes
+        }
         edge_ids_by_type = {
             edge_type: _tensor_int_tuple(shard_graph.edges[edge_type].data["e_id"])
             for edge_type in shard_graph.edges
@@ -153,6 +161,14 @@ def write_partitioned_graph(graph: Graph, root, *, num_partitions: int) -> Parti
         edge_feature_shapes = {
             edge_type: {
                 name: tuple(int(dim) for dim in value.shape)
+                for name, value in shard_graph.edges[edge_type].data.items()
+                if name != "edge_index" and isinstance(value, torch.Tensor)
+            }
+            for edge_type in shard_graph.edges
+        }
+        edge_feature_dtypes = {
+            edge_type: {
+                name: str(value.dtype).removeprefix("torch.")
                 for name, value in shard_graph.edges[edge_type].data.items()
                 if name != "edge_index" and isinstance(value, torch.Tensor)
             }
@@ -179,7 +195,9 @@ def write_partitioned_graph(graph: Graph, root, *, num_partitions: int) -> Parti
                 path=filename,
                 metadata={
                     "node_feature_shapes": node_feature_shapes,
+                    "node_feature_dtypes": node_feature_dtypes,
                     "edge_feature_shapes": edge_feature_shapes,
+                    "edge_feature_dtypes": edge_feature_dtypes,
                     "edge_ids_by_type": edge_ids_by_type,
                     "boundary_edge_ids_by_type": boundary_edge_ids_by_type,
                 },

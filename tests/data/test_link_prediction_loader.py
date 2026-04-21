@@ -20,6 +20,13 @@ def _graph():
     )
 
 
+def _graph_without_x():
+    return Graph.homo(
+        edge_index=torch.tensor([[0, 1], [1, 2]]),
+        y=torch.tensor([0, 1, 0]),
+    )
+
+
 def test_loader_collates_link_prediction_records():
     graph = _graph()
     dataset = ListDataset(
@@ -143,6 +150,16 @@ def test_uniform_negative_link_sampler_avoids_tensor_tolist(monkeypatch):
     assert len(sampled) == 3
     assert sampled[0].label == 1
     assert all(int(current.dst_index) != 1 for current in sampled[1:])
+
+
+def test_uniform_negative_link_sampler_supports_homo_graph_without_x():
+    sampler = UniformNegativeLinkSampler(num_negatives=1)
+
+    sampled = sampler.sample(LinkPredictionRecord(graph=_graph_without_x(), src_index=0, dst_index=1, label=1))
+
+    assert len(sampled) == 2
+    assert sampled[0].label == 1
+    assert all(0 <= int(current.dst_index) < 3 for current in sampled)
 
 
 def test_uniform_negative_link_sampler_avoids_tensor_item(monkeypatch):
@@ -546,6 +563,18 @@ def test_hard_negative_link_sampler_avoids_torch_unique(monkeypatch):
     assert {(0, 3), (0, 4)}.issubset({(int(current.src_index), int(current.dst_index)) for current in sampled[1:]})
 
 
+def test_hard_negative_link_sampler_supports_homo_graph_without_x():
+    sampler = HardNegativeLinkSampler(num_negatives=1, num_hard_negatives=1)
+
+    sampled = sampler.sample(
+        LinkPredictionRecord(graph=_graph_without_x(), src_index=0, dst_index=1, label=1, hard_negative_dst=[2])
+    )
+
+    assert len(sampled) == 2
+    assert sampled[0].label == 1
+    assert sampled[1].dst_index == 2
+
+
 def test_hard_negative_link_sampler_can_skip_negative_seed_records_when_enabled():
     graph = Graph.homo(
         edge_index=torch.tensor([[0, 0, 1], [1, 2, 2]]),
@@ -616,6 +645,18 @@ def test_candidate_link_sampler_can_skip_negative_seed_records_in_loader():
     )
 
     assert list(iter(loader)) == []
+
+
+def test_candidate_link_sampler_supports_homo_graph_without_x():
+    sampler = CandidateLinkSampler()
+
+    sampled = sampler.sample(
+        LinkPredictionRecord(graph=_graph_without_x(), src_index=0, dst_index=1, label=1, candidate_dst=[2])
+    )
+
+    assert len(sampled) == 2
+    assert sampled[0].label == 1
+    assert sampled[1].dst_index == 2
 
 
 def test_link_neighbor_sampler_with_candidate_base_can_skip_negative_seed_records_in_loader():

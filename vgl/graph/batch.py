@@ -275,6 +275,60 @@ def _resolve_temporal_edge_type(record):
         raise ValueError("Temporal event prediction on heterogeneous graphs requires edge_type") from exc
 
 
+def _normalized_link_record_metadata(record):
+    metadata = dict(record.metadata)
+    sample_id = getattr(record, "sample_id", None)
+    if sample_id is not None:
+        metadata["sample_id"] = sample_id
+    query_id = _resolve_link_query_id(record)
+    if query_id is not None:
+        metadata["query_id"] = query_id
+    edge_type = _resolve_link_edge_type(record)
+    if edge_type is not None:
+        metadata["edge_type"] = edge_type
+    reverse_edge_type = _resolve_link_reverse_edge_type(record)
+    if reverse_edge_type is not None:
+        metadata["reverse_edge_type"] = reverse_edge_type
+    if getattr(record, "exclude_seed_edge", False) or bool(record.metadata.get("exclude_seed_edges", False)):
+        metadata["exclude_seed_edges"] = True
+    hard_negative_dst = getattr(record, "hard_negative_dst", None)
+    if hard_negative_dst is not None:
+        metadata["hard_negative_dst"] = hard_negative_dst
+    candidate_dst = getattr(record, "candidate_dst", None)
+    if candidate_dst is not None:
+        metadata["candidate_dst"] = candidate_dst
+    if bool(getattr(record, "filter_ranking", False) or record.metadata.get("filter_ranking", False)):
+        metadata["filter_ranking"] = True
+    return metadata
+
+
+def _normalized_temporal_record_metadata(record):
+    metadata = dict(record.metadata)
+    sample_id = getattr(record, "sample_id", None)
+    if sample_id is not None:
+        metadata["sample_id"] = sample_id
+    query_id = getattr(record, "query_id", None)
+    if query_id is None:
+        query_id = record.metadata.get("query_id")
+    if query_id is not None:
+        metadata["query_id"] = query_id
+    edge_type = _resolve_temporal_edge_type(record)
+    if edge_type is not None:
+        metadata["edge_type"] = edge_type
+    return metadata
+
+
+def _normalized_sample_metadata(sample):
+    metadata = dict(sample.metadata)
+    sample_id = getattr(sample, "sample_id", None)
+    if sample_id is not None:
+        metadata["sample_id"] = sample_id
+    source_graph_id = getattr(sample, "source_graph_id", None)
+    if source_graph_id is not None:
+        metadata["source_graph_id"] = source_graph_id
+    return metadata
+
+
 def _batch_homo_graphs(graphs, *, context):
     if len(graphs) == 1:
         return graphs[0], {id(graphs[0]): 0}
@@ -304,7 +358,7 @@ def _batch_homo_graphs(graphs, *, context):
     edge_data = {key: [] for key in edge_keys if key != "edge_index"}
     for graph in graphs:
         graph_offsets[id(graph)] = offset
-        num_nodes = int(graph.x.size(0))
+        num_nodes = graph._node_count("node")
         edge_index = graph.edge_index
         edge_count = int(edge_index.size(1))
         edge_indices.append(edge_index + offset)
@@ -495,7 +549,7 @@ class GraphBatch:
             raise ValueError("GraphBatch requires either all homogeneous or all heterogeneous graphs")
 
         if first_is_homo:
-            counts = [graph.x.size(0) for graph in graphs]
+            counts = [graph._node_count("node") for graph in graphs]
             graph_index, graph_ptr = _graph_membership_from_counts(counts)
             return cls(graphs=graphs, graph_index=graph_index, graph_ptr=graph_ptr)
 
@@ -531,7 +585,7 @@ class GraphBatch:
     ) -> "GraphBatch":
         graphs = [sample.graph for sample in samples]
         batch = cls.from_graphs(graphs)
-        batch.metadata = [sample.metadata for sample in samples]
+        batch.metadata = [_normalized_sample_metadata(sample) for sample in samples]
         if label_source is None:
             return batch
         if label_key is None:
@@ -646,7 +700,7 @@ class NodeBatch:
             seed_values = []
             for sample in samples:
                 sample_graph = sample.graph
-                num_nodes = int(sample_graph.x.size(0))
+                num_nodes = sample_graph._node_count("node")
                 seed_index = _require_int(sample.subgraph_seed, field_name="subgraph_seed")
                 if seed_index < 0 or seed_index >= num_nodes:
                     raise ValueError("NodeBatch subgraph_seed must fall within the sampled graph node range")
@@ -669,7 +723,7 @@ class NodeBatch:
         return cls(
             graph=graph,
             seed_index=torch.tensor(seed_values, dtype=torch.long),
-            metadata=[sample.metadata for sample in samples],
+            metadata=[_normalized_sample_metadata(sample) for sample in samples],
             blocks=_batch_blocks(samples, context="NodeBatch"),
         )
 
@@ -761,7 +815,7 @@ class LinkPredictionBatch:
                 raise ValueError("LinkPredictionBatch record edge_type must exist in the source graph")
             current_src_type, _, current_dst_type = current_edge_type
             if is_homo:
-                num_nodes = int(record_graph.x.size(0))
+                num_nodes = record_graph._node_count("node")
                 if src_index < 0 or src_index >= num_nodes or dst_index < 0 or dst_index >= num_nodes:
                     raise ValueError("LinkPredictionBatch indices must fall within the source graph node range")
                 offset = graph_offsets[id(record_graph)]
@@ -844,7 +898,7 @@ class LinkPredictionBatch:
             dst_node_type=dst_node_type,
             query_index=query_index,
             filter_mask=filter_mask,
-            metadata=[record.metadata for record in records],
+            metadata=[_normalized_link_record_metadata(record) for record in records],
             blocks=_batch_blocks(records, context="LinkPredictionBatch"),
         )
 
@@ -977,7 +1031,7 @@ class TemporalEventBatch:
                 raise ValueError("TemporalEventBatch record edge_type must exist in the source graph")
             current_src_type, _, current_dst_type = current_edge_type
             if is_homo:
-                num_nodes = int(record_graph.x.size(0))
+                num_nodes = record_graph._node_count("node")
                 if src_index < 0 or src_index >= num_nodes or dst_index < 0 or dst_index >= num_nodes:
                     raise ValueError("TemporalEventBatch indices must fall within the source graph node range")
                 offset = graph_offsets[id(record_graph)]
@@ -1010,7 +1064,7 @@ class TemporalEventBatch:
             edge_type=edge_type,
             src_node_type=src_node_type,
             dst_node_type=dst_node_type,
-            metadata=[record.metadata for record in records],
+            metadata=[_normalized_temporal_record_metadata(record) for record in records],
         )
 
     def history_graph(self, index: int):

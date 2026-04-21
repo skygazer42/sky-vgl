@@ -31,13 +31,7 @@ def _check(condition: bool, message: str) -> tuple[bool, str]:
 
 
 def _pyproject_urls(repo_root: Path) -> tuple[bool, str]:
-    try:
-        import tomllib  # type: ignore[attr-defined]
-    except ModuleNotFoundError:  # pragma: no cover - Python 3.10 fallback
-        import tomli as tomllib  # type: ignore[no-redef]
-
-    with (repo_root / "pyproject.toml").open("rb") as handle:
-        pyproject = tomllib.load(handle)
+    pyproject = repo_script_imports.load_toml_file(repo_root / "pyproject.toml")
     return _check(pyproject["project"]["urls"] == _contracts_module().PROJECT_URLS, "pyproject project.urls matches contracts")
 
 

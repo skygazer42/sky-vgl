@@ -62,6 +62,11 @@ hide:
 
 VGL 内置 60+ 种图卷积层，查看 [卷积层速查表](conv-zoo.md) 快速找到适合的算子。
 
+## 端到端示例
+
+- [跨分区采样](distributed-partition.md) — `write_partitioned_graph` → `load_partitioned_stores` → `StoreBackedSamplingCoordinator` → `DataLoader` 的完整路径。
+- [框架互操作](interop.md) — DGL / PyG / NetworkX / `torch.sparse` / CSV 的最小往返代码。
+
 ## 示例代码目录
 
 项目仓库中的 `examples/` 目录按图类型组织：

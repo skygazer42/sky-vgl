@@ -1,9 +1,12 @@
 from __future__ import annotations
 
+import hashlib
 import pickle
+import re
+import shutil
 import urllib.request
 import zipfile
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 
 import torch
 
@@ -17,6 +20,34 @@ _PLANETOID_DATASET_NAMES = {
     "cora": "Cora",
     "citeseer": "Citeseer",
     "pubmed": "PubMed",
+}
+
+_PLANETOID_SOURCE_COMMIT = "af6abf468a772cc055bec88c52e4d6f51b7c37e3"
+_PLANETOID_RAW_SHA256 = {
+    "ind.cora.x": "23cfa55d91c6f624233f5eb7b6e3f141f1bd2b2ae39608a63cf5d084bb27baab",
+    "ind.cora.tx": "b9afbaa4a400df991f6f02ef677e1e44da55ffc04801fd02f9e673987829226a",
+    "ind.cora.allx": "9419ba2f26f5c35243db64aba110e0f35a04851609e0dc5433450676ca6b8543",
+    "ind.cora.y": "94465c14eb53e04ca262198dcbb2521ee8af60fb3f3d546cd6ca24a511b0e7d1",
+    "ind.cora.ty": "41f5ac76596a1699cc33f53084a2419e92961c42bb75f36fc38e616d348532ad",
+    "ind.cora.ally": "2b998f5cc7fedc86e7f97ca2498f47a1ffc1462c29e2d578b23bf3f62b6e7d71",
+    "ind.cora.graph": "58f13302f39dde8852dad6fe6d15b89b077b6d7f837626bce671ef80344b383d",
+    "ind.cora.test.index": "297ce89af2b51a6a194181c7dbe1796c6a1cf9cd9349a88383b1b1e227867875",
+    "ind.citeseer.x": "d20de19150741e555de0ed037195630fc194114ebc7fd72ced62810148aa22f6",
+    "ind.citeseer.tx": "539a8906a2da97628d212f2fdd668c109a8b3f0d36574b59e5d3fd5b5303da21",
+    "ind.citeseer.allx": "2ac30345d95c9ec933a817ee0bdd6a5f077f8c184a20e696910192d534414668",
+    "ind.citeseer.y": "8ba87e515d8e3ee3cf52f6d2c5b86aa73f11ecad825a808455209ec26cd54924",
+    "ind.citeseer.ty": "55e5bd1ba1e733a04598753ad1a8d57957f4b8f89e74519f41f4f4938767e4ce",
+    "ind.citeseer.ally": "f704b2d986dde6c2669934de1f3ae5696a6cf9455c0f6b2646a2d135ea0a1c95",
+    "ind.citeseer.graph": "d79a4ef9d3e7169aee8946145f6b7306e35bc79bffad26346cfb94e10e9912a7",
+    "ind.citeseer.test.index": "2af990671580b6b2df5d158d1038f8292e30c9cd821b5453f399659b25b723d4",
+    "ind.pubmed.x": "fbe9cb5c47200d1b7769a26e579be3b7130b556831f9d850e77c4c74f2599b33",
+    "ind.pubmed.tx": "4eb5f5d0f30f26497eb0ac6ac9719d09c67e284f1ed0385c93f3ef27a671da3d",
+    "ind.pubmed.allx": "508e538e2abdccdd54c4d3e9f49d638b4af7107d85845f66ddea5a5152658b7e",
+    "ind.pubmed.y": "e6c807633307a07ed659249006536a147c7999c797f11a2560752990181b41b3",
+    "ind.pubmed.ty": "ee2e0d4819d9fbcc403689c3bf2e49face401b605932f093bc58ab6461130fdd",
+    "ind.pubmed.ally": "0c37bbe3b5014ec365e9d393cf4791925e5ed94fb194305d74f064a8d7b50f0e",
+    "ind.pubmed.graph": "5b89f0036ca22909471f1e6558eb42fa06e0c730a577bde5b058b40638f81dc9",
+    "ind.pubmed.test.index": "b101d421688bbaecbd82e8a18f1e282378d6830f3a37666f28ebc47f844341b5",
 }
 
 _COMMON_TU_DATASET_NAMES = (
@@ -34,6 +65,8 @@ _COMMON_TU_DATASET_NAMES = (
     "REDDIT-MULTI-5K",
 )
 
+_TU_DATASET_NAME_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_-]*$")
+
 
 def _dense_tensor(value) -> torch.Tensor:
     if isinstance(value, torch.Tensor):
@@ -41,6 +74,22 @@ def _dense_tensor(value) -> torch.Tensor:
     if hasattr(value, "toarray"):
         value = value.toarray()
     return torch.as_tensor(value)
+
+
+def _sha256_digest(path: Path) -> str:
+    digest = hashlib.sha256()
+    with path.open("rb") as handle:
+        for chunk in iter(lambda: handle.read(1024 * 1024), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
+def _download_verified_file(url: str, destination: Path, *, expected_sha256: str) -> None:
+    urllib.request.urlretrieve(url, destination)
+    digest = _sha256_digest(destination)
+    if digest != expected_sha256:
+        destination.unlink(missing_ok=True)
+        raise ValueError(f"checksum mismatch for {destination.name}")
 
 
 def _read_pickle(path: Path):
@@ -69,6 +118,28 @@ def _one_hot_labels(labels: torch.Tensor) -> torch.Tensor:
     return labels.argmax(dim=-1).to(dtype=torch.long)
 
 
+def _safe_zip_destination(root: Path, member_name: str) -> Path:
+    normalized = PurePosixPath(member_name.replace("\\", "/"))
+    if normalized.is_absolute() or any(part == ".." for part in normalized.parts):
+        raise ValueError(f"unsafe archive member {member_name!r}")
+    relative_parts = [part for part in normalized.parts if part not in {"", "."}]
+    destination = (root.resolve() / Path(*relative_parts)).resolve()
+    destination.relative_to(root.resolve())
+    return destination
+
+
+def _extract_zip_safely(archive: zipfile.ZipFile, destination_dir: Path) -> None:
+    destination_dir.mkdir(parents=True, exist_ok=True)
+    for member in archive.infolist():
+        destination = _safe_zip_destination(destination_dir, member.filename)
+        if member.is_dir():
+            destination.mkdir(parents=True, exist_ok=True)
+            continue
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        with archive.open(member) as source, destination.open("wb") as target:
+            shutil.copyfileobj(source, target)
+
+
 class CachedGraphDataset(ListDataset):
     name = "dataset"
     version = "1.0"
@@ -95,7 +166,10 @@ class CachedGraphDataset(ListDataset):
                 if not download:
                     raise FileNotFoundError(f"{self.__class__.__name__} requires raw files under {self.raw_dir}")
                 self.download()
+            self.validate_raw()
             self.process()
+        else:
+            self.validate_processed_cache()
 
         dataset = OnDiskGraphDataset(self.processed_dir)
         graphs = [dataset[index] for index in range(len(dataset))]
@@ -112,6 +186,12 @@ class CachedGraphDataset(ListDataset):
 
     def has_processed(self) -> bool:
         return (self.processed_dir / "manifest.json").exists()
+
+    def validate_raw(self) -> None:
+        return None
+
+    def validate_processed_cache(self) -> None:
+        return None
 
     def download(self) -> None:
         missing = []
@@ -211,13 +291,50 @@ class PlanetoidDataset(CachedGraphDataset):
             f"{prefix}.test.index",
         )
         self.raw_urls = {
-            filename: f"https://github.com/kimiyoung/planetoid/raw/master/data/{filename}"
+            filename: f"https://raw.githubusercontent.com/kimiyoung/planetoid/{_PLANETOID_SOURCE_COMMIT}/data/{filename}"
             for filename in self.raw_file_names
         }
         super().__init__(root, transform=transform, download=download, force_reload=force_reload)
 
     def dataset_dirname(self) -> str:
         return f"planetoid/{self.name}"
+
+    def _validate_raw_cache(self) -> None:
+        missing = []
+        for filename in self.raw_file_names:
+            raw_path = self.raw_dir / filename
+            expected_sha256 = _PLANETOID_RAW_SHA256.get(filename)
+            if not raw_path.exists() or expected_sha256 is None:
+                missing.append(filename)
+                continue
+            if _sha256_digest(raw_path) != expected_sha256:
+                raise ValueError(f"checksum mismatch for {filename}")
+        if missing:
+            joined = ", ".join(sorted(missing))
+            raise FileNotFoundError(f"missing raw files for {self.name}: {joined}")
+
+    def validate_raw(self) -> None:
+        self._validate_raw_cache()
+
+    def validate_processed_cache(self) -> None:
+        self._validate_raw_cache()
+
+    def download(self) -> None:
+        missing = []
+        for filename in self.raw_file_names:
+            destination = self.raw_dir / filename
+            if destination.exists():
+                continue
+            url = self.raw_urls.get(filename)
+            expected_sha256 = _PLANETOID_RAW_SHA256.get(filename)
+            if url is None or expected_sha256 is None:
+                missing.append(filename)
+                continue
+            destination.parent.mkdir(parents=True, exist_ok=True)
+            _download_verified_file(url, destination, expected_sha256=expected_sha256)
+        if missing:
+            joined = ", ".join(sorted(missing))
+            raise FileNotFoundError(f"missing raw files for {self.name}: {joined}")
 
     def build_manifest(self, graphs: list[Graph]) -> DatasetManifest:
         return DatasetManifest(
@@ -290,6 +407,8 @@ class TUDataset(CachedGraphDataset):
         normalized_name = str(name).strip()
         if not normalized_name:
             raise ValueError("TUDataset requires a non-empty dataset name")
+        if _TU_DATASET_NAME_RE.fullmatch(normalized_name) is None:
+            raise ValueError(f"invalid TUDataset dataset name: {name!r}")
         self.dataset_name = normalized_name.upper()
         self.name = self.dataset_name.lower()
         self.raw_file_names = (
@@ -314,13 +433,17 @@ class TUDataset(CachedGraphDataset):
         if not archive_path.exists():
             urllib.request.urlretrieve(self.raw_urls["__archive__"], archive_path)
         with zipfile.ZipFile(archive_path) as archive:
-            archive.extractall(self.raw_dir)
+            _extract_zip_safely(archive, self.raw_dir)
         nested_dir = self.raw_dir / self.dataset_name
         if nested_dir.is_dir():
             for path in nested_dir.iterdir():
                 target = self.raw_dir / path.name
                 if not target.exists():
                     path.replace(target)
+        missing = [filename for filename in self.raw_file_names if not (self.raw_dir / filename).exists()]
+        if missing:
+            joined = ", ".join(sorted(missing))
+            raise FileNotFoundError(f"missing raw files for {self.name}: {joined}")
 
     def build_manifest(self, graphs: list[Graph]) -> DatasetManifest:
         return DatasetManifest(

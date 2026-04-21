@@ -12,8 +12,17 @@ def import_optional(
 ):
     try:
         return importlib.import_module(module_name)
-    except Exception as exc:
+    except ModuleNotFoundError as exc:
+        expected_names = {
+            module_name,
+            module_name.split(".")[0],
+        }
         install_name = package_name or module_name
+        expected_names.add(install_name)
+        expected_names.add(install_name.replace("-", "_"))
+        missing_name = getattr(exc, "name", None)
+        if missing_name is not None and missing_name not in expected_names:
+            raise
         raise ImportError(
             f"{feature_name} requires the optional {install_name!r} dependency. "
             f'Install it with `pip install "{_DIST_NAME}[{extra_name}]"`.'

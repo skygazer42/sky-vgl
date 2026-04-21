@@ -58,7 +58,6 @@ def test_import_vgl_does_not_require_numpy():
 def test_legacy_namespace_imports_do_not_repeat_after_reload():
     expectations = {
         "vgl.core": "vgl.core is a legacy compatibility namespace; prefer `vgl.graph` for graph containers and related errors.",
-        "vgl.data": "vgl.data is a legacy compatibility namespace; prefer `vgl.dataloading` for loaders, samplers, plans, and materialization helpers; dataset and catalog APIs remain under `vgl.data`.",
         "vgl.train": "vgl.train is a legacy compatibility namespace; prefer `vgl.engine`, `vgl.tasks`, and `vgl.metrics`.",
     }
 
@@ -113,6 +112,59 @@ def test_import_vgl_root_does_not_emit_legacy_namespace_warnings():
 
     assert completed.returncode == 0, completed.stderr
     assert completed.stdout.strip() == "0"
+
+
+def test_import_vgl_data_does_not_emit_legacy_warning_on_first_import():
+    script = textwrap.dedent(
+        """
+        import warnings
+
+        with warnings.catch_warnings(record=True) as captured:
+            warnings.simplefilter("always", FutureWarning)
+            import vgl.data
+            legacy_messages = [
+                str(warning.message)
+                for warning in captured
+                if str(warning.message).startswith("vgl.data")
+            ]
+            print(len(legacy_messages))
+            for message in legacy_messages:
+                print(message)
+        """
+    )
+
+    completed = _run_python_script(script)
+
+    assert completed.returncode == 0, completed.stderr
+    lines = [line for line in completed.stdout.splitlines() if line]
+    assert lines == ["0"]
+
+
+def test_import_vgl_then_vgl_data_does_not_emit_legacy_warning():
+    script = textwrap.dedent(
+        """
+        import warnings
+
+        with warnings.catch_warnings(record=True) as captured:
+            warnings.simplefilter("always", FutureWarning)
+            import vgl
+            import vgl.data
+            legacy_messages = [
+                str(warning.message)
+                for warning in captured
+                if str(warning.message).startswith("vgl.data")
+            ]
+            print(len(legacy_messages))
+            for message in legacy_messages:
+                print(message)
+        """
+    )
+
+    completed = _run_python_script(script)
+
+    assert completed.returncode == 0, completed.stderr
+    lines = [line for line in completed.stdout.splitlines() if line]
+    assert lines == ["0"]
 
 
 def test_edge_store_pin_memory_gracefully_skips_when_driver_is_unavailable(monkeypatch):

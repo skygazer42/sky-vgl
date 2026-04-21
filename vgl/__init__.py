@@ -8,10 +8,10 @@ from vgl.tasks import GraphClassificationTask as GraphClassificationTask
 from vgl.tasks import LinkPredictionTask as LinkPredictionTask
 from vgl.tasks import TemporalEventPredictionTask as TemporalEventPredictionTask
 from vgl.version import __version__ as __version__
-from vgl.data import DatasetRegistry as DatasetRegistry
-from vgl.data import KarateClubDataset as KarateClubDataset
-from vgl.data import PlanetoidDataset as PlanetoidDataset
-from vgl.data import TUDataset as TUDataset
+from vgl.data.public import DatasetRegistry as DatasetRegistry
+from vgl.data.public import KarateClubDataset as KarateClubDataset
+from vgl.data.public import PlanetoidDataset as PlanetoidDataset
+from vgl.data.public import TUDataset as TUDataset
 from vgl.nn import AGNNConv as AGNNConv
 from vgl.nn import APPNPConv as APPNPConv
 from vgl.nn import ARMAConv as ARMAConv
@@ -36,8 +36,8 @@ from vgl.tasks import ConfidencePenaltyTask as ConfidencePenaltyTask
 from vgl.engine import ConsoleLogger as ConsoleLogger
 from vgl.nn import DAGNNConv as DAGNNConv
 from vgl.nn import DNAConv as DNAConv
-from vgl.data import DatasetManifest as DatasetManifest
-from vgl.data import DatasetSplit as DatasetSplit
+from vgl.data.catalog import DatasetManifest as DatasetManifest
+from vgl.data.catalog import DatasetSplit as DatasetSplit
 from vgl.engine import DeferredReweighting as DeferredReweighting
 from vgl.nn import DirGNNConv as DirGNNConv
 from vgl.nn import ECConv as ECConv
@@ -124,7 +124,7 @@ from vgl.dataloading import Node2VecWalkSampler as Node2VecWalkSampler
 from vgl.graph import NodeBatch as NodeBatch
 from vgl.dataloading import NodeNeighborSampler as NodeNeighborSampler
 from vgl.dataloading import NodeSeedSubgraphSampler as NodeSeedSubgraphSampler
-from vgl.data import OnDiskGraphDataset as OnDiskGraphDataset
+from vgl.data.ondisk import OnDiskGraphDataset as OnDiskGraphDataset
 from vgl.nn import PDNConv as PDNConv
 from vgl.nn import PNAConv as PNAConv
 from vgl.nn import PointNetConv as PointNetConv

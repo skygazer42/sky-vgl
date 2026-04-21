@@ -22,6 +22,23 @@ def test_graph_batch_tracks_membership():
     assert batch.graph_index.shape[0] == 4
 
 
+def test_graph_batch_tracks_membership_without_x():
+    g1 = Graph.homo(
+        edge_index=torch.tensor([[0], [1]]),
+        y=torch.tensor([0, 1]),
+    )
+    g2 = Graph.homo(
+        edge_index=torch.tensor([[0], [1]]),
+        y=torch.tensor([1, 0]),
+    )
+
+    batch = GraphBatch.from_graphs([g1, g2])
+
+    assert batch.num_graphs == 2
+    assert torch.equal(batch.graph_index, torch.tensor([0, 0, 1, 1]))
+    assert torch.equal(batch.graph_ptr, torch.tensor([0, 2, 4]))
+
+
 def test_graph_batch_tracks_membership_without_tensor_tolist(monkeypatch):
     g1 = Graph.homo(
         edge_index=torch.tensor([[0], [1]]),

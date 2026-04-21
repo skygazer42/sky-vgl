@@ -94,6 +94,26 @@ from vgl.engine import CHECKPOINT_FORMAT, CHECKPOINT_FORMAT_VERSION
       show_root_heading: true
       show_source: false
 
+### 恢复契约
+
+`restore_checkpoint` 在把磁盘 payload 映射回 `Trainer` / `TrainingHistory` 时会执行一轮严格的规范化与一致性校验:
+
+- `model_state_dict` 必须是映射类型,缺失或错型直接报错,不隐式跳过。
+- `trainer_state` 与 `history` 的 `completed_epochs`、`global_step`、`best_epoch`、`best_metric`、`active_monitor`、`stop_reason` 之间的关系会逐字段交叉校验;不自洽的 payload 拒绝加载,避免恢复出"半完成"训练。
+- 若历史中包含 `final_train`/`final_val` 摘要,它们必须与最后一段 summary 完全一致;被监控(`val_monitor`)的运行还要求 val 历史完整。
+- 返回的 `resume_state` 与 checkpoint payload 彼此独立(已 detach),修改一方不会污染另一方。
+
+在 `Trainer` 级别直接传 `checkpoint=path` 或 `trainer.resume(path)` 会透明地使用该契约。
+
+## Evaluator
+
+离线评估入口,独立于 `Trainer`;接收模型和 `DataLoader`,复用与训练期相同的 metric 聚合路径,便于固定权重后跑完整 val/test。
+
+::: vgl.engine.Evaluator
+    options:
+      show_root_heading: true
+      show_source: false
+
 ## 高级优化器
 
 ::: vgl.engine.SAM

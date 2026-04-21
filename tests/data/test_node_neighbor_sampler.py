@@ -11,6 +11,13 @@ from vgl.distributed.coordinator import StoreBackedSamplingCoordinator
 from vgl.storage import FeatureStore, InMemoryTensorStore
 
 
+def _graph_without_x():
+    return Graph.homo(
+        edge_index=torch.tensor([[0, 1, 3], [1, 2, 1]]),
+        y=torch.tensor([0, 1, 0, 1]),
+    )
+
+
 def test_node_neighbor_sampler_extracts_local_subgraph_and_seed_index():
     graph = Graph.homo(
         edge_index=torch.tensor([[0, 1, 3], [1, 2, 1]]),
@@ -25,6 +32,18 @@ def test_node_neighbor_sampler_extracts_local_subgraph_and_seed_index():
     assert sample.subgraph_seed == 1
     assert torch.equal(sample.graph.n_id, torch.tensor([0, 1, 2, 3]))
     assert torch.equal(sample.graph.edge_index, torch.tensor([[0, 1, 3], [1, 2, 1]]))
+
+
+def test_node_neighbor_sampler_supports_homo_graph_without_x():
+    sampler = NodeNeighborSampler(num_neighbors=[-1])
+
+    sample = sampler.sample((_graph_without_x(), {"seed": 1, "sample_id": "n1"}))
+
+    assert sample.sample_id == "n1"
+    assert sample.subgraph_seed == 1
+    assert torch.equal(sample.graph.n_id, torch.tensor([0, 1, 2, 3]))
+    assert torch.equal(sample.graph.edge_index, torch.tensor([[0, 1, 3], [1, 2, 1]]))
+    assert torch.equal(sample.graph.y, torch.tensor([0, 1, 0, 1]))
 
 
 def test_loader_builds_node_batch_from_node_neighbor_samples():

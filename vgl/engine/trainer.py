@@ -379,23 +379,21 @@ class Trainer:
             return tuple(self._move_batch_to_device(item) for item in batch)
         if isinstance(batch, self._SUPPORTED_VGL_TRANSFER_TYPES):
             return self._move_vgl_batch_to_device(batch)
+        if is_dataclass(batch):
+            return self._move_vgl_batch_to_device(batch)
         if batch is None or isinstance(batch, (str, bytes, int, float, bool)):
             return batch
         raise TypeError(f"Unsupported batch type for automatic device transfer: {type(batch)!r}")
 
     def _move_vgl_batch_to_device(self, batch):
+        if is_dataclass(batch):
+            return self._move_dataclass_value_to_device(batch)
         if hasattr(batch, "to") and callable(batch.to):
             non_blocking = self._resolved_non_blocking(batch)
             try:
                 return batch.to(self.device, non_blocking=non_blocking)
             except TypeError:
                 return batch.to(self.device)
-        if is_dataclass(batch):
-            values = {
-                field.name: self._move_vgl_value_to_device(getattr(batch, field.name))
-                for field in fields(batch)
-            }
-            return type(batch)(**values)
         raise TypeError(f"VGL batch type does not support device transfer: {type(batch)!r}")
 
     def _move_vgl_value_to_device(self, value):
@@ -410,12 +408,25 @@ class Trainer:
         if isinstance(value, self._SUPPORTED_VGL_TRANSFER_TYPES):
             return self._move_vgl_batch_to_device(value)
         if is_dataclass(value):
-            values = {
-                field.name: self._move_vgl_value_to_device(getattr(value, field.name))
-                for field in fields(value)
-            }
-            return type(value)(**values)
+            return self._move_dataclass_value_to_device(value)
         return value
+
+    def _move_dataclass_value_to_device(self, value):
+        field_values = {
+            field.name: self._move_vgl_value_to_device(getattr(value, field.name))
+            for field in fields(value)
+        }
+        init_values = {
+            field.name: field_values[field.name]
+            for field in fields(value)
+            if field.init
+        }
+        rebuilt = type(value)(**init_values)
+        for field in fields(value):
+            if field.init:
+                continue
+            object.__setattr__(rebuilt, field.name, field_values[field.name])
+        return rebuilt
 
     def _prepare_batch(self, batch):
         if self.device is None:

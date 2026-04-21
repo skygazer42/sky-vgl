@@ -1,8 +1,12 @@
+import json
+from pathlib import Path
+
 import pytest
 import torch
 
 from vgl import Graph
 import vgl.distributed.shard as distributed_shard_module
+import vgl.distributed.store as distributed_store_module
 from vgl.distributed.shard import LocalGraphShard
 from vgl.distributed.writer import write_partitioned_graph
 
@@ -71,6 +75,67 @@ def test_local_graph_shard_from_partition_dir_rejects_unknown_partition_id(tmp_p
 
     with pytest.raises(KeyError, match="unknown partition_id: 9"):
         LocalGraphShard.from_partition_dir(tmp_path, partition_id=9)
+
+
+def test_local_graph_shard_rejects_parent_escaping_partition_payload_path_before_load(tmp_path, monkeypatch):
+    graph = Graph.homo(
+        edge_index=torch.tensor([[0, 1, 2, 3], [1, 2, 3, 0]]),
+        x=torch.arange(8, dtype=torch.float32).view(4, 2),
+    )
+    write_partitioned_graph(graph, tmp_path, num_partitions=2)
+    manifest_path = tmp_path / "manifest.json"
+    payload = json.loads(manifest_path.read_text())
+    payload["partitions"][0]["path"] = "../escape.pt"
+    manifest_path.write_text(json.dumps(payload))
+
+    def fail_load(*args, **kwargs):
+        raise AssertionError("torch.load should not be reached for escaped partition payload paths")
+
+    monkeypatch.setattr(distributed_store_module.torch, "load", fail_load)
+
+    shard = LocalGraphShard.from_partition_dir(tmp_path, partition_id=0)
+
+    with pytest.raises(ValueError, match="partition payload path"):
+        shard.feature_store.fetch(("node", "node", "x"), torch.tensor([0]))
+
+
+def test_local_graph_shard_rejects_absolute_partition_payload_path_before_load(tmp_path, monkeypatch):
+    graph = Graph.homo(
+        edge_index=torch.tensor([[0, 1, 2, 3], [1, 2, 3, 0]]),
+        x=torch.arange(8, dtype=torch.float32).view(4, 2),
+    )
+    write_partitioned_graph(graph, tmp_path, num_partitions=2)
+    manifest_path = tmp_path / "manifest.json"
+    payload = json.loads(manifest_path.read_text())
+    payload["partitions"][0]["path"] = str((tmp_path / "part-0.pt").resolve())
+    manifest_path.write_text(json.dumps(payload))
+
+    def fail_load(*args, **kwargs):
+        raise AssertionError("torch.load should not be reached for absolute partition payload paths")
+
+    monkeypatch.setattr(distributed_store_module.torch, "load", fail_load)
+
+    shard = LocalGraphShard.from_partition_dir(tmp_path, partition_id=0)
+
+    with pytest.raises(ValueError, match="partition payload path"):
+        shard.feature_store.fetch(("node", "node", "x"), torch.tensor([0]))
+
+
+def test_local_graph_shard_normalizes_partition_payload_path_within_root(tmp_path):
+    graph = Graph.homo(
+        edge_index=torch.tensor([[0, 1, 2, 3], [1, 2, 3, 0]]),
+        x=torch.arange(8, dtype=torch.float32).view(4, 2),
+    )
+    write_partitioned_graph(graph, tmp_path, num_partitions=2)
+    manifest_path = tmp_path / "manifest.json"
+    payload = json.loads(manifest_path.read_text())
+    payload["partitions"][0]["path"] = str(Path("nested") / ".." / "part-0.pt")
+    manifest_path.write_text(json.dumps(payload))
+
+    shard = LocalGraphShard.from_partition_dir(tmp_path, partition_id=0)
+    fetched = shard.feature_store.fetch(("node", "node", "x"), torch.tensor([0, 1])).values
+
+    assert torch.equal(fetched, torch.tensor([[0.0, 1.0], [2.0, 3.0]]))
 
 
 def test_local_graph_shard_from_partition_dir_is_lazy_until_data_access(monkeypatch, tmp_path):

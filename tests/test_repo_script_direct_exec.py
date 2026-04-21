@@ -113,11 +113,57 @@ def test_docs_link_scan_lists_tasks_outside_repo_root(tmp_path):
 
 
 def test_dependency_audit_prints_requirements_outside_repo_root(tmp_path):
-    completed = _run_script_outside_repo(tmp_path, "scripts/dependency_audit.py", "--print-requirements")
+    completed = _run_script_outside_repo(
+        tmp_path,
+        "scripts/dependency_audit.py",
+        "--print-requirements",
+        "--groups",
+        "runtime",
+        "full",
+    )
+
+    assert completed.returncode == 0, completed.stderr
+    lines = completed.stdout.splitlines()
+    assert "torch>=2.4" in lines
+    assert "typing_extensions>=4.12" in lines
+    assert "numpy>=1.26" in lines
+    assert "scipy>=1.11" in lines
+    assert "networkx>=3.2" in lines
+    assert "tensorboard>=2.14" in lines
+    assert "dgl>=1.1.3,<2" in lines
+    assert "torch-geometric>=2.5" in lines
+
+
+def test_dependency_audit_can_parse_pyproject_without_tomli_modules(tmp_path):
+    bootstrap = textwrap.dedent(
+        f"""
+        import importlib.abc
+        import runpy
+        import sys
+
+        class _TomlBlocker(importlib.abc.MetaPathFinder):
+            def find_spec(self, fullname, path=None, target=None):
+                if fullname in {{"tomli", "tomllib"}}:
+                    raise ModuleNotFoundError(f"blocked import: {{fullname}}")
+                return None
+
+        sys.meta_path.insert(0, _TomlBlocker())
+        sys.path.insert(0, {str(REPO_ROOT)!r})
+        script = sys.argv[1]
+        sys.argv = [script, "--print-requirements", "--groups", "runtime"]
+        runpy.run_path(script, run_name="__main__")
+        """
+    ).strip()
+
+    completed = subprocess.run(
+        [sys.executable, "-c", bootstrap, str(REPO_ROOT / "scripts" / "dependency_audit.py")],
+        cwd=tmp_path,
+        capture_output=True,
+        text=True,
+    )
 
     assert completed.returncode == 0, completed.stderr
     assert "torch>=2.4" in completed.stdout.splitlines()
-    assert "typing_extensions>=4.12" in completed.stdout.splitlines()
 
 
 def test_extras_smoke_lists_defaults_outside_repo_root(tmp_path):

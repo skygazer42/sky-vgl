@@ -1,3 +1,5 @@
+from dataclasses import dataclass, field
+
 import pytest
 import torch
 from torch import nn
@@ -97,6 +99,15 @@ class UnsupportedBatch:
     def to(self, *args, **kwargs):
         del args, kwargs
         return self
+
+
+@dataclass(slots=True)
+class InitFalseBatch:
+    target: torch.Tensor
+    moved_target: torch.Tensor = field(init=False)
+
+    def __post_init__(self):
+        self.moved_target = self.target
 
 
 def _node_batch():
@@ -206,3 +217,21 @@ def test_trainer_rejects_unsupported_batch_type_when_auto_move_enabled():
 
     with pytest.raises(TypeError, match="Unsupported batch type"):
         trainer.fit([UnsupportedBatch()])
+
+
+def test_trainer_moves_dataclass_batches_with_init_false_fields():
+    trainer = Trainer(
+        model=AttrBatchModel(),
+        task=AttrBatchTask(),
+        optimizer=torch.optim.SGD,
+        lr=1.0,
+        max_epochs=1,
+        device="cpu",
+    )
+
+    moved = trainer._move_batch_to_device(InitFalseBatch(torch.tensor([1.0], dtype=torch.float32)))
+
+    assert isinstance(moved, InitFalseBatch)
+    assert moved.target.device.type == "cpu"
+    assert moved.moved_target.device.type == "cpu"
+    assert torch.equal(moved.target, moved.moved_target)

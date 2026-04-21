@@ -577,7 +577,22 @@ class PartitionedGraphStore:
 def _partition_payload(root, partition: PartitionShard) -> dict:
     if partition.path is None:
         raise ValueError(f"partition {partition.partition_id} does not declare a payload path")
-    return torch.load(Path(root) / partition.path, weights_only=True)
+    root_path = Path(root).resolve()
+    payload_path = Path(partition.path)
+    if payload_path.is_absolute():
+        raise ValueError(
+            f"partition payload path must stay within {root_path}: {partition.path!r}"
+        )
+
+    resolved_payload_path = (root_path / payload_path).resolve(strict=False)
+    try:
+        resolved_payload_path.relative_to(root_path)
+    except ValueError as exc:
+        raise ValueError(
+            f"partition payload path must stay within {root_path}: {partition.path!r}"
+        ) from exc
+
+    return torch.load(resolved_payload_path, weights_only=True)
 
 
 def _node_ids_by_type(payload: dict, partition: PartitionShard) -> dict[str, torch.Tensor]:

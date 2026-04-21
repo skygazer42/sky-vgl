@@ -5,13 +5,27 @@
 The preferred import layout is now domain-based:
 
 - `vgl.graph` for `Graph`, `GraphBatch`, `GraphView`, and `GraphSchema`
-- `vgl.dataloading` for `DataLoader`, datasets, samplers, and sample records
+- `vgl.dataloading` for `DataLoader`, samplers, plans, and sample records
 - `vgl.tasks` for task definitions
 - `vgl.engine` for `Trainer`, callbacks, checkpoints, and `TrainingHistory`
 - `vgl.metrics` for metric implementations and `build_metric`
 - `vgl.transforms` for graph transforms
 
-The older `vgl.core`, `vgl.data`, and `vgl.train` modules still work as compatibility layers, but new code should avoid them.
+`vgl.data` remains the public namespace for built-in datasets, dataset manifests, and on-disk dataset access.
+
+The older `vgl.core`, `vgl.train`, and the legacy loader/sampler-style `vgl.data.*` module paths still work as compatibility layers, but new code should avoid those compatibility paths.
+
+!!! warning "Compatibility notices"
+    Importing from `vgl.core` 或 `vgl.train` 会在运行时触发一次 `FutureWarning`(由 `vgl._compat.warn_legacy_namespace` 发出),提示迁移到规范路径:
+
+    - `vgl.core.*` → `vgl.graph.*`(`Graph` / `GraphBatch` / `GraphView` / `GraphSchema` / `Block` / `NodeStore` / `EdgeStore` / `GNNError` / `SchemaError`)
+    - `vgl.train.Trainer` / `Callback` / `Logger` / `EarlyStopping` / `ModelCheckpoint` / `save_checkpoint` / `restore_checkpoint` / 各 `*Scheduler` / `SAM`/`ASAM`/`GSAM`/`Lookahead`/`EMA`/`SWA` → `vgl.engine.*`
+    - `vgl.train.tasks.*` → `vgl.tasks.*`
+    - `vgl.train.metrics.build_metric` → `vgl.metrics.build_metric`
+    - `vgl.train.history.TrainingHistory` → `vgl.engine.TrainingHistory`
+    - `vgl.train.evaluator.Evaluator` → `vgl.engine.Evaluator`
+
+    `vgl.data` 的数据集/目录入口保持公开可用;其余 legacy 命名空间只做 re-export,不提供单独的 API 参考页;所有公共符号都能从 `vgl.graph` / `vgl.engine` / `vgl.tasks` / `vgl.metrics` / `vgl.data` 直接解析。
 
 Common import rewrites:
 

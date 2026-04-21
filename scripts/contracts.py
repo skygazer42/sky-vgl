@@ -65,12 +65,14 @@ WHEEL_IMPORT_MODULES = (
     "vgl.graph",
     "vgl.dataloading",
     "vgl.engine",
+    "vgl.storage",
     "vgl.tasks",
 )
 PREFERRED_IMPORT_SMOKES = (
     ("vgl.graph", "Graph"),
     ("vgl.engine", "Trainer"),
     ("vgl.data", "PlanetoidDataset"),
+    ("vgl.storage", "MmapTensorStore"),
     ("vgl.tasks", "NodeClassificationTask"),
 )
 README_VERSION_BADGE = "https://img.shields.io/pypi/v/sky-vgl?style=flat-square"
@@ -186,26 +188,32 @@ GOLDEN_PATH_ROOT_EXPORTS = (
     ),
     ReexportSpec(
         "root",
-        "vgl exports DatasetRegistry from vgl.data",
+        "vgl exports DatasetRegistry from vgl.data.public",
         "vgl/__init__.py",
         "DatasetRegistry",
-        "vgl.data.DatasetRegistry",
+        "vgl.data.public.DatasetRegistry",
     ),
     ReexportSpec(
         "root",
-        "vgl exports KarateClubDataset from vgl.data",
+        "vgl exports KarateClubDataset from vgl.data.public",
         "vgl/__init__.py",
         "KarateClubDataset",
-        "vgl.data.KarateClubDataset",
+        "vgl.data.public.KarateClubDataset",
     ),
     ReexportSpec(
         "root",
-        "vgl exports PlanetoidDataset from vgl.data",
+        "vgl exports PlanetoidDataset from vgl.data.public",
         "vgl/__init__.py",
         "PlanetoidDataset",
-        "vgl.data.PlanetoidDataset",
+        "vgl.data.public.PlanetoidDataset",
     ),
-    ReexportSpec("root", "vgl exports TUDataset from vgl.data", "vgl/__init__.py", "TUDataset", "vgl.data.TUDataset"),
+    ReexportSpec(
+        "root",
+        "vgl exports TUDataset from vgl.data.public",
+        "vgl/__init__.py",
+        "TUDataset",
+        "vgl.data.public.TUDataset",
+    ),
 )
 
 ROOT_EXPORT_GROUPS = (
@@ -280,18 +288,17 @@ ROOT_EXPORT_GROUPS = (
             "UniformNegativeLinkSampler",
         ),
     ),
+    ("vgl.data.catalog", ("DatasetManifest", "DatasetSplit")),
     (
-        "vgl.data",
+        "vgl.data.public",
         (
-            "DatasetManifest",
             "DatasetRegistry",
-            "DatasetSplit",
             "KarateClubDataset",
-            "OnDiskGraphDataset",
             "PlanetoidDataset",
             "TUDataset",
         ),
     ),
+    ("vgl.data.ondisk", ("OnDiskGraphDataset",)),
     (
         "vgl.graph",
         (

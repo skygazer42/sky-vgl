@@ -26,7 +26,7 @@ from vgl.graph import Graph
 from vgl.tasks import GraphClassificationTask, NodeClassificationTask
 ```
 
-Legacy `vgl.data` and `vgl.train` paths still work, but new code should prefer the package layout above.
+Legacy `vgl.train` paths still work, and legacy loader/sampler-style `vgl.data.*` module paths remain available for compatibility, but new code should prefer the package layout above.
 
 For public datasets and preprocessing, VGL now exposes:
 

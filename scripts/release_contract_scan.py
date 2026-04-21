@@ -280,12 +280,7 @@ class ArtifactContext:
 
     def _load_pyproject(self) -> dict:
         if self._pyproject is None:
-            try:
-                import tomllib  # type: ignore[attr-defined]
-            except ModuleNotFoundError:  # pragma: no cover - Python 3.10 fallback
-                import tomli as tomllib  # type: ignore[no-redef]
-            with (self.repo_root / "pyproject.toml").open("rb") as handle:
-                self._pyproject = tomllib.load(handle)
+            self._pyproject = repo_script_imports.load_toml_file(self.repo_root / "pyproject.toml")
         return self._pyproject
 
     def _single_artifact(self, pattern: str) -> tuple[Path | None, str]:

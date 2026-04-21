@@ -140,12 +140,7 @@ class ScanContext:
 
     def _load_pyproject(self) -> dict:
         if self._pyproject_cache is None:
-            try:
-                import tomllib  # type: ignore[attr-defined]
-            except ModuleNotFoundError:  # pragma: no cover - Python 3.10 fallback
-                import tomli as tomllib  # type: ignore[no-redef]
-            with self.resolve("pyproject.toml").open("rb") as handle:
-                self._pyproject_cache = tomllib.load(handle)
+            self._pyproject_cache = repo_script_imports.load_toml_file(self.resolve("pyproject.toml"))
         return self._pyproject_cache
 
 
@@ -176,6 +171,20 @@ def _text_contains_task(
 ) -> ScanTask:
     def check() -> tuple[bool, str]:
         return ctx.contains(relative_path, snippet)
+
+    return ScanTask(task_id, category, description, check)
+
+
+def _text_lacks_task(
+    ctx: ScanContext,
+    task_id: str,
+    category: str,
+    description: str,
+    relative_path: str,
+    snippet: str,
+) -> ScanTask:
+    def check() -> tuple[bool, str]:
+        return snippet not in ctx._read_text(relative_path), f"{relative_path} does not contain {snippet!r}"
 
     return ScanTask(task_id, category, description, check)
 
@@ -727,7 +736,14 @@ def build_tasks(repo_root: Path) -> list[ScanTask]:
 
     tasks.extend(
         [
-            _text_contains_task(ctx, "066", "publish", "publish triggers on v* tags", ".github/workflows/publish.yml", '- "v*"'),
+            _text_lacks_task(
+                ctx,
+                "066",
+                "publish",
+                "publish does not trigger on tag pushes",
+                ".github/workflows/publish.yml",
+                "push:",
+            ),
             _text_contains_task(
                 ctx,
                 "067",
@@ -785,13 +801,31 @@ def build_tasks(repo_root: Path) -> list[ScanTask]:
                 ".github/workflows/publish.yml",
                 "Publish to PyPI with Trusted Publishing",
             ),
+            _workflow_job_contains_task(
+                ctx,
+                "074a",
+                "publish",
+                "publish PyPI token job only runs for releases",
+                ".github/workflows/publish.yml",
+                "publish-pypi-token",
+                "github.event_name == 'release'",
+            ),
+            _workflow_job_contains_task(
+                ctx,
+                "074b",
+                "publish",
+                "publish PyPI trusted job only runs for releases",
+                ".github/workflows/publish.yml",
+                "publish-pypi-trusted",
+                "github.event_name == 'release'",
+            ),
             _text_contains_task(
                 ctx,
                 "075",
                 "publish",
                 "publish uploads built distributions as artifacts",
                 ".github/workflows/publish.yml",
-                "actions/upload-artifact@v4",
+                "actions/upload-artifact@",
             ),
             _workflow_step_contains_task(
                 ctx,

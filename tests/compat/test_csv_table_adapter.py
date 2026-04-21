@@ -198,6 +198,40 @@ def test_to_csv_tables_rejects_heterogeneous_graphs(tmp_path):
         graph.to_csv_tables(tmp_path / "nodes.csv", tmp_path / "edges.csv")
 
 
+def test_to_csv_tables_rejects_duplicate_public_node_ids(tmp_path):
+    graph = Graph.homo(
+        edge_index=torch.tensor([[0], [1]]),
+        x=torch.tensor([1.0, 2.0]),
+        n_id=torch.tensor([10, 10]),
+    )
+
+    with pytest.raises(ValueError, match="unique public node ids"):
+        graph.to_csv_tables(tmp_path / "nodes.csv", tmp_path / "edges.csv")
+
+
+def test_to_csv_tables_rejects_non_integral_public_node_ids(tmp_path):
+    graph = Graph.homo(
+        edge_index=torch.tensor([[0], [1]]),
+        x=torch.tensor([1.0, 2.0]),
+        n_id=torch.tensor([1.5, 2.5]),
+    )
+
+    with pytest.raises(ValueError, match="integer public node ids"):
+        graph.to_csv_tables(tmp_path / "nodes.csv", tmp_path / "edges.csv")
+
+
+def test_to_csv_tables_rejects_duplicate_public_edge_ids(tmp_path):
+    graph = Graph.homo(
+        edge_index=torch.tensor([[0, 0], [1, 1]]),
+        x=torch.tensor([1.0, 2.0]),
+        n_id=torch.tensor([10, 20]),
+        edge_data={"e_id": torch.tensor([7, 7])},
+    )
+
+    with pytest.raises(ValueError, match="unique public ids"):
+        graph.to_csv_tables(tmp_path / "nodes.csv", tmp_path / "edges.csv")
+
+
 def test_compat_exports_csv_table_helpers(tmp_path):
     from vgl.compat import from_csv_tables, to_csv_tables
 

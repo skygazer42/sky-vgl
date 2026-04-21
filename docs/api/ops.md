@@ -69,3 +69,16 @@
 | `metapath_reachable_graph(graph, ...)` | 元路径可达图 |
 
 所有函数同时支持同构图和异构图（通过 `edge_type` 参数选择关系）。
+
+## to_simple 语义
+
+`to_simple` 对每个关系去重平行边并按字典序归并(`(src, dst)` → 聚合到唯一边),返回的新图与原图共享节点视图,但边 payload/特征会按以下规则合并:
+
+- 整型/浮点边特征默认走 `sum` 归约;可传 `reduce="mean"` / `"max"` / `"min"` 调整。
+- 对 `eid`/`n_id` 等保留字段以"出现的第一条"为准,不归约。
+- 可传 `return_edge_mapping=True` 获得 `(new_graph, edge_mapping)`,其中 `edge_mapping` 是长度为原边数的 `LongTensor`,将旧 eid 映射到去重后的 eid。
+
+::: vgl.ops.to_simple
+    options:
+      show_root_heading: true
+      show_source: false

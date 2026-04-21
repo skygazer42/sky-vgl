@@ -4,7 +4,8 @@ from types import SimpleNamespace
 
 from vgl import Graph
 from vgl.core.batch import GraphBatch, LinkPredictionBatch, NodeBatch, TemporalEventBatch
-from vgl.data.sample import LinkPredictionRecord, TemporalEventRecord
+from vgl.graph.schema import GraphSchema
+from vgl.data.sample import LinkPredictionRecord, SampleRecord, TemporalEventRecord
 import vgl.dataloading.materialize as materialize_module
 from vgl.dataloading.executor import (
     MaterializationContext,
@@ -13,6 +14,7 @@ from vgl.dataloading.executor import (
 )
 from vgl.dataloading.materialize import _link_message_passing_graph, materialize_batch, materialize_context
 from vgl.dataloading.requests import GraphSeedRequest, LinkSeedRequest, NodeSeedRequest, TemporalSeedRequest
+from vgl.storage import FeatureStore, InMemoryGraphStore, InMemoryTensorStore
 
 
 EDGE_TYPE = ("node", "interacts", "node")
@@ -80,6 +82,28 @@ def test_materialize_batch_builds_graph_batch_from_graph_contexts():
     assert isinstance(batch, GraphBatch)
     assert batch.num_graphs == 2
     assert torch.equal(batch.labels, torch.tensor([1, 0]))
+
+
+def test_materialize_batch_preserves_graph_context_metadata_without_labels():
+    context = MaterializationContext(
+        request=GraphSeedRequest(
+            graph_ids=torch.tensor([0]),
+            metadata={},
+        ),
+        state={
+            "graph": Graph.homo(
+                edge_index=torch.tensor([[0], [1]]),
+                x=torch.randn(2, 4),
+                y=torch.tensor([1]),
+            )
+        },
+        metadata={"sample_id": "g0", "source_graph_id": "root-0"},
+    )
+
+    batch = materialize_batch([context])
+
+    assert isinstance(batch, GraphBatch)
+    assert batch.metadata == [{"sample_id": "g0", "source_graph_id": "root-0"}]
 
 
 def test_materialize_batch_builds_link_prediction_batch_from_link_contexts():
@@ -209,6 +233,58 @@ def test_materialize_batch_reuses_graph_materialization_across_link_contexts(mon
     assert isinstance(batch, LinkPredictionBatch)
     assert calls == 1
     assert torch.equal(batch.graph.x, torch.tensor([[1.0], [2.0], [3.0]]))
+
+
+def test_materialize_batch_link_context_homo_graph_without_x_uses_fetched_node_features():
+    graph = Graph.homo(
+        edge_index=torch.tensor([[0, 1], [1, 2]]),
+        y=torch.tensor([0, 1, 0]),
+    )
+    context = MaterializationContext(
+        request=LinkSeedRequest(
+            src_ids=torch.tensor([0]),
+            dst_ids=torch.tensor([1]),
+            labels=torch.tensor([1]),
+        ),
+        state={
+            "record": LinkPredictionRecord(graph=graph, src_index=0, dst_index=1, label=1),
+            "_materialized_node_features": {
+                "node": {
+                    "x": SimpleNamespace(
+                        index=torch.tensor([0, 1, 2]),
+                        values=torch.tensor([[1.0], [2.0], [3.0]]),
+                    )
+                }
+            },
+        },
+    )
+
+    batch = materialize_batch([context])
+
+    assert isinstance(batch, LinkPredictionBatch)
+    assert torch.equal(batch.graph.n_id, torch.tensor([0, 1, 2]))
+    assert torch.equal(batch.graph.x, torch.tensor([[1.0], [2.0], [3.0]]))
+
+
+def test_materialize_batch_link_context_homo_graph_without_x_still_batches():
+    graph = Graph.homo(
+        edge_index=torch.tensor([[0, 1], [1, 2]]),
+        y=torch.tensor([0, 1, 0]),
+    )
+    context = MaterializationContext(
+        request=LinkSeedRequest(
+            src_ids=torch.tensor([0]),
+            dst_ids=torch.tensor([1]),
+            labels=torch.tensor([1]),
+        ),
+        state={"record": LinkPredictionRecord(graph=graph, src_index=0, dst_index=1, label=1)},
+    )
+
+    batch = materialize_batch([context])
+
+    assert isinstance(batch, LinkPredictionBatch)
+    assert torch.equal(batch.src_index, torch.tensor([0]))
+    assert torch.equal(batch.dst_index, torch.tensor([1]))
 
 
 def test_materialize_batch_reuses_link_message_passing_graph_across_block_contexts(monkeypatch):
@@ -371,6 +447,35 @@ def test_materialize_batch_reuses_homo_node_blocks_across_node_contexts(monkeypa
     assert len(batch.blocks) == 1
 
 
+def test_materialize_context_homo_graph_without_x_builds_node_blocks():
+    graph = Graph.homo(
+        edge_index=torch.tensor([[0, 1, 2], [1, 2, 0]]),
+        y=torch.tensor([0, 1, 0]),
+    )
+    context = MaterializationContext(
+        request=NodeSeedRequest(
+            node_ids=torch.tensor([0]),
+            node_type="node",
+            metadata={"seed": 0, "sample_id": "n0"},
+        ),
+        state={
+            "sample": SampleRecord(
+                graph=graph,
+                metadata={"seed": 0, "sample_id": "n0"},
+                subgraph_seed=0,
+            ),
+            "node_hops": [torch.tensor([0, 1]), torch.tensor([0, 1, 2])],
+        },
+        metadata={"sample_id": "n0"},
+        graph=graph,
+    )
+
+    sample = materialize_context(context)
+
+    assert sample.blocks is not None
+    assert len(sample.blocks) == 1
+    assert sample.subgraph_seed == 0
+
 
 def test_materialize_batch_builds_node_batch_from_multi_seed_node_contexts():
     graph = Graph.homo(
@@ -495,6 +600,31 @@ def test_materialize_multi_seed_homo_node_context_avoids_tensor_int(monkeypatch)
 
     assert [sample.metadata["seed"] for sample in samples] == [2, 4]
     assert [sample.subgraph_seed for sample in samples] == [1, 2]
+
+
+def test_materialize_context_preserves_public_seed_metadata_for_homo_subgraphs():
+    graph = Graph.homo(
+        edge_index=torch.tensor([[0, 1, 2], [1, 2, 0]]),
+        n_id=torch.tensor([10, 11, 12]),
+        edge_data={"e_id": torch.tensor([20, 21, 22])},
+    )
+    context = MaterializationContext(
+        request=NodeSeedRequest(
+            node_ids=torch.tensor([1]),
+            node_type="node",
+            metadata={"seed": 11, "sample_id": "n11"},
+        ),
+        state={"node_ids": torch.tensor([1, 2]), "edge_ids": torch.tensor([1])},
+        metadata={"sample_id": "n11"},
+        graph=graph,
+    )
+
+    sample = materialize_context(context)
+
+    assert sample.metadata["seed"] == 11
+    assert torch.equal(sample.graph.n_id, torch.tensor([11, 12]))
+    assert torch.equal(sample.graph.edata["e_id"], torch.tensor([21]))
+    assert sample.subgraph_seed == 0
 
 
 def test_materialize_multi_seed_hetero_node_context_avoids_tensor_item(monkeypatch):
@@ -678,6 +808,154 @@ def test_materialize_node_context_homo_avoids_dense_node_mappings(monkeypatch):
     assert sample.subgraph_seed == 1
 
 
+def test_materialize_context_homo_graph_without_x_uses_fetched_node_features():
+    graph = Graph.homo(
+        edge_index=torch.tensor([[0, 1, 2], [1, 2, 0]]),
+        y=torch.tensor([0, 1, 0]),
+    )
+    context = MaterializationContext(
+        request=NodeSeedRequest(
+            node_ids=torch.tensor([1]),
+            node_type="node",
+            metadata={"seed": 1, "sample_id": "n1"},
+        ),
+        state={
+            "node_ids": torch.tensor([0, 1, 2]),
+            "_materialized_node_features": {
+                "node": {
+                    "x": SimpleNamespace(
+                        index=torch.tensor([0, 1, 2]),
+                        values=torch.tensor([[1.0], [2.0], [3.0]]),
+                    )
+                }
+            },
+        },
+        metadata={"sample_id": "n1"},
+        graph=graph,
+    )
+
+    sample = materialize_context(context)
+
+    assert torch.equal(sample.graph.n_id, torch.tensor([0, 1, 2]))
+    assert torch.equal(sample.graph.x, torch.tensor([[1.0], [2.0], [3.0]]))
+    assert sample.subgraph_seed == 1
+
+
+def test_materialize_context_hetero_graph_without_x_uses_fetched_node_features():
+    writes = ("author", "writes", "paper")
+    written_by = ("paper", "written_by", "author")
+    graph = Graph.hetero(
+        nodes={
+            "paper": {"y": torch.tensor([0, 1, 0])},
+            "author": {"role": torch.tensor([1, 2])},
+        },
+        edges={
+            writes: {"edge_index": torch.tensor([[0, 1], [1, 2]])},
+            written_by: {"edge_index": torch.tensor([[1, 2], [0, 1]])},
+        },
+    )
+    context = MaterializationContext(
+        request=NodeSeedRequest(
+            node_ids=torch.tensor([1]),
+            node_type="paper",
+            metadata={"seed": 1, "node_type": "paper", "sample_id": "p1"},
+        ),
+        state={
+            "node_ids_by_type": {
+                "paper": torch.tensor([1, 2]),
+                "author": torch.tensor([0, 1]),
+            },
+            "_materialized_node_features": {
+                "paper": {
+                    "x": SimpleNamespace(
+                        index=torch.tensor([1, 2]),
+                        values=torch.tensor([[1.0], [2.0]]),
+                    )
+                },
+                "author": {
+                    "x": SimpleNamespace(
+                        index=torch.tensor([0, 1]),
+                        values=torch.tensor([[10.0], [20.0]]),
+                    )
+                },
+            },
+        },
+        metadata={"sample_id": "p1"},
+        graph=graph,
+    )
+
+    sample = materialize_context(context)
+
+    assert torch.equal(sample.graph.nodes["paper"].n_id, torch.tensor([1, 2]))
+    assert torch.equal(sample.graph.nodes["paper"].x, torch.tensor([[1.0], [2.0]]))
+    assert torch.equal(sample.graph.nodes["author"].n_id, torch.tensor([0, 1]))
+    assert torch.equal(sample.graph.nodes["author"].x, torch.tensor([[10.0], [20.0]]))
+    assert sample.subgraph_seed == 0
+
+
+def test_materialize_context_storage_backed_hetero_temporal_graph_without_resident_node_tensors_uses_fetched_features():
+    writes = ("author", "writes", "paper")
+    schema = GraphSchema(
+        node_types=("author", "paper"),
+        edge_types=(writes,),
+        node_features={"author": (), "paper": ()},
+        edge_features={writes: ("timestamp",)},
+        time_attr="timestamp",
+    )
+    graph = Graph.from_storage(
+        schema=schema,
+        feature_store=FeatureStore(
+            {
+                ("edge", writes, "timestamp"): InMemoryTensorStore(torch.tensor([1, 3], dtype=torch.long)),
+            }
+        ),
+        graph_store=InMemoryGraphStore(
+            {writes: torch.tensor([[0, 1], [0, 0]], dtype=torch.long)},
+            num_nodes={"author": 2, "paper": 1},
+        ),
+    )
+    context = MaterializationContext(
+        request=TemporalSeedRequest(
+            src_ids=torch.tensor([0]),
+            dst_ids=torch.tensor([0]),
+            timestamps=torch.tensor([2]),
+            edge_type=writes,
+        ),
+        state={
+            "record": TemporalEventRecord(
+                graph=graph,
+                src_index=0,
+                dst_index=0,
+                timestamp=2,
+                label=1,
+                edge_type=writes,
+            ),
+            "_materialized_node_features": {
+                "author": {
+                    "x": SimpleNamespace(
+                        index=torch.tensor([0, 1]),
+                        values=torch.tensor([[10.0], [20.0]]),
+                    )
+                },
+                "paper": {
+                    "x": SimpleNamespace(
+                        index=torch.tensor([0]),
+                        values=torch.tensor([[1.0]]),
+                    )
+                },
+            },
+        },
+        graph=graph,
+    )
+
+    sample = materialize_context(context)
+
+    assert torch.equal(sample.graph.nodes["author"].data["n_id"], torch.tensor([0, 1]))
+    assert torch.equal(sample.graph.nodes["author"].data["x"], torch.tensor([[10.0], [20.0]]))
+    assert torch.equal(sample.graph.nodes["paper"].data["n_id"], torch.tensor([0]))
+    assert torch.equal(sample.graph.nodes["paper"].data["x"], torch.tensor([[1.0]]))
+
+
 def test_materialize_node_context_hetero_avoids_dense_node_masks(monkeypatch):
     writes = ("author", "writes", "paper")
     written_by = ("paper", "written_by", "author")
@@ -797,7 +1075,7 @@ def test_build_stitched_node_samples_avoids_tensor_item(monkeypatch):
         torch.tensor([11]),
     )
 
-    assert sample.metadata["seed"] == 1
+    assert sample.metadata["seed"] == 11
     assert sample.subgraph_seed == 1
 
 
@@ -828,7 +1106,7 @@ def test_build_stitched_node_samples_avoids_tensor_int(monkeypatch):
         torch.tensor([11]),
     )
 
-    assert sample.metadata["seed"] == 1
+    assert sample.metadata["seed"] == 11
     assert sample.subgraph_seed == 1
 
 
@@ -865,7 +1143,7 @@ def test_build_stitched_hetero_node_samples_avoids_tensor_item(monkeypatch):
         node_type="paper",
     )
 
-    assert sample.metadata["seed"] == 1
+    assert sample.metadata["seed"] == 31
     assert sample.metadata["node_type"] == "paper"
     assert sample.subgraph_seed == 1
 
@@ -903,6 +1181,6 @@ def test_build_stitched_hetero_node_samples_avoids_tensor_int(monkeypatch):
         node_type="paper",
     )
 
-    assert sample.metadata["seed"] == 1
+    assert sample.metadata["seed"] == 31
     assert sample.metadata["node_type"] == "paper"
     assert sample.subgraph_seed == 1

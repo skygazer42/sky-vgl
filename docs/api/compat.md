@@ -55,6 +55,26 @@ from vgl.compat import (
 )
 ```
 
+::: vgl.compat.block_to_dgl
+    options:
+      show_root_heading: true
+      show_source: false
+
+::: vgl.compat.block_from_dgl
+    options:
+      show_root_heading: true
+      show_source: false
+
+::: vgl.compat.hetero_block_to_dgl
+    options:
+      show_root_heading: true
+      show_source: false
+
+::: vgl.compat.hetero_block_from_dgl
+    options:
+      show_root_heading: true
+      show_source: false
+
 ## PyG 互操作
 
 ```python
@@ -79,16 +99,32 @@ graph = Graph.from_networkx(nx_graph)
 nx_graph = graph.to_networkx()
 ```
 
+模块级别的辅助函数:
+
+```python
+from vgl.compat import from_networkx, to_networkx
+```
+
+::: vgl.compat.from_networkx
+    options:
+      show_root_heading: true
+      show_source: false
+
+::: vgl.compat.to_networkx
+    options:
+      show_root_heading: true
+      show_source: false
+
 ## CSV 互操作
 
 ```python
 from vgl.graph import Graph
 
 # 从边列表 CSV 导入
-graph = Graph.from_csv_edge_list("edges.csv")
+graph = Graph.from_edge_list_csv("edges.csv")
 
 # 从节点/边 CSV 对导入
-graph = Graph.from_csv("nodes.csv", "edges.csv")
+graph = Graph.from_csv_tables("nodes.csv", "edges.csv")
 ```
 
 ## 内存边列表

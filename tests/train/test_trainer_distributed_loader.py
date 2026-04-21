@@ -100,3 +100,20 @@ def test_trainer_accepts_distributed_aware_loader_batches_without_api_changes():
 
     assert history["completed_epochs"] == 1
     assert "loss" in result
+
+
+def test_trainer_moves_distributed_aware_dataclass_batches_to_device():
+    trainer = Trainer(
+        model=TinyDistributedGraphClassifier(),
+        task=GraphClassificationTask(target="label", label_source="metadata"),
+        optimizer=torch.optim.Adam,
+        lr=1e-2,
+        max_epochs=1,
+        device="cpu",
+    )
+
+    history = trainer.fit(_loader(), val_data=_loader())
+    result = trainer.test(_loader())
+
+    assert history["completed_epochs"] == 1
+    assert "loss" in result

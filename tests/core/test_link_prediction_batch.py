@@ -18,8 +18,8 @@ def test_link_prediction_batch_tracks_fields():
     graph = _graph()
     batch = LinkPredictionBatch.from_records(
         [
-            LinkPredictionRecord(graph=graph, src_index=0, dst_index=1, label=1, sample_id="p"),
-            LinkPredictionRecord(graph=graph, src_index=2, dst_index=0, label=0, sample_id="n"),
+            LinkPredictionRecord(graph=graph, src_index=0, dst_index=1, label=1, sample_id="p", query_id="q0"),
+            LinkPredictionRecord(graph=graph, src_index=2, dst_index=0, label=0, sample_id="n", query_id="q1"),
         ]
     )
 
@@ -27,7 +27,10 @@ def test_link_prediction_batch_tracks_fields():
     assert torch.equal(batch.src_index, torch.tensor([0, 2]))
     assert torch.equal(batch.dst_index, torch.tensor([1, 0]))
     assert torch.equal(batch.labels, torch.tensor([1.0, 0.0]))
-    assert batch.metadata == [{}, {}]
+    assert batch.metadata == [
+        {"sample_id": "p", "query_id": "q0", "edge_type": ("node", "to", "node")},
+        {"sample_id": "n", "query_id": "q1", "edge_type": ("node", "to", "node")},
+    ]
 
 
 def test_link_prediction_batch_rejects_empty_records():

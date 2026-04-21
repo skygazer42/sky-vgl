@@ -208,17 +208,27 @@ class RandomLinkSplit(BaseTransform):
             return positions
         return _sorted_unique_tensor(order.index_select(0, positions))
 
-    def _records_from_indices(self, graph, edge_index, indices, *, split, edge_type, reverse_edge_type):
+    def _records_from_indices(self, graph, edge_index, indices, *, split, edge_type, reverse_edge_type, public_edge_ids=None):
         index = torch.as_tensor(indices, dtype=torch.long, device=edge_index.device).view(-1)
         if index.numel() == 0:
             return []
         selected_edge_index = edge_index.index_select(1, index)
+        if (
+            isinstance(public_edge_ids, torch.Tensor)
+            and public_edge_ids.ndim > 0
+            and int(public_edge_ids.size(0)) == int(edge_index.size(1))
+        ):
+            resolved_edge_ids = public_edge_ids.index_select(0, index.to(device=public_edge_ids.device, dtype=torch.long))
+        else:
+            resolved_edge_ids = index
         edge_ids = index.detach().cpu().numpy().reshape(-1)
+        resolved_edge_id_values = resolved_edge_ids.detach().cpu().numpy().reshape(-1)
         src_indices = selected_edge_index[0].detach().cpu().numpy().reshape(-1)
         dst_indices = selected_edge_index[1].detach().cpu().numpy().reshape(-1)
         records = []
-        for edge_id, src_index, dst_index in zip(edge_ids, src_indices, dst_indices):
+        for edge_id, resolved_edge_id, src_index, dst_index in zip(edge_ids, resolved_edge_id_values, src_indices, dst_indices):
             edge_id_value = int(edge_id)
+            resolved_edge_id_value = int(resolved_edge_id)
             src_index_value = int(src_index)
             dst_index_value = int(dst_index)
             sample_id = f"{split}:{edge_id_value}"
@@ -230,7 +240,7 @@ class RandomLinkSplit(BaseTransform):
                     label=1,
                     metadata={
                         "split": split,
-                        "edge_id": edge_id_value,
+                        "edge_id": resolved_edge_id_value,
                         "edge_type": edge_type,
                         "reverse_edge_type": reverse_edge_type,
                         "sample_id": sample_id,
@@ -392,13 +402,14 @@ class RandomLinkSplit(BaseTransform):
         edge_type = self._resolve_edge_type(graph)
         edge_index = graph.edges[edge_type].edge_index
         src_node_type, _, dst_node_type = edge_type
-        num_src_nodes = int(graph.nodes[src_node_type].x.size(0))
-        num_dst_nodes = int(graph.nodes[dst_node_type].x.size(0))
+        num_src_nodes = int(graph._node_count(src_node_type))
+        num_dst_nodes = int(graph._node_count(dst_node_type))
         reverse_edge_index = None
         if self.rev_edge_type is not None:
             if self.rev_edge_type not in graph.edges:
                 raise ValueError("RandomLinkSplit rev_edge_type must exist in the source graph")
             reverse_edge_index = graph.edges[self.rev_edge_type].edge_index
+        public_edge_ids = graph.edges[edge_type].data.get("e_id")
 
         groups = self._edge_groups(edge_index)
         total_groups = len(groups)
@@ -472,6 +483,7 @@ class RandomLinkSplit(BaseTransform):
             split="train",
             edge_type=edge_type,
             reverse_edge_type=self.rev_edge_type,
+            public_edge_ids=public_edge_ids,
         )
         val_records = self._records_from_indices(
             val_graph,
@@ -480,6 +492,7 @@ class RandomLinkSplit(BaseTransform):
             split="val",
             edge_type=edge_type,
             reverse_edge_type=self.rev_edge_type,
+            public_edge_ids=public_edge_ids,
         )
         test_records = self._records_from_indices(
             test_graph,
@@ -488,6 +501,7 @@ class RandomLinkSplit(BaseTransform):
             split="test",
             edge_type=edge_type,
             reverse_edge_type=self.rev_edge_type,
+            public_edge_ids=public_edge_ids,
         )
 
         generator = None

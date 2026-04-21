@@ -1,5 +1,6 @@
 import torch
 import inspect
+import pytest
 
 from vgl import Graph, HeteroBlock
 from vgl.data.dataset import ListDataset
@@ -2274,6 +2275,113 @@ def test_link_neighbor_sampler_stitched_hetero_output_blocks_materialize_multi_r
         raise AssertionError("stitched hetero multi-relation blocks should stay on tensors")
 
     monkeypatch.setattr(torch.Tensor, "tolist", fail_tolist)
+
+    batch = next(iter(loader))
+
+    assert batch.blocks is not None
+    assert len(batch.blocks) == 1
+    block = batch.blocks[0]
+    assert isinstance(block, HeteroBlock)
+    assert block.edge_types == (WRITES, WRITTEN_BY, cites)
+    assert torch.equal(block.dst_n_id["author"], torch.tensor([0], dtype=torch.long))
+    assert torch.equal(block.dst_n_id["paper"], torch.tensor([1, 2, 3], dtype=torch.long))
+    assert torch.equal(block.edata(WRITES)["edge_weight"], torch.tensor([10.0, 20.0]))
+    assert torch.equal(block.edata(WRITTEN_BY)["edge_weight"], torch.tensor([100.0]))
+    assert torch.equal(block.edata(cites)["edge_weight"], torch.tensor([1000.0, 2000.0]))
+
+
+def test_link_neighbor_sampler_supports_hetero_graph_without_x():
+    graph = Graph.hetero(
+        nodes={
+            "author": {"role": torch.tensor([1, 2])},
+            "paper": {"y": torch.tensor([0, 1, 0])},
+        },
+        edges={
+            WRITES: {"edge_index": torch.tensor([[0, 1], [1, 2]])},
+            WRITTEN_BY: {"edge_index": torch.tensor([[1, 2], [0, 1]])},
+        },
+    )
+
+    record = LinkNeighborSampler(num_neighbors=[-1]).sample(
+        LinkPredictionRecord(graph=graph, src_index=0, dst_index=1, label=1, edge_type=WRITES)
+    )
+
+    assert torch.equal(record.graph.nodes["author"].n_id, torch.tensor([0]))
+    assert torch.equal(record.graph.nodes["paper"].n_id, torch.tensor([1]))
+    assert record.src_index == 0
+    assert record.dst_index == 0
+
+
+@pytest.mark.parametrize("feature_store_factory", ["local", "store"])
+def test_link_neighbor_sampler_stitched_hetero_output_blocks_materialize_multi_relation_blocks_across_partitions(
+    feature_store_factory,
+    tmp_path,
+):
+    cites = ("paper", "cites", "paper")
+    graph = Graph.hetero(
+        nodes={
+            "author": {"x": torch.tensor([[10.0], [20.0]])},
+            "paper": {"x": torch.tensor([[1.0], [2.0], [3.0], [4.0]])},
+        },
+        edges={
+            WRITES: {
+                "edge_index": torch.tensor([[0, 1], [1, 2]], dtype=torch.long),
+                "edge_weight": torch.tensor([10.0, 20.0]),
+            },
+            WRITTEN_BY: {
+                "edge_index": torch.tensor([[1, 2], [0, 1]], dtype=torch.long),
+                "edge_weight": torch.tensor([100.0, 200.0]),
+            },
+            cites: {
+                "edge_index": torch.tensor([[0, 2], [2, 3]], dtype=torch.long),
+                "edge_weight": torch.tensor([1000.0, 2000.0]),
+            },
+        },
+    )
+    write_partitioned_graph(graph, tmp_path, num_partitions=2)
+    shards = {
+        0: LocalGraphShard.from_partition_dir(tmp_path, partition_id=0),
+        1: LocalGraphShard.from_partition_dir(tmp_path, partition_id=1),
+    }
+
+    class MixedEdgeTypeBaseSampler:
+        def sample(self, item):
+            return [
+                LinkPredictionRecord(
+                    graph=item.graph,
+                    src_index=0,
+                    dst_index=1,
+                    label=1,
+                    edge_type=WRITES,
+                ),
+                LinkPredictionRecord(
+                    graph=item.graph,
+                    src_index=2,
+                    dst_index=3,
+                    label=0,
+                    edge_type=cites,
+                ),
+            ]
+
+    feature_store = LocalSamplingCoordinator(shards) if feature_store_factory == "local" else _store_backed_coordinator(shards)
+    loader = Loader(
+        dataset=ListDataset(
+            [LinkPredictionRecord(graph=shards[0].graph, src_index=0, dst_index=1, label=1, edge_type=WRITES)]
+        ),
+        sampler=LinkNeighborSampler(
+            num_neighbors=[-1],
+            base_sampler=MixedEdgeTypeBaseSampler(),
+            node_feature_names={"author": ("x",), "paper": ("x",)},
+            edge_feature_names={
+                WRITES: ("edge_weight",),
+                WRITTEN_BY: ("edge_weight",),
+                cites: ("edge_weight",),
+            },
+            output_blocks=True,
+        ),
+        batch_size=1,
+        feature_store=feature_store,
+    )
 
     batch = next(iter(loader))
 

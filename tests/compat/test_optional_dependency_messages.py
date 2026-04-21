@@ -31,6 +31,24 @@ def test_networkx_adapter_error_suggests_install_extra(monkeypatch):
         graph.to_networkx()
 
 
+def test_networkx_adapter_preserves_backend_internal_import_errors(monkeypatch):
+    graph = Graph.homo(
+        edge_index=torch.tensor([[0], [1]]),
+        x=torch.tensor([[1.0], [2.0]]),
+    )
+    original_import_module = importlib.import_module
+
+    def _boom(name, package=None):
+        if name == "networkx" or name.startswith("networkx."):
+            raise RuntimeError("backend import exploded")
+        return original_import_module(name, package)
+
+    monkeypatch.setattr(importlib, "import_module", _boom)
+
+    with pytest.raises(RuntimeError, match="backend import exploded"):
+        graph.to_networkx()
+
+
 def test_pyg_adapter_error_suggests_install_extra(monkeypatch):
     graph = Graph.homo(
         edge_index=torch.tensor([[0], [1]]),

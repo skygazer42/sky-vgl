@@ -70,6 +70,12 @@ def _infer_export_edge_columns(graph: Graph, edge_columns) -> list[str]:
     return resolved
 
 
+def _ensure_unique_public_edge_ids(values: torch.Tensor) -> None:
+    flattened = values.detach().cpu().numpy().reshape(-1)
+    if len({int(value) for value in flattened}) != len(flattened):
+        raise ValueError("edge feature 'e_id' must contain unique public ids for edge-list CSV export")
+
+
 def _scalar_edge_value(values: torch.Tensor, index: int, *, column: str):
     value = values[index]
     if not isinstance(value, torch.Tensor) or value.ndim != 0:
@@ -135,6 +141,8 @@ def to_edge_list_csv(
     edge_list = to_edge_list(graph)
     resolved_edge_columns = _infer_export_edge_columns(graph, edge_columns)
     edge_store = graph.edges[("node", "to", "node")].data
+    if "e_id" in resolved_edge_columns:
+        _ensure_unique_public_edge_ids(edge_store["e_id"])
     fieldnames = [src_column, dst_column, *resolved_edge_columns]
 
     with Path(path).open("w", encoding="utf-8", newline="") as handle:

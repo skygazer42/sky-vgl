@@ -37,6 +37,35 @@ def test_node_batch_batches_subgraphs_into_disjoint_union():
     assert batch.metadata == [{"seed": 1, "sample_id": "a"}, {"seed": 2, "sample_id": "b"}]
 
 
+def test_node_batch_metadata_preserves_sample_record_ids():
+    graph = Graph.homo(
+        edge_index=torch.tensor([[0], [1]]),
+        x=torch.randn(2, 4),
+    )
+
+    batch = NodeBatch.from_samples(
+        [SampleRecord(graph=graph, metadata={}, sample_id="a", source_graph_id="root-a", subgraph_seed=0)]
+    )
+
+    assert batch.metadata == [{"sample_id": "a", "source_graph_id": "root-a"}]
+
+
+def test_node_batch_batches_subgraphs_without_x():
+    g1 = Graph.homo(
+        edge_index=torch.tensor([[0], [1]]),
+        y=torch.tensor([0, 1]),
+    )
+    g2 = Graph.homo(
+        edge_index=torch.tensor([[0, 1], [1, 2]]),
+        y=torch.tensor([1, 0, 1]),
+    )
+
+    batch = NodeBatch.from_samples([_sample(g1, 1, "a"), _sample(g2, 2, "b")])
+
+    assert torch.equal(batch.seed_index, torch.tensor([1, 4]))
+    assert batch.metadata == [{"seed": 1, "sample_id": "a"}, {"seed": 2, "sample_id": "b"}]
+
+
 def test_node_batch_batches_hetero_subgraphs_with_seed_type_offsets():
     g1 = Graph.hetero(
         nodes={

@@ -142,6 +142,16 @@ def test_to_edge_list_csv_rejects_heterogeneous_graphs(tmp_path):
         graph.to_edge_list_csv(tmp_path / "hetero.csv")
 
 
+def test_to_edge_list_csv_rejects_duplicate_public_edge_ids(tmp_path):
+    graph = Graph.homo(
+        edge_index=torch.tensor([[0, 0], [1, 1]]),
+        edge_data={"e_id": torch.tensor([7, 7])},
+    )
+
+    with pytest.raises(ValueError, match="unique public ids"):
+        graph.to_edge_list_csv(tmp_path / "graph.csv")
+
+
 def test_compat_exports_edge_list_csv_helpers(tmp_path):
     from vgl.compat import from_edge_list_csv, to_edge_list_csv
 

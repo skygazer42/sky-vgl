@@ -32,6 +32,13 @@ def _base_graph():
     )
 
 
+def _graph_without_x():
+    return Graph.homo(
+        edge_index=torch.tensor([[0, 1, 3], [1, 2, 4]]),
+        y=torch.tensor([0, 0, 1, 1, 2]),
+    )
+
+
 def test_compose_applies_transforms_in_order():
     graph = _base_graph()
 
@@ -379,6 +386,32 @@ def test_to_undirected_transform_avoids_torch_unique(monkeypatch):
     assert torch.equal(transformed.edge_index, torch.tensor([[0, 1, 1, 2], [1, 2, 0, 1]]))
 
 
+def test_to_undirected_supports_homo_graph_without_x():
+    transformed = ToUndirected()(_graph_without_x())
+
+    assert transformed._node_count("node") == 5
+    assert {tuple(edge.tolist()) for edge in transformed.edge_index.t()} == {
+        (0, 1),
+        (1, 0),
+        (1, 2),
+        (2, 1),
+        (3, 4),
+        (4, 3),
+    }
+
+
+def test_to_undirected_assigns_unique_ids_to_synthesized_reverse_edges():
+    graph = Graph.homo(
+        edge_index=torch.tensor([[0], [1]]),
+        x=torch.randn(2, 2),
+        edge_data={"e_id": torch.tensor([42])},
+    )
+
+    transformed = ToUndirected()(graph)
+
+    assert torch.equal(transformed.edata["e_id"], torch.tensor([42, 43]))
+
+
 def test_add_and_remove_self_loops_round_trip():
     graph = Graph.homo(
         edge_index=torch.tensor([[0, 1], [1, 0]]),
@@ -410,6 +443,31 @@ def test_add_self_loops_transform_avoids_tensor_tolist(monkeypatch):
     transformed = AddSelfLoops(fill_value=1.25)(graph)
 
     assert torch.equal(transformed.edge_index, torch.tensor([[0, 1, 0, 1, 2], [1, 0, 0, 1, 2]]))
+
+
+def test_add_self_loops_supports_homo_graph_without_x():
+    transformed = AddSelfLoops()(_graph_without_x())
+
+    assert transformed._node_count("node") == 5
+    assert {(int(src), int(dst)) for src, dst in transformed.edge_index.t()} >= {
+        (0, 0),
+        (1, 1),
+        (2, 2),
+        (3, 3),
+        (4, 4),
+    }
+
+
+def test_add_self_loops_assigns_unique_ids_to_synthesized_loop_edges():
+    graph = Graph.homo(
+        edge_index=torch.tensor([[0], [1]]),
+        x=torch.randn(3, 2),
+        edge_data={"e_id": torch.tensor([42])},
+    )
+
+    transformed = AddSelfLoops()(graph)
+
+    assert torch.equal(transformed.edata["e_id"], torch.tensor([42, 43, 44, 45]))
 
 
 def test_largest_connected_components_keeps_biggest_component():
@@ -492,3 +550,11 @@ def test_largest_connected_components_accepts_tensor_num_components_without_tens
 
     assert transformed.x.size(0) == 3
     assert torch.equal(transformed.edge_index, torch.tensor([[0, 1], [1, 2]]))
+
+
+def test_largest_connected_components_supports_homo_graph_without_x():
+    transformed = LargestConnectedComponents()(_graph_without_x())
+
+    assert transformed._node_count("node") == 3
+    assert torch.equal(transformed.edge_index, torch.tensor([[0, 1], [1, 2]]))
+    assert torch.equal(transformed.y, torch.tensor([0, 0, 1]))

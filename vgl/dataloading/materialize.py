@@ -1,3 +1,4 @@
+from collections.abc import Mapping
 from dataclasses import replace
 from typing import cast
 
@@ -42,6 +43,23 @@ def _cache_key(value):
     return ("object", id(value))
 
 
+def _resolved_seed_metadata_values(seed_value, fallback_seeds: torch.Tensor) -> list[int]:
+    fallback = [_as_python_int(seed) for seed in torch.as_tensor(fallback_seeds, dtype=torch.long).view(-1)]
+    if seed_value is None:
+        return fallback
+    if isinstance(seed_value, torch.Tensor):
+        values = [_as_python_int(seed) for seed in seed_value.view(-1)]
+    elif isinstance(seed_value, (list, tuple)):
+        values = [_as_python_int(seed) for seed in seed_value]
+    else:
+        values = [_as_python_int(seed_value)]
+    if len(values) == len(fallback):
+        return values
+    if len(values) == 1 and len(fallback) == 1:
+        return values
+    raise ValueError("seed metadata must align with the number of requested seeds")
+
+
 def _align_tensor_slice(index: torch.Tensor, tensor_slice) -> torch.Tensor:
     index = torch.as_tensor(index, dtype=torch.long).view(-1)
     slice_index = tensor_slice.index.to(dtype=torch.long).view(-1)
@@ -61,7 +79,7 @@ def _subgraph(
     fetched_edge_features: dict[object, dict[str, object]] | None = None,
 ):
     node_ids = node_ids.to(dtype=torch.long)
-    num_nodes = int(graph.x.size(0))
+    num_nodes = graph._node_count("node")
     edge_index = graph.edge_index
     edge_store = graph.edges[graph._default_edge_type()]
     node_ids_device = node_ids.to(device=edge_index.device)
@@ -116,7 +134,7 @@ def _hetero_subgraph(
     nodes = {}
     for node_type, store in graph.nodes.items():
         node_ids = node_ids_by_type[node_type].to(dtype=torch.long)
-        num_nodes = store.x.size(0)
+        num_nodes = graph._node_count(node_type)
 
         node_data = {}
         for key, value in store.data.items():
@@ -175,6 +193,13 @@ def _node_store_shape(store) -> tuple[int, torch.device]:
     raise ValueError(f"cannot infer node shape for node type {store.type_name!r}")
 
 
+def _node_data_device(node_data: Mapping[str, object]) -> torch.device:
+    for value in node_data.values():
+        if isinstance(value, torch.Tensor):
+            return value.device
+    return torch.device("cpu")
+
+
 def _store_device(store) -> torch.device:
     for value in store.data.values():
         if isinstance(value, torch.Tensor):
@@ -196,7 +221,8 @@ def _graph_with_materialized_features(
         node_data = dict(node_store.data)
         node_ids = node_data.get("n_id")
         if node_ids is None:
-            node_ids = torch.arange(graph.x.size(0), dtype=torch.long, device=graph.x.device)
+            node_count = graph._node_count("node")
+            node_ids = torch.arange(node_count, dtype=torch.long, device=_node_data_device(node_data))
             node_data["n_id"] = node_ids
         for feature_name, tensor_slice in (fetched_node_features or {}).get("node", {}).items():
             node_data[feature_name] = _align_tensor_slice(node_ids, tensor_slice)
@@ -217,7 +243,8 @@ def _graph_with_materialized_features(
             node_data = dict(store.data)
             node_ids = node_data.get("n_id")
             if node_ids is None:
-                node_count, device = _node_store_shape(store)
+                node_count = graph._node_count(node_type)
+                device = _node_data_device(node_data)
                 node_ids = torch.arange(node_count, dtype=torch.long, device=device)
                 node_data["n_id"] = node_ids
             for feature_name, tensor_slice in (fetched_node_features or {}).get(node_type, {}).items():
@@ -401,7 +428,11 @@ def _materialize_record_payload(
             if needs_homo_node_blocks:
                 node_ids = graph.nodes["node"].data.get("n_id")
                 if node_ids is None:
-                    node_ids = torch.arange(graph.x.size(0), dtype=torch.long, device=graph.x.device)
+                    node_ids = torch.arange(
+                        graph._node_count("node"),
+                        dtype=torch.long,
+                        device=_node_data_device(graph.nodes["node"].data),
+                    )
                 blocks = _build_homo_blocks_from_local_ids(graph, node_ids, context.state["node_hops"])
             elif context.state.get("node_block_edge_type") is not None:
                 blocks = _build_hetero_blocks_from_local_ids(
@@ -604,9 +635,10 @@ def _node_context_to_sample(
                 node_blocks_cache[cache_key] = blocks
 
     samples = []
+    resolved_seed_values = _resolved_seed_metadata_values(metadata.get("seed"), seeds)
     for index in range(seeds.numel()):
         sample_metadata = dict(metadata)
-        sample_metadata["seed"] = _as_python_int(seeds[index])
+        sample_metadata["seed"] = resolved_seed_values[index]
         if node_type != "node":
             sample_metadata.setdefault("node_type", node_type)
         samples.append(
@@ -632,11 +664,17 @@ def _graph_context_to_sample(context: MaterializationContext) -> SampleRecord:
         raise ValueError("graph context requires graph for materialization")
     request = context.request
     metadata = dict(getattr(request, "metadata", {}))
+    sample_id = context.metadata.get("sample_id", metadata.get("sample_id"))
+    source_graph_id = context.metadata.get("source_graph_id", metadata.get("source_graph_id"))
+    if sample_id is not None:
+        metadata.setdefault("sample_id", sample_id)
+    if source_graph_id is not None:
+        metadata.setdefault("source_graph_id", source_graph_id)
     return SampleRecord(
         graph=graph,
         metadata=metadata,
-        sample_id=context.metadata.get("sample_id", metadata.get("sample_id")),
-        source_graph_id=context.metadata.get("source_graph_id", metadata.get("source_graph_id")),
+        sample_id=sample_id,
+        source_graph_id=source_graph_id,
     )
 
 
@@ -685,9 +723,7 @@ def materialize_batch(items, *, label_source=None, label_key=None):
             return NodeBatch.from_samples(samples)
         if kind == "graph":
             samples = [_graph_context_to_sample(context) for context in items]
-            if label_source is not None and label_key is not None:
-                return GraphBatch.from_samples(samples, label_source=label_source, label_key=label_key)
-            return GraphBatch.from_graphs([sample.graph for sample in samples])
+            return GraphBatch.from_samples(samples, label_source=label_source, label_key=label_key)
         if kind == "link":
             records = []
             graph_cache: dict[object, Graph] = {}

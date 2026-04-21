@@ -3,6 +3,8 @@ import json
 from pathlib import Path
 from typing import Any
 
+import torch
+
 
 def _normalize_range(node_range) -> tuple[int, int]:
     start, end = node_range
@@ -59,6 +61,28 @@ def _normalize_edge_feature_shape_metadata(raw_value) -> dict[tuple[str, str, st
     }
 
 
+def _normalize_node_feature_dtype_metadata(raw_value) -> dict[str, dict[str, str]]:
+    raw_value = dict(raw_value)
+    return {
+        str(node_type): {
+            str(feature_name): str(dtype_name)
+            for feature_name, dtype_name in dict(feature_dtypes).items()
+        }
+        for node_type, feature_dtypes in raw_value.items()
+    }
+
+
+def _normalize_edge_feature_dtype_metadata(raw_value) -> dict[tuple[str, str, str], dict[str, str]]:
+    raw_value = dict(raw_value)
+    return {
+        _normalize_edge_type(edge_type): {
+            str(feature_name): str(dtype_name)
+            for feature_name, dtype_name in dict(feature_dtypes).items()
+        }
+        for edge_type, feature_dtypes in raw_value.items()
+    }
+
+
 def _normalize_partition_metadata(metadata: dict[str, Any]) -> dict[str, Any]:
     normalized = dict(metadata)
     for key in _EDGE_ID_METADATA_KEYS:
@@ -72,6 +96,12 @@ def _normalize_partition_metadata(metadata: dict[str, Any]) -> dict[str, Any]:
     raw_edge_feature_shapes = normalized.get("edge_feature_shapes")
     if raw_edge_feature_shapes is not None:
         normalized["edge_feature_shapes"] = _normalize_edge_feature_shape_metadata(raw_edge_feature_shapes)
+    raw_node_feature_dtypes = normalized.get("node_feature_dtypes")
+    if raw_node_feature_dtypes is not None:
+        normalized["node_feature_dtypes"] = _normalize_node_feature_dtype_metadata(raw_node_feature_dtypes)
+    raw_edge_feature_dtypes = normalized.get("edge_feature_dtypes")
+    if raw_edge_feature_dtypes is not None:
+        normalized["edge_feature_dtypes"] = _normalize_edge_feature_dtype_metadata(raw_edge_feature_dtypes)
     return normalized
 
 
@@ -102,6 +132,24 @@ def _serialize_partition_metadata(metadata: dict[str, Any]) -> dict[str, Any]:
                 for feature_name, shape in dict(feature_shapes).items()
             }
             for edge_type, feature_shapes in dict(raw_edge_feature_shapes).items()
+        }
+    raw_node_feature_dtypes = serialized.get("node_feature_dtypes")
+    if raw_node_feature_dtypes is not None:
+        serialized["node_feature_dtypes"] = {
+            str(node_type): {
+                str(feature_name): str(dtype_name)
+                for feature_name, dtype_name in dict(feature_dtypes).items()
+            }
+            for node_type, feature_dtypes in dict(raw_node_feature_dtypes).items()
+        }
+    raw_edge_feature_dtypes = serialized.get("edge_feature_dtypes")
+    if raw_edge_feature_dtypes is not None:
+        serialized["edge_feature_dtypes"] = {
+            json.dumps(list(edge_type)): {
+                str(feature_name): str(dtype_name)
+                for feature_name, dtype_name in dict(feature_dtypes).items()
+            }
+            for edge_type, feature_dtypes in dict(raw_edge_feature_dtypes).items()
         }
     return serialized
 
@@ -165,6 +213,20 @@ class PartitionShard:
             for edge_type, feature_shapes in self.metadata.get("edge_feature_shapes", {}).items()
         }
 
+    @property
+    def node_feature_dtypes(self) -> dict[str, dict[str, str]]:
+        return {
+            str(node_type): dict(feature_dtypes)
+            for node_type, feature_dtypes in self.metadata.get("node_feature_dtypes", {}).items()
+        }
+
+    @property
+    def edge_feature_dtypes(self) -> dict[tuple[str, str, str], dict[str, str]]:
+        return {
+            _normalize_edge_type(edge_type): dict(feature_dtypes)
+            for edge_type, feature_dtypes in self.metadata.get("edge_feature_dtypes", {}).items()
+        }
+
     def feature_shape(self, key) -> tuple[int, ...]:
         entity_kind, type_key, feature_name = key
         feature_name = str(feature_name)
@@ -179,6 +241,26 @@ class PartitionShard:
             except KeyError as exc:
                 raise KeyError(key) from exc
         raise KeyError(key)
+
+    def feature_dtype(self, key) -> torch.dtype:
+        entity_kind, type_key, feature_name = key
+        feature_name = str(feature_name)
+        if entity_kind == "node":
+            try:
+                dtype_name = self.node_feature_dtypes[str(type_key)][feature_name]
+            except KeyError as exc:
+                raise KeyError(key) from exc
+        elif entity_kind == "edge":
+            try:
+                dtype_name = self.edge_feature_dtypes[tuple(type_key)][feature_name]
+            except KeyError as exc:
+                raise KeyError(key) from exc
+        else:
+            raise KeyError(key)
+        try:
+            return getattr(torch, dtype_name)
+        except AttributeError as exc:
+            raise ValueError(f"unsupported feature dtype metadata: {dtype_name!r}") from exc
 
     def owns(self, node_id: int, *, node_type: str = "node") -> bool:
         start, end = self.node_range_for(node_type)

@@ -1353,6 +1353,18 @@ class ModelCheckpoint(Callback):
             filename = f"{filename}.ckpt"
         return self.dirpath / filename
 
+    def _validate_managed_checkpoint_path(self, path):
+        if path is None:
+            return None
+        base_dir = self.dirpath.resolve()
+        candidate = Path(path)
+        resolved = candidate.resolve(strict=False) if candidate.is_absolute() else (base_dir / candidate).resolve(strict=False)
+        try:
+            resolved.relative_to(base_dir)
+        except ValueError as exc:
+            raise ValueError("ModelCheckpoint paths must stay within dirpath") from exc
+        return str(resolved)
+
     def _save_checkpoint(self, trainer, history, path, *, epoch, tag, monitor_value=None):
         metadata = {
             "epoch": int(epoch),
@@ -1487,17 +1499,20 @@ class ModelCheckpoint(Callback):
         if state_mode is not None:
             self.active_mode = state_mode
         self.best_k_models = [
-            {"path": str(entry["path"]), "score": float(entry["score"])}
+            {
+                "path": self._validate_managed_checkpoint_path(entry["path"]),
+                "score": float(entry["score"]),
+            }
             for entry in state.get("best_k_models", [])
         ]
-        self.best_model_path = state.get("best_model_path")
+        self.best_model_path = self._validate_managed_checkpoint_path(state.get("best_model_path"))
         best_score = state.get("best_model_score")
         self.best_model_score = None if best_score is None else float(best_score)
-        self.kth_best_model_path = state.get("kth_best_model_path")
+        self.kth_best_model_path = self._validate_managed_checkpoint_path(state.get("kth_best_model_path"))
         kth_score = state.get("kth_best_model_score")
         self.kth_best_model_score = None if kth_score is None else float(kth_score)
-        self.last_model_path = state.get("last_model_path")
-        self.exception_model_path = state.get("exception_model_path")
+        self.last_model_path = self._validate_managed_checkpoint_path(state.get("last_model_path"))
+        self.exception_model_path = self._validate_managed_checkpoint_path(state.get("exception_model_path"))
         self._refresh_best_model_fields()
 
     def on_epoch_end(self, trainer, epoch, train_summary, val_summary, history):

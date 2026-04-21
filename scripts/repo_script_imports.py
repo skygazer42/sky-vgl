@@ -32,3 +32,35 @@ def resolve_repo_relative_path(path: Path, *, repo_root: Path = REPO_ROOT) -> Pa
 def load_repo_module(module_name: str):
     ensure_repo_root_on_path()
     return importlib.import_module(module_name)
+
+
+def load_toml_file(path: Path):
+    loaders = []
+    try:
+        import tomllib  # type: ignore[attr-defined]
+
+        loaders.append(tomllib)
+    except ModuleNotFoundError:
+        pass
+    try:
+        import tomli  # type: ignore[import-not-found]
+
+        loaders.append(tomli)
+    except ModuleNotFoundError:
+        pass
+    try:
+        from pip._vendor import tomli as pip_tomli  # type: ignore[import-not-found]
+
+        loaders.append(pip_tomli)
+    except ModuleNotFoundError:
+        pass
+
+    if not loaders:
+        raise ModuleNotFoundError("No TOML parser available; install tomli on Python < 3.11")
+
+    with Path(path).open("rb") as handle:
+        for loader in loaders:
+            handle.seek(0)
+            return loader.load(handle)
+
+    raise RuntimeError(f"unable to load TOML file: {path}")

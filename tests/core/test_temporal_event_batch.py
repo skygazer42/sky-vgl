@@ -17,8 +17,8 @@ def test_temporal_event_batch_tracks_fields_and_history_views():
         time_attr="timestamp",
     )
     records = [
-        TemporalEventRecord(graph=graph, src_index=0, dst_index=1, timestamp=3, label=1),
-        TemporalEventRecord(graph=graph, src_index=2, dst_index=0, timestamp=5, label=0),
+        TemporalEventRecord(graph=graph, src_index=0, dst_index=1, timestamp=3, label=1, sample_id="evt-3", query_id="q-3"),
+        TemporalEventRecord(graph=graph, src_index=2, dst_index=0, timestamp=5, label=0, sample_id="evt-5", query_id="q-5"),
     ]
 
     batch = TemporalEventBatch.from_records(records)
@@ -29,6 +29,10 @@ def test_temporal_event_batch_tracks_fields_and_history_views():
     assert torch.equal(batch.dst_index, torch.tensor([1, 0]))
     assert torch.equal(batch.timestamp, torch.tensor([3, 5]))
     assert torch.equal(batch.labels, torch.tensor([1, 0]))
+    assert batch.metadata == [
+        {"sample_id": "evt-3", "query_id": "q-3", "edge_type": ("node", "interacts", "node")},
+        {"sample_id": "evt-5", "query_id": "q-5", "edge_type": ("node", "interacts", "node")},
+    ]
     assert torch.equal(history.edges[edge_type].timestamp, torch.tensor([1, 3]))
 
 

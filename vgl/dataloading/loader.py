@@ -148,16 +148,32 @@ class Loader:
         if isinstance(value, dict):
             return {key: self._pin_memory_value(item) for key, item in value.items()}
         if is_dataclass(value):
-            for field in fields(value):
-                current = getattr(value, field.name)
-                pinned = self._pin_memory_value(current)
-                if pinned is current:
-                    continue
-                try:
+            field_values = {
+                field.name: self._pin_memory_value(getattr(value, field.name))
+                for field in fields(value)
+            }
+            if all(field_values[field.name] is getattr(value, field.name) for field in fields(value)):
+                return value
+            try:
+                for field in fields(value):
+                    current = getattr(value, field.name)
+                    pinned = field_values[field.name]
+                    if pinned is current:
+                        continue
                     setattr(value, field.name, pinned)
-                except (AttributeError, FrozenInstanceError, TypeError):
-                    continue
-            return value
+                return value
+            except (AttributeError, FrozenInstanceError, TypeError):
+                init_values = {
+                    field.name: field_values[field.name]
+                    for field in fields(value)
+                    if field.init
+                }
+                rebuilt = type(value)(**init_values)
+                for field in fields(value):
+                    if field.init:
+                        continue
+                    object.__setattr__(rebuilt, field.name, field_values[field.name])
+                return rebuilt
         return value
 
     def _finalize_batch(self, items):

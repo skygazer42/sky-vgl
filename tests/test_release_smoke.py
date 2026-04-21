@@ -175,6 +175,7 @@ def test_build_import_check_script_uses_root_and_preferred_import_paths():
     assert "from vgl.graph import Graph" in script
     assert "from vgl.engine import Trainer" in script
     assert "from vgl.data import PlanetoidDataset" in script
+    assert "from vgl.storage import MmapTensorStore" in script
     assert "from vgl.tasks import NodeClassificationTask" in script
     assert "repo_root not in module_path.parents" in script
 

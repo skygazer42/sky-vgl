@@ -40,6 +40,11 @@
 
 ## HeteroBlock
 
+`HeteroBlock` 是多关系版本的消息流块(Block),为每条规范 `(src_type, rel, dst_type)` 维护一份独立的源/目标 ID 映射和稀疏邻接,常用于异构邻居采样器把多关系前沿打包成单次模型调用。与 `Block` 的关键区别:
+
+- 对外以字典形式暴露 `src_nodes[ntype]` / `dst_nodes[ntype]` / `edges[rel]`,保持节点类型不混淆。
+- 与 `vgl.ops.to_hetero_block` 以及 `vgl.compat.hetero_block_{to,from}_dgl` 互通。
+
 ::: vgl.graph.HeteroBlock
     options:
       show_root_heading: true

@@ -412,11 +412,11 @@ class LocalSamplingCoordinator:
             raise ValueError("fetch_node_features requires a node feature key")
         node_type = str(type_key)
         node_ids = torch.as_tensor(node_ids, dtype=torch.long)
-        routes = self.route_node_ids(node_ids, node_type=node_type)
         if node_ids.numel() == 0:
             first_store = next(iter(self.feature_stores.values()))
-            shape = first_store.shape(key)
-            return TensorSlice(index=node_ids, values=torch.empty((0,) + shape[1:]))
+            first_partition_id = next(iter(self.feature_stores))
+            return first_store.fetch(key, node_ids, partition_id=first_partition_id)
+        routes = self.route_node_ids(node_ids, node_type=node_type)
 
         values = None
         for route in routes:
@@ -441,9 +441,11 @@ class LocalSamplingCoordinator:
         edge_type = tuple(type_key)
         edge_ids = torch.as_tensor(edge_ids, dtype=torch.long)
         if edge_ids.numel() == 0:
-            first_store = next(iter(self.feature_stores.values()))
-            shape = first_store.shape(key)
-            return TensorSlice(index=edge_ids, values=torch.empty((0,) + shape[1:]))
+            first_partition_id = next(iter(self.partition_ids()))
+            partition = self._shard(first_partition_id).partition
+            shape = partition.feature_shape(key)
+            dtype = partition.feature_dtype(key)
+            return TensorSlice(index=edge_ids, values=torch.empty((0,) + shape[1:], dtype=dtype))
 
         owner_ids, owner_partitions = self._edge_owner_lookup_by_type.get(
             edge_type,
@@ -704,10 +706,13 @@ class StoreBackedSamplingCoordinator:
             raise ValueError("fetch_node_features requires a node feature key")
         node_type = str(type_key)
         node_ids = torch.as_tensor(node_ids, dtype=torch.long)
-        routes = self.route_node_ids(node_ids, node_type=node_type)
         if node_ids.numel() == 0:
-            shape = self.feature_store.shape(key)
-            return TensorSlice(index=node_ids, values=torch.empty((0,) + shape[1:]))
+            first_partition_id = next(iter(self.partition_ids()))
+            partition = self._partition(first_partition_id)
+            shape = partition.feature_shape(key)
+            dtype = partition.feature_dtype(key)
+            return TensorSlice(index=node_ids, values=torch.empty((0,) + shape[1:], dtype=dtype))
+        routes = self.route_node_ids(node_ids, node_type=node_type)
 
         values = None
         for route in routes:
@@ -728,8 +733,11 @@ class StoreBackedSamplingCoordinator:
         edge_type = tuple(type_key)
         edge_ids = torch.as_tensor(edge_ids, dtype=torch.long)
         if edge_ids.numel() == 0:
-            shape = self.feature_store.shape(key)
-            return TensorSlice(index=edge_ids, values=torch.empty((0,) + shape[1:]))
+            first_partition_id = next(iter(self.partition_ids()))
+            partition = self._partition(first_partition_id)
+            shape = partition.feature_shape(key)
+            dtype = partition.feature_dtype(key)
+            return TensorSlice(index=edge_ids, values=torch.empty((0,) + shape[1:], dtype=dtype))
 
         owner_ids, owner_partitions = self._edge_owner_lookup_by_type.get(
             edge_type,

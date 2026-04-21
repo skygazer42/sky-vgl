@@ -29,6 +29,53 @@ def _as_python_int(value) -> int:
     return int(value)
 
 
+def _resolved_seed_metadata_values(seed_value, fallback_seeds: torch.Tensor) -> list[int]:
+    fallback = [_as_python_int(seed) for seed in torch.as_tensor(fallback_seeds, dtype=torch.long).view(-1)]
+    if seed_value is None:
+        return fallback
+    if isinstance(seed_value, torch.Tensor):
+        values = [_as_python_int(seed) for seed in seed_value.view(-1)]
+    elif isinstance(seed_value, (list, tuple)):
+        values = [_as_python_int(seed) for seed in seed_value]
+    else:
+        values = [_as_python_int(seed_value)]
+    if len(values) == len(fallback):
+        return values
+    if len(values) == 1 and len(fallback) == 1:
+        return values
+    raise ValueError("seed metadata must align with the number of requested seeds")
+
+
+def _normalized_record_metadata(
+    record,
+    *,
+    sample_id=None,
+    query_id=None,
+    edge_type=None,
+    reverse_edge_type=None,
+) -> dict[str, Any]:
+    metadata = dict(record.metadata)
+    if sample_id is not None:
+        metadata["sample_id"] = sample_id
+    if query_id is not None:
+        metadata["query_id"] = query_id
+    if edge_type is not None:
+        metadata["edge_type"] = edge_type
+    if reverse_edge_type is not None:
+        metadata["reverse_edge_type"] = reverse_edge_type
+    if getattr(record, "exclude_seed_edge", False):
+        metadata["exclude_seed_edges"] = True
+    hard_negative_dst = getattr(record, "hard_negative_dst", None)
+    if hard_negative_dst is not None:
+        metadata["hard_negative_dst"] = hard_negative_dst
+    candidate_dst = getattr(record, "candidate_dst", None)
+    if candidate_dst is not None:
+        metadata["candidate_dst"] = candidate_dst
+    if bool(getattr(record, "filter_ranking", False)):
+        metadata["filter_ranking"] = True
+    return metadata
+
+
 def _resolve_feature_store(feature_store, graph):
     if feature_store is not None:
         return feature_store
@@ -105,6 +152,20 @@ def _graph_node_global_ids(graph, node_ids: torch.Tensor, *, node_type: str) -> 
     if global_ids is None:
         return node_ids
     return torch.as_tensor(global_ids, dtype=torch.long, device=node_ids.device)[node_ids]
+
+
+def _graph_node_global_ids_with_global_fallback(graph, node_ids: torch.Tensor, *, node_type: str) -> torch.Tensor:
+    node_ids = torch.as_tensor(node_ids, dtype=torch.long).view(-1)
+    node_store = graph.nodes[str(node_type)]
+    global_ids = node_store.data.get("n_id")
+    if global_ids is None:
+        return node_ids
+    global_ids = torch.as_tensor(global_ids, dtype=torch.long, device=node_ids.device).view(-1)
+    resolved = node_ids.clone()
+    valid_mask = (node_ids >= 0) & (node_ids < global_ids.numel())
+    if bool(valid_mask.any()):
+        resolved[valid_mask] = global_ids[node_ids[valid_mask]]
+    return resolved
 
 
 def _graph_edge_global_ids(graph, edge_ids: torch.Tensor, *, edge_type) -> torch.Tensor:
@@ -602,24 +663,41 @@ def _expand_stitched_hetero_node_ids(
     return seed_global_ids, _as_node_ids_by_type(expanded)
 
 
-def _stitched_hetero_link_seed_global_ids(graph, records) -> dict[str, torch.Tensor]:
-    seed_local_ids_by_type: dict[str, list[int]] = {node_type: [] for node_type in graph.schema.node_types}
+def _stitched_hetero_link_seed_global_ids(graph_or_records, records=None) -> dict[str, torch.Tensor]:
+    if records is None:
+        records = graph_or_records
+    if not records:
+        return {}
+    node_types = records[0].graph.schema.node_types
+    seed_global_ids_by_type: dict[str, list[int]] = {node_type: [] for node_type in node_types}
+    device_by_type = {
+        node_type: _infer_data_device(records[0].graph.nodes[node_type].data)
+        for node_type in node_types
+    }
     for record in records:
+        graph = record.graph
         src_type, _, dst_type = _resolve_link_record_edge_type(record)
-        seed_local_ids_by_type[src_type].append(_as_python_int(record.src_index))
-        seed_local_ids_by_type[dst_type].append(_as_python_int(record.dst_index))
-
-    seed_global_ids_by_type = {}
-    for node_type in graph.schema.node_types:
-        device = _infer_data_device(graph.nodes[node_type].data)
-        local_tensor = torch.tensor(seed_local_ids_by_type[node_type], dtype=torch.long, device=device).view(-1)
-        local_tensor = _sorted_unique_tensor(local_tensor)
-        seed_global_ids_by_type[node_type] = _graph_node_global_ids(
+        src_global = _graph_node_global_ids_with_global_fallback(
             graph,
-            local_tensor,
-            node_type=node_type,
+            torch.tensor([_as_python_int(record.src_index)], dtype=torch.long, device=_infer_data_device(graph.nodes[src_type].data)),
+            node_type=src_type,
         )
-    return seed_global_ids_by_type
+        dst_global = _graph_node_global_ids_with_global_fallback(
+            graph,
+            torch.tensor([_as_python_int(record.dst_index)], dtype=torch.long, device=_infer_data_device(graph.nodes[dst_type].data)),
+            node_type=dst_type,
+        )
+        seed_global_ids_by_type[src_type].append(_as_python_int(src_global[0]))
+        seed_global_ids_by_type[dst_type].append(_as_python_int(dst_global[0]))
+        device_by_type[src_type] = src_global.device
+        device_by_type[dst_type] = dst_global.device
+
+    return {
+        node_type: _sorted_unique_tensor(
+            torch.tensor(seed_global_ids_by_type[node_type], dtype=torch.long, device=device_by_type[node_type])
+        )
+        for node_type in node_types
+    }
 
 
 def _collect_stitched_hetero_edges(
@@ -835,12 +913,12 @@ def _sorted_unique_temporal_edge_records(
 ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
     edge_ids = torch.as_tensor(edge_ids, dtype=torch.long, device=device).view(-1)
     edge_index = torch.as_tensor(edge_index, dtype=torch.long, device=device)
-    timestamps = torch.as_tensor(timestamps, dtype=torch.long, device=device).view(-1)
+    timestamps = torch.as_tensor(timestamps, device=device).view(-1)
     if edge_ids.numel() == 0 or edge_index.numel() == 0:
         return (
             torch.empty((0,), dtype=torch.long, device=device),
             torch.empty((2, 0), dtype=torch.long, device=device),
-            torch.empty((0,), dtype=torch.long, device=device),
+            torch.empty((0,), dtype=timestamps.dtype, device=device),
         )
     order = torch.argsort(edge_ids, stable=True)
     edge_ids = edge_ids[order]
@@ -1075,10 +1153,11 @@ def _build_stitched_node_samples(
     seed_local_ids = torch.as_tensor(seed_local_ids, dtype=torch.long).view(-1)
     seed_global_ids = torch.as_tensor(seed_global_ids, dtype=torch.long).view(-1)
     subgraph_seeds = _lookup_positions(stitched_graph.n_id, seed_global_ids, entity_name="stitched node")
+    resolved_seed_values = _resolved_seed_metadata_values(metadata.get("seed"), seed_global_ids)
     samples = []
     for index in range(seed_local_ids.numel()):
         sample_metadata = dict(metadata)
-        sample_metadata["seed"] = _as_python_int(seed_local_ids[index])
+        sample_metadata["seed"] = resolved_seed_values[index]
         samples.append(
             SampleRecord(
                 graph=stitched_graph,
@@ -1150,10 +1229,11 @@ def _build_stitched_hetero_node_samples(
         seed_global_ids,
         entity_name=f"stitched {node_type}",
     )
+    resolved_seed_values = _resolved_seed_metadata_values(metadata.get("seed"), seed_global_ids)
     samples = []
     for index in range(seed_local_ids.numel()):
         sample_metadata = dict(metadata)
-        sample_metadata["seed"] = _as_python_int(seed_local_ids[index])
+        sample_metadata["seed"] = resolved_seed_values[index]
         sample_metadata.setdefault("node_type", str(node_type))
         samples.append(
             SampleRecord(
@@ -1231,6 +1311,8 @@ def _build_stitched_homo_temporal_record(graph, record, stitched_graph: Graph) -
     )
     seed_positions = _lookup_positions(stitched_graph.n_id, seed_global_ids, entity_name="stitched node")
     edge_type = _resolve_temporal_record_edge_type(record)
+    sample_id = record.resolved_sample_id
+    query_id = record.resolved_query_id
     return TemporalEventRecord(
         graph=stitched_graph,
         src_index=_as_python_int(seed_positions[0]),
@@ -1238,9 +1320,14 @@ def _build_stitched_homo_temporal_record(graph, record, stitched_graph: Graph) -
         timestamp=_as_python_int(record.timestamp),
         label=_as_python_int(record.label),
         event_features=record.event_features,
-        metadata=dict(record.metadata),
-        sample_id=record.resolved_sample_id,
-        query_id=record.resolved_query_id,
+        metadata=_normalized_record_metadata(
+            record,
+            sample_id=sample_id,
+            query_id=query_id,
+            edge_type=edge_type,
+        ),
+        sample_id=sample_id,
+        query_id=query_id,
         edge_type=edge_type,
     )
 
@@ -1268,6 +1355,8 @@ def _build_stitched_hetero_temporal_record(graph, record, stitched_graph: Graph)
         dst_global,
         entity_name=f"stitched {dst_type}",
     )
+    sample_id = record.resolved_sample_id
+    query_id = record.resolved_query_id
     return TemporalEventRecord(
         graph=stitched_graph,
         src_index=_as_python_int(src_position),
@@ -1275,9 +1364,14 @@ def _build_stitched_hetero_temporal_record(graph, record, stitched_graph: Graph)
         timestamp=_as_python_int(record.timestamp),
         label=_as_python_int(record.label),
         event_features=record.event_features,
-        metadata=dict(record.metadata),
-        sample_id=record.resolved_sample_id,
-        query_id=record.resolved_query_id,
+        metadata=_normalized_record_metadata(
+            record,
+            sample_id=sample_id,
+            query_id=query_id,
+            edge_type=edge_type,
+        ),
+        sample_id=sample_id,
+        query_id=query_id,
         edge_type=edge_type,
     )
 
@@ -1352,6 +1446,12 @@ def _build_stitched_homo_temporal_history(
         time_order = torch.argsort(edge_timestamps, stable=True)
         edge_ids_global = edge_ids_global[time_order][-sampler.max_events :]
         edge_index_global = edge_index_global[:, time_order][:, -sampler.max_events :]
+        edge_ids_global, edge_index_global, edge_timestamps = _sorted_unique_temporal_edge_records(
+            edge_ids_global,
+            edge_index_global,
+            edge_timestamps[time_order][-sampler.max_events :],
+            device=device,
+        )
 
     return edge_ids_global, edge_index_global
 
@@ -1426,6 +1526,12 @@ def _build_stitched_hetero_temporal_history(
         time_order = torch.argsort(edge_timestamps, stable=True)
         edge_ids_global = edge_ids_global[time_order][-sampler.max_events :]
         edge_index_global = edge_index_global[:, time_order][:, -sampler.max_events :]
+        edge_ids_global, edge_index_global, edge_timestamps = _sorted_unique_temporal_edge_records(
+            edge_ids_global,
+            edge_index_global,
+            edge_timestamps[time_order][-sampler.max_events :],
+            device=device,
+        )
 
     return edge_ids_global, edge_index_global
 
@@ -1578,96 +1684,98 @@ def _build_stitched_homo_link_records(graph, records, stitched_graph: Graph) -> 
     dst_positions = _lookup_positions(stitched_graph.n_id, dst_global_ids, entity_name="stitched node")
     sampled_records = []
     for index, record in enumerate(records):
+        sample_id = record.resolved_sample_id
+        query_id = record.resolved_query_id
+        edge_type = record.edge_type
+        reverse_edge_type = record.reverse_edge_type
         sampled_records.append(
             LinkPredictionRecord(
                 graph=stitched_graph,
                 src_index=_as_python_int(src_positions[index]),
                 dst_index=_as_python_int(dst_positions[index]),
                 label=_as_python_int(record.label),
-                metadata=dict(record.metadata),
-                sample_id=record.resolved_sample_id,
+                metadata=_normalized_record_metadata(
+                    record,
+                    sample_id=sample_id,
+                    query_id=query_id,
+                    edge_type=edge_type,
+                    reverse_edge_type=reverse_edge_type,
+                ),
+                sample_id=sample_id,
                 exclude_seed_edge=bool(record.exclude_seed_edge),
                 hard_negative_dst=record.hard_negative_dst,
                 candidate_dst=record.candidate_dst,
-                edge_type=record.edge_type,
-                reverse_edge_type=record.reverse_edge_type,
-                query_id=record.resolved_query_id,
+                edge_type=edge_type,
+                reverse_edge_type=reverse_edge_type,
+                query_id=query_id,
                 filter_ranking=bool(record.filter_ranking),
             )
         )
     return sampled_records
 
 
-def _build_stitched_hetero_link_records(graph, records, stitched_graph: Graph) -> list[LinkPredictionRecord]:
+def _build_stitched_hetero_link_records(graph_or_records, records_or_stitched_graph, stitched_graph: Graph | None = None) -> list[LinkPredictionRecord]:
+    if stitched_graph is None:
+        records = graph_or_records
+        stitched_graph = records_or_stitched_graph
+    else:
+        records = records_or_stitched_graph
     edge_types = tuple(_resolve_link_record_edge_type(record) for record in records)
-    src_local_ids_by_type: dict[str, list[int]] = {node_type: [] for node_type in stitched_graph.nodes}
-    src_record_indices_by_type: dict[str, list[int]] = {node_type: [] for node_type in stitched_graph.nodes}
-    dst_local_ids_by_type: dict[str, list[int]] = {node_type: [] for node_type in stitched_graph.nodes}
-    dst_record_indices_by_type: dict[str, list[int]] = {node_type: [] for node_type in stitched_graph.nodes}
-    for index, edge_type in enumerate(edge_types):
-        src_type, _, dst_type = edge_type
-        src_local_ids_by_type[src_type].append(_as_python_int(records[index].src_index))
-        src_record_indices_by_type[src_type].append(index)
-        dst_local_ids_by_type[dst_type].append(_as_python_int(records[index].dst_index))
-        dst_record_indices_by_type[dst_type].append(index)
-
-    src_positions = [0] * len(records)
-    dst_positions = [0] * len(records)
-    for node_type in stitched_graph.nodes:
-        if src_local_ids_by_type[node_type]:
-            src_global_ids = _graph_node_global_ids(
-                graph,
-                torch.tensor(
-                    src_local_ids_by_type[node_type],
-                    dtype=torch.long,
-                    device=_infer_data_device(graph.nodes[node_type].data),
-                ),
-                node_type=node_type,
-            )
-            current_positions = _lookup_positions(
-                stitched_graph.nodes[node_type].data["n_id"],
-                src_global_ids,
-                entity_name=f"stitched {node_type}",
-            )
-            for offset, record_index in enumerate(src_record_indices_by_type[node_type]):
-                src_positions[record_index] = _as_python_int(current_positions[offset])
-
-        if dst_local_ids_by_type[node_type]:
-            dst_global_ids = _graph_node_global_ids(
-                graph,
-                torch.tensor(
-                    dst_local_ids_by_type[node_type],
-                    dtype=torch.long,
-                    device=_infer_data_device(graph.nodes[node_type].data),
-                ),
-                node_type=node_type,
-            )
-            current_positions = _lookup_positions(
-                stitched_graph.nodes[node_type].data["n_id"],
-                dst_global_ids,
-                entity_name=f"stitched {node_type}",
-            )
-            for offset, record_index in enumerate(dst_record_indices_by_type[node_type]):
-                dst_positions[record_index] = _as_python_int(current_positions[offset])
-
     sampled_records = []
     for index, record in enumerate(records):
         edge_type = edge_types[index]
         src_type, _, dst_type = edge_type
+        src_global_ids = _graph_node_global_ids_with_global_fallback(
+            record.graph,
+            torch.tensor(
+                [_as_python_int(record.src_index)],
+                dtype=torch.long,
+                device=_infer_data_device(record.graph.nodes[src_type].data),
+            ),
+            node_type=src_type,
+        )
+        dst_global_ids = _graph_node_global_ids_with_global_fallback(
+            record.graph,
+            torch.tensor(
+                [_as_python_int(record.dst_index)],
+                dtype=torch.long,
+                device=_infer_data_device(record.graph.nodes[dst_type].data),
+            ),
+            node_type=dst_type,
+        )
+        src_position = _lookup_positions(
+            stitched_graph.nodes[src_type].data["n_id"],
+            src_global_ids,
+            entity_name=f"stitched {src_type}",
+        )
+        dst_position = _lookup_positions(
+            stitched_graph.nodes[dst_type].data["n_id"],
+            dst_global_ids,
+            entity_name=f"stitched {dst_type}",
+        )
+        sample_id = record.resolved_sample_id
+        query_id = record.resolved_query_id
+        reverse_edge_type = record.reverse_edge_type
         sampled_records.append(
             LinkPredictionRecord(
                 graph=stitched_graph,
-                src_index=src_positions[index],
-                dst_index=dst_positions[index],
+                src_index=_as_python_int(src_position[0]),
+                dst_index=_as_python_int(dst_position[0]),
                 label=_as_python_int(record.label),
-                metadata=dict(record.metadata),
-                sample_id=record.resolved_sample_id,
+                metadata=_normalized_record_metadata(
+                    record,
+                    sample_id=sample_id,
+                    query_id=query_id,
+                    edge_type=edge_type,
+                    reverse_edge_type=reverse_edge_type,
+                ),
+                sample_id=sample_id,
                 exclude_seed_edge=bool(record.exclude_seed_edge),
                 hard_negative_dst=record.hard_negative_dst,
                 candidate_dst=record.candidate_dst,
                 edge_type=edge_type,
-                reverse_edge_type=record.reverse_edge_type,
-                query_id=record.resolved_query_id,
+                reverse_edge_type=reverse_edge_type,
+                query_id=query_id,
                 filter_ranking=bool(record.filter_ranking),
             )
         )
@@ -1945,7 +2053,7 @@ class PlanExecutor:
                 context.state["link_node_ids_local"] = stitched_graph.n_id
                 context.state["link_node_hops"] = link_node_hops
         elif stitched_hetero_partition is not None:
-            seed_global_ids_by_type = _stitched_hetero_link_seed_global_ids(graph, records)
+            seed_global_ids_by_type = _stitched_hetero_link_seed_global_ids(records)
             if output_blocks:
                 node_ids_by_type, link_node_hops_by_type = _as_node_ids_and_hops_by_type(
                     _expand_stitched_hetero_global_node_ids(
@@ -1981,7 +2089,7 @@ class PlanExecutor:
                 edge_ids_by_type,
                 _relabel_stitched_edge_index_by_type(node_ids_by_type, edge_index_by_type),
             )
-            sampled_records = _build_stitched_hetero_link_records(graph, records, stitched_graph)
+            sampled_records = _build_stitched_hetero_link_records(records, stitched_graph)
             sampled = sampled_records if bool(stage.params["is_sequence"]) else sampled_records[0]
         else:
             if output_blocks:

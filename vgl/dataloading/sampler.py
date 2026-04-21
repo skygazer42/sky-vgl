@@ -441,7 +441,7 @@ class UniformNegativeLinkSampler(Sampler):
     def _candidate_destinations(self, item):
         edge_type, _, dst_type = _link_endpoint_types(item)
         graph = item.graph
-        num_nodes = int(graph.nodes[dst_type].x.size(0))
+        num_nodes = int(graph._node_count(dst_type))
         mask = torch.ones(num_nodes, dtype=torch.bool)
         mask[_as_python_int(item.dst_index)] = False
         if self.exclude_positive_edges:
@@ -580,7 +580,7 @@ class UniformNegativeLinkSampler(Sampler):
 
     def _uniform_destinations(self, item, count, *, excluded_destinations=()):
         edge_type, _, dst_type = _link_endpoint_types(item)
-        num_nodes = int(item.graph.nodes[dst_type].x.size(0))
+        num_nodes = int(item.graph._node_count(dst_type))
         device = item.graph.edges[edge_type].edge_index.device
         excluded = self._excluded_negative_destinations(item)
         additional_excluded = torch.as_tensor(excluded_destinations, dtype=torch.long, device=device).view(-1)
@@ -649,7 +649,7 @@ class HardNegativeLinkSampler(UniformNegativeLinkSampler):
             return torch.empty((0,), dtype=torch.long)
         candidates = torch.as_tensor(raw_candidates, dtype=torch.long).view(-1)
         _, _, dst_type = _link_endpoint_types(item)
-        num_nodes = int(item.graph.nodes[dst_type].x.size(0))
+        num_nodes = int(item.graph._node_count(dst_type))
         if ((candidates < 0) | (candidates >= num_nodes)).any():
             raise ValueError("hard_negative_dst entries must fall within the source graph node range")
         candidates = _ordered_unique_tensor(candidates)
@@ -732,7 +732,7 @@ class CandidateLinkSampler(UniformNegativeLinkSampler):
     def _candidate_destinations(self, item):
         raw_candidates = self._resolved_candidate_dst(item)
         _, _, dst_type = _link_endpoint_types(item)
-        num_nodes = int(item.graph.nodes[dst_type].x.size(0))
+        num_nodes = int(item.graph._node_count(dst_type))
         if raw_candidates is None:
             return torch.arange(num_nodes, dtype=torch.long)
         candidates = torch.as_tensor(raw_candidates, dtype=torch.long).view(-1)
@@ -1008,7 +1008,7 @@ class LinkNeighborSampler(Sampler):
         nodes = {}
         for node_type, store in graph.nodes.items():
             node_ids = node_ids_by_type[node_type].to(dtype=torch.long)
-            num_nodes = store.x.size(0)
+            num_nodes = graph._node_count(node_type)
 
             node_data = {}
             for key, value in store.data.items():
@@ -1294,7 +1294,7 @@ class TemporalNeighborSampler(LinkNeighborSampler):
 
         candidate_edge_ids = sorted_edge_ids[lower[0] : upper[0]]
         if self.max_events is not None and candidate_edge_ids.numel() > self.max_events:
-            return candidate_edge_ids[-self.max_events :]
+            candidate_edge_ids = candidate_edge_ids[-self.max_events :]
         if edge_ids_are_sorted or candidate_edge_ids.numel() <= 1:
             return candidate_edge_ids
         return torch.sort(candidate_edge_ids, stable=True).values
@@ -1429,7 +1429,7 @@ class TemporalNeighborSampler(LinkNeighborSampler):
 
     def _subgraph(self, graph, edge_type, node_ids, history_edge_ids):
         node_ids = node_ids.to(dtype=torch.long)
-        num_nodes = int(graph.x.size(0))
+        num_nodes = graph._node_count("node")
         edge_store = graph.edges[edge_type]
         edge_index = edge_store.edge_index
 
@@ -1482,7 +1482,7 @@ class TemporalNeighborSampler(LinkNeighborSampler):
         for node_type in unique_node_types:
             store = graph.nodes[node_type]
             node_ids = node_ids_by_type[node_type].to(dtype=torch.long)
-            num_nodes = store.x.size(0)
+            num_nodes = graph._node_count(node_type)
 
             node_data = {}
             for key, value in store.data.items():
@@ -1529,6 +1529,12 @@ class TemporalNeighborSampler(LinkNeighborSampler):
         }
 
     def _local_record(self, record, graph, node_mapping, *, edge_type):
+        metadata = dict(record.metadata)
+        if record.sample_id is not None:
+            metadata["sample_id"] = record.sample_id
+        if record.query_id is not None:
+            metadata["query_id"] = record.query_id
+        metadata["edge_type"] = edge_type
         local_positions = _lookup_positions(
             node_mapping,
             torch.tensor(
@@ -1545,13 +1551,20 @@ class TemporalNeighborSampler(LinkNeighborSampler):
             timestamp=_as_python_int(record.timestamp),
             label=_as_python_int(record.label),
             event_features=record.event_features,
-            metadata=dict(record.metadata),
+            metadata=metadata,
             sample_id=record.sample_id,
+            query_id=record.query_id,
             edge_type=edge_type,
         )
 
     def _hetero_local_record(self, record, graph, node_mapping, *, edge_type):
         _, src_type, dst_type = _temporal_endpoint_types(record)
+        metadata = dict(record.metadata)
+        if record.sample_id is not None:
+            metadata["sample_id"] = record.sample_id
+        if record.query_id is not None:
+            metadata["query_id"] = record.query_id
+        metadata["edge_type"] = edge_type
         src_position = _lookup_positions(
             node_mapping[src_type],
             torch.tensor(
@@ -1577,8 +1590,9 @@ class TemporalNeighborSampler(LinkNeighborSampler):
             timestamp=_as_python_int(record.timestamp),
             label=_as_python_int(record.label),
             event_features=record.event_features,
-            metadata=dict(record.metadata),
+            metadata=metadata,
             sample_id=record.sample_id,
+            query_id=record.query_id,
             edge_type=edge_type,
         )
 
@@ -1793,7 +1807,7 @@ class NodeNeighborSampler(LinkNeighborSampler):
         elif node_type not in graph.nodes:
             raise ValueError("NodeNeighborSampler metadata['node_type'] must exist in the source graph")
         seed_ids = self._normalize_seed_ids(seed)
-        num_nodes = int(graph.x.size(0)) if node_type == "node" and hasattr(graph, "x") else int(graph.nodes[node_type].x.size(0))
+        num_nodes = graph._node_count(node_type)
         if torch.any((seed_ids < 0) | (seed_ids >= num_nodes)):
             raise ValueError("NodeNeighborSampler seed must fall within the source graph node range")
         if node_type != "node":

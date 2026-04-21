@@ -19,6 +19,22 @@ def _edge_pair_keys(edge_index: torch.Tensor, *, dst_count: int) -> torch.Tensor
     return edge_index[0].to(dtype=torch.long) * int(dst_count) + edge_index[1].to(dtype=torch.long)
 
 
+def _homo_num_nodes(graph) -> int:
+    return int(graph._node_count("node"))
+
+
+def _fresh_edge_ids(existing: torch.Tensor, *, count: int, device: torch.device) -> torch.Tensor:
+    if count == 0:
+        return torch.empty((0,), dtype=existing.dtype if existing.numel() > 0 else torch.long, device=device)
+    if existing.numel() == 0:
+        start = 0
+        dtype = torch.long
+    else:
+        start = _as_python_int(existing.to(dtype=torch.long).max()) + 1
+        dtype = existing.dtype
+    return torch.arange(start, start + count, dtype=dtype, device=device)
+
+
 def _sorted_unique_tensor(values) -> torch.Tensor:
     values = torch.as_tensor(values, dtype=torch.long).view(-1)
     if values.numel() == 0:
@@ -74,7 +90,7 @@ class ToUndirected(BaseTransform):
         edge_type = graph._default_edge_type()
         store = graph.edges[edge_type]
         edge_index = store.edge_index
-        num_nodes = int(graph.x.size(0))
+        num_nodes = _homo_num_nodes(graph)
         reverse_index = edge_index[[1, 0]].contiguous()
         missing_mask = ~_membership_mask(
             _edge_pair_keys(reverse_index, dst_count=num_nodes),
@@ -98,7 +114,11 @@ class ToUndirected(BaseTransform):
             if key == "edge_index":
                 continue
             if is_edge_aligned(value, edge_count):
-                edges[edge_type][key] = torch.cat([value, value[mirror_indices]], dim=0)
+                if key == "e_id":
+                    appended = _fresh_edge_ids(value, count=int(mirror_indices.numel()), device=value.device)
+                    edges[edge_type][key] = torch.cat([value, appended], dim=0)
+                else:
+                    edges[edge_type][key] = torch.cat([value, value[mirror_indices]], dim=0)
             else:
                 edges[edge_type][key] = value
         return clone_graph(graph, edges=edges)
@@ -114,7 +134,7 @@ class AddSelfLoops(BaseTransform):
         edge_type = graph._default_edge_type()
         store = graph.edges[edge_type]
         edge_index = store.edge_index
-        num_nodes = graph.x.size(0)
+        num_nodes = _homo_num_nodes(graph)
         loop_mask = edge_index[0] == edge_index[1]
         has_loop = torch.zeros(num_nodes, dtype=torch.bool, device=edge_index.device)
         if bool(loop_mask.any()):
@@ -132,8 +152,11 @@ class AddSelfLoops(BaseTransform):
             if key == "edge_index":
                 continue
             if is_edge_aligned(value, edge_count):
-                fill_shape = (add_count,) + tuple(value.shape[1:])
-                fill_tensor = value.new_full(fill_shape, self.fill_value)
+                if key == "e_id":
+                    fill_tensor = _fresh_edge_ids(value, count=add_count, device=value.device)
+                else:
+                    fill_shape = (add_count,) + tuple(value.shape[1:])
+                    fill_tensor = value.new_full(fill_shape, self.fill_value)
                 edges[edge_type][key] = torch.cat([value, fill_tensor], dim=0)
             else:
                 edges[edge_type][key] = value
@@ -169,7 +192,7 @@ class LargestConnectedComponents(BaseTransform):
         if self.num_components < 1:
             raise ValueError("num_components must be >= 1")
 
-        num_nodes = int(graph.x.size(0))
+        num_nodes = _homo_num_nodes(graph)
         labels = torch.arange(num_nodes, dtype=torch.long, device=graph.edge_index.device)
         if graph.edge_index.numel() > 0:
             src_nodes = graph.edge_index[0].to(dtype=torch.long)

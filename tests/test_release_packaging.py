@@ -2,6 +2,7 @@ import email
 import importlib
 import importlib.util
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -52,10 +53,14 @@ def _load_install_release_extras_module(module_name: str = "install_release_extr
 
 def _artifact_smoke_backend_available(name: str) -> bool:
     release_smoke = _load_release_smoke_module()
+    try:
+        module_name = release_smoke._backend_import_module_name(name)
+    except ValueError:
+        module_name = name
     bootstrap = "".join(
         f"site.addsitedir({str(path)!r})\n" for path in release_smoke._outer_site_packages()
     )
-    script = "import site\n" + bootstrap + f"import {name}\n"
+    script = "import site\n" + bootstrap + f"import {module_name}\n"
     completed = subprocess.run(
         [sys.executable, "-c", script],
         cwd=REPO_ROOT,
@@ -335,6 +340,9 @@ def test_release_workflows_exist_for_ci_and_pypi_publish():
     assert "python -m mkdocs build --strict" in ci_text
     assert "python -m build" in ci_text
     assert "python -m twine check" in ci_text
+    assert "actionlint/releases/latest/download" not in ci_text
+    assert "actionlint_${ACTIONLINT_VERSION}_linux_amd64.tar.gz" in ci_text
+    assert "sha256sum -c -" in ci_text
     assert "python scripts/docs_link_scan.py" in ci_text
     assert "python scripts/release_contract_scan.py --artifact-dir dist" in ci_text
     assert "python scripts/release_smoke.py --artifact-dir dist --kind all" in ci_text
@@ -343,11 +351,21 @@ def test_release_workflows_exist_for_ci_and_pypi_publish():
     assert "python scripts/release_smoke.py --artifact-dir dist --kind all --interop-backend all" in package_check_smoke_step
     assert 'python -m pip install -e ".[pyg,dgl]"' not in package_check_smoke_step
     assert "python scripts/metadata_consistency.py" in (REPO_ROOT / "docs" / "releasing.md").read_text(encoding="utf-8")
-    assert "tags:" in publish_text
-    assert "v*" in publish_text
+    assert "push:" not in publish_text
     assert "testpypi" in publish_text.lower()
     assert "pypi" in publish_text.lower()
     assert "id-token: write" in publish_text
+    for action in (
+        "actions/checkout",
+        "actions/setup-python",
+        "actions/upload-artifact",
+        "actions/download-artifact",
+        "pypa/gh-action-pypi-publish",
+    ):
+        assert re.search(rf"uses:\s+{re.escape(action)}@[0-9a-f]{{40}}", publish_text), action
+    assert "@v4" not in publish_text
+    assert "@v5" not in publish_text
+    assert "@release/v1" not in publish_text
     assert "PYPI_API_TOKEN" in publish_text
     assert "TEST_PYPI_API_TOKEN" in publish_text
     assert "probe-publish-auth:" in publish_text
@@ -360,6 +378,8 @@ def test_release_workflows_exist_for_ci_and_pypi_publish():
     assert 'python -m pip install -e ".[pyg,dgl]"' not in publish_build_install_step
     assert "python scripts/release_smoke.py --artifact-dir dist --kind all --interop-backend all" in publish_build_smoke_step
     assert 'python -m pip install -e ".[pyg,dgl]"' not in publish_build_smoke_step
+    assert "github.event_name == 'release'" in publish_text
+    assert "startsWith(github.ref, 'refs/tags/v')" not in publish_text
     assert "Publish to PyPI with API token" in publish_text
     assert "Publish to PyPI with Trusted Publishing" in publish_text
     assert "Publish to TestPyPI with API token" in publish_text

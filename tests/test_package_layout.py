@@ -1,4 +1,4 @@
-from vgl import Block, DataLoader, Graph, Loader
+from vgl import Block, DataLoader, Graph, HeteroBlock, Loader
 from vgl.core.graph import Graph as LegacyGraph
 from vgl.data.loader import Loader as LegacyLoader
 
@@ -61,6 +61,7 @@ def test_domain_packages_expose_preferred_import_paths():
     from vgl.graph import Block as DomainBlock
     from vgl.graph import Graph as DomainGraph
     from vgl.graph import GraphBatch, GraphSchema, GraphView, NodeBatch
+    from vgl.graph import HeteroBlock as DomainHeteroBlock
     from vgl.graph import LinkPredictionBatch, TemporalEventBatch
     from vgl.metrics import Accuracy, FilteredHitsAtK, FilteredMRR, HitsAtK, Metric, MRR, build_metric
     from vgl.tasks import (
@@ -78,6 +79,7 @@ def test_domain_packages_expose_preferred_import_paths():
         TemporalEventPredictionTask,
     )
     from vgl.transforms import IdentityTransform, RandomLinkSplit
+    from vgl.core import HeteroBlock as LegacyCoreHeteroBlock
     from vgl.train import ASAM as LegacyASAM
     from vgl.train import BootstrapBetaScheduler as LegacyBootstrapBetaScheduler
     from vgl.train import BootstrapTask as LegacyBootstrapTask
@@ -121,6 +123,8 @@ def test_domain_packages_expose_preferred_import_paths():
 
     assert DomainBlock is Block
     assert DomainGraph is Graph
+    assert DomainHeteroBlock is HeteroBlock
+    assert LegacyCoreHeteroBlock is HeteroBlock
     assert Graph is LegacyGraph
     assert DomainDataLoader is DataLoader
     assert DataLoader is Loader

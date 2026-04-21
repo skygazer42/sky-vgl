@@ -215,6 +215,43 @@ loader = DataLoader(
 )
 ```
 
+### 使用 StoreBackedSamplingCoordinator 跨分区按需取数
+
+当分区较多或无法一次性把所有 `LocalGraphShard` 装入内存时,可以走 Store 路径:分区目录被懒加载成 `PartitionedGraphStore` / `PartitionedFeatureStore`,`StoreBackedSamplingCoordinator` 只在采样到具体前沿时才按需取结构和特征。整条链路与 `LocalSamplingCoordinator` 完全同接口,可无感替换:
+
+```python
+from vgl.distributed import (
+    StoreBackedSamplingCoordinator,
+    load_partitioned_stores,
+    write_partitioned_graph,
+)
+from vgl.dataloading import DataLoader, ListDataset, NodeNeighborSampler
+
+# 1. 离线一次:把整图切到目录里
+write_partitioned_graph(graph, "artifacts/partitions", num_partitions=4)
+
+# 2. 在线:懒打开 store,按需生成 coordinator
+manifest, feature_store, graph_store = load_partitioned_stores("artifacts/partitions")
+coordinator = StoreBackedSamplingCoordinator(
+    manifest=manifest,
+    feature_store=feature_store,
+    graph_store=graph_store,
+)
+
+# 更短的等价入口
+coordinator = StoreBackedSamplingCoordinator.from_partition_dir("artifacts/partitions")
+
+# 3. 与本地 coordinator 等价地挂到 DataLoader
+loader = DataLoader(
+    dataset=ListDataset(samples),
+    sampler=NodeNeighborSampler(num_neighbors=[15, 10]),
+    batch_size=1024,
+    feature_store=coordinator,
+)
+```
+
+`tests/integration/test_foundation_partition_local.py` 是一个最小 smoke,覆盖 `write → load → coordinate → sample` 的整条路径,可作为排障基准。
+
 ## 下一步
 
 - [训练器与回调](training.md) — 配置训练参数

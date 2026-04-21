@@ -62,3 +62,96 @@ normalized = edge_softmax(sparse_adj, edge_scores)
     options:
       show_root_heading: true
       show_source: false
+
+## 布局与转换
+
+### SparseLayout
+
+标识 COO / CSR / CSC 三种内部布局,可作为 `to_coo/to_csr/to_csc` 的目标,也用于 `from_torch_sparse` 自动识别源布局。
+
+::: vgl.sparse.SparseLayout
+    options:
+      show_root_heading: true
+      show_source: false
+
+### from_edge_index
+
+从 `edge_index`(形状 `(2, E)`)直接构造 `SparseTensor`,可携带 payload。
+
+::: vgl.sparse.from_edge_index
+    options:
+      show_root_heading: true
+      show_source: false
+
+### to_coo / to_csr / to_csc
+
+就地或复制地切换布局。布局切换是免拷贝的(懒构建索引),新布局缓存在原 `SparseTensor` 上。
+
+::: vgl.sparse.to_coo
+    options:
+      show_root_heading: true
+      show_source: false
+
+::: vgl.sparse.to_csr
+    options:
+      show_root_heading: true
+      show_source: false
+
+::: vgl.sparse.to_csc
+    options:
+      show_root_heading: true
+      show_source: false
+
+### torch.sparse 互操作
+
+```python
+import torch
+from vgl.sparse import from_torch_sparse, to_torch_sparse
+
+native = torch.sparse_csr_tensor(crow, col, values, size=(N, N))
+vst = from_torch_sparse(native)           # → vgl.sparse.SparseTensor
+back = to_torch_sparse(vst)               # → torch.Tensor
+```
+
+::: vgl.sparse.from_torch_sparse
+    options:
+      show_root_heading: true
+      show_source: false
+
+::: vgl.sparse.to_torch_sparse
+    options:
+      show_root_heading: true
+      show_source: false
+
+## 其他运算
+
+### degree / sum / transpose
+
+::: vgl.sparse.degree
+    options:
+      show_root_heading: true
+      show_source: false
+
+::: vgl.sparse.sum
+    options:
+      show_root_heading: true
+      show_source: false
+
+::: vgl.sparse.transpose
+    options:
+      show_root_heading: true
+      show_source: false
+
+### select_rows / select_cols
+
+按行或列索引裁剪稀疏结构,同步保留 payload。
+
+::: vgl.sparse.select_rows
+    options:
+      show_root_heading: true
+      show_source: false
+
+::: vgl.sparse.select_cols
+    options:
+      show_root_heading: true
+      show_source: false

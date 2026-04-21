@@ -299,6 +299,9 @@ def test_build_stitched_homo_temporal_record_uses_resolved_metadata_ids():
 
     assert record.sample_id == "evt-7"
     assert record.query_id == "q-7"
+    assert record.metadata["sample_id"] == "evt-7"
+    assert record.metadata["query_id"] == "q-7"
+    assert record.metadata["edge_type"] == ("node", "to", "node")
 
 
 def test_build_stitched_hetero_temporal_record_avoids_tensor_int(monkeypatch):
@@ -401,6 +404,9 @@ def test_build_stitched_hetero_temporal_record_uses_resolved_metadata_ids():
 
     assert record.sample_id == "evt-9"
     assert record.query_id == "q-9"
+    assert record.metadata["sample_id"] == "evt-9"
+    assert record.metadata["query_id"] == "q-9"
+    assert record.metadata["edge_type"] == ("author", "writes", "paper")
 
 
 def test_build_stitched_homo_link_records_avoids_tensor_int(monkeypatch):
@@ -473,6 +479,47 @@ def test_build_stitched_homo_link_records_use_resolved_metadata_ids():
 
     assert records[0].sample_id == "pos-1"
     assert records[0].query_id == "query-a"
+    assert records[0].metadata["sample_id"] == "pos-1"
+    assert records[0].metadata["query_id"] == "query-a"
+
+
+def test_build_stitched_homo_link_records_normalize_record_level_routing_metadata():
+    graph = Graph.homo(
+        edge_index=torch.tensor([[0, 1], [1, 2]]),
+        x=torch.randn(3, 2),
+    )
+    graph.nodes["node"].data["n_id"] = torch.tensor([10, 11, 12])
+    stitched_graph = Graph.homo(
+        edge_index=torch.tensor([[1], [2]]),
+        x=torch.randn(4, 2),
+    )
+    stitched_graph.nodes["node"].data["n_id"] = torch.tensor([9, 11, 12, 13])
+
+    records = _build_stitched_homo_link_records(
+        graph,
+        [
+            LinkPredictionRecord(
+                graph=graph,
+                src_index=1,
+                dst_index=2,
+                label=0,
+                sample_id="neg-1",
+                query_id="query-c",
+                exclude_seed_edge=True,
+                hard_negative_dst=[2],
+                candidate_dst=[0, 2],
+                filter_ranking=True,
+            ),
+        ],
+        stitched_graph,
+    )
+
+    assert records[0].metadata["sample_id"] == "neg-1"
+    assert records[0].metadata["query_id"] == "query-c"
+    assert records[0].metadata["exclude_seed_edges"] is True
+    assert records[0].metadata["hard_negative_dst"] == [2]
+    assert records[0].metadata["candidate_dst"] == [0, 2]
+    assert records[0].metadata["filter_ranking"] is True
 
 
 def test_build_stitched_hetero_link_records_avoids_tensor_int(monkeypatch):
@@ -580,6 +627,54 @@ def test_build_stitched_hetero_link_records_use_resolved_metadata_ids():
 
     assert records[0].sample_id == "edge-1"
     assert records[0].query_id == "query-b"
+    assert records[0].metadata["sample_id"] == "edge-1"
+    assert records[0].metadata["query_id"] == "query-b"
+    assert records[0].metadata["edge_type"] == ("author", "writes", "paper")
+
+
+def test_build_stitched_hetero_link_records_normalize_record_level_routing_metadata():
+    graph = Graph.hetero(
+        nodes={
+            "author": {"x": torch.randn(2, 2), "n_id": torch.tensor([10, 11])},
+            "paper": {"x": torch.randn(3, 2), "n_id": torch.tensor([20, 21, 22])},
+        },
+        edges={("author", "writes", "paper"): {"edge_index": torch.tensor([[0, 1], [1, 2]])}},
+    )
+    stitched_graph = Graph.hetero(
+        nodes={
+            "author": {"x": torch.randn(2, 2), "n_id": torch.tensor([8, 10])},
+            "paper": {"x": torch.randn(4, 2), "n_id": torch.tensor([19, 20, 21, 22])},
+        },
+        edges={("author", "writes", "paper"): {"edge_index": torch.tensor([[1, 1], [2, 3]])}},
+    )
+
+    records = _build_stitched_hetero_link_records(
+        graph,
+        [
+            LinkPredictionRecord(
+                graph=graph,
+                src_index=0,
+                dst_index=1,
+                label=0,
+                sample_id="edge-neg",
+                query_id="query-neg",
+                exclude_seed_edge=True,
+                hard_negative_dst=[2],
+                candidate_dst=[1, 2],
+                filter_ranking=True,
+                edge_type=("author", "writes", "paper"),
+            ),
+        ],
+        stitched_graph,
+    )
+
+    assert records[0].metadata["sample_id"] == "edge-neg"
+    assert records[0].metadata["query_id"] == "query-neg"
+    assert records[0].metadata["edge_type"] == ("author", "writes", "paper")
+    assert records[0].metadata["exclude_seed_edges"] is True
+    assert records[0].metadata["hard_negative_dst"] == [2]
+    assert records[0].metadata["candidate_dst"] == [1, 2]
+    assert records[0].metadata["filter_ranking"] is True
 
 
 def test_stitched_hetero_link_seed_global_ids_avoids_tensor_int(monkeypatch):

@@ -31,6 +31,20 @@ def test_graph_batch_tracks_graph_ptr_labels_and_metadata():
     assert batch.metadata[0]["label"] == 1
 
 
+def test_graph_batch_metadata_preserves_sample_record_ids_without_labels():
+    graph = Graph.homo(
+        edge_index=torch.tensor([[0], [1]]),
+        x=torch.randn(2, 4),
+    )
+    samples = [
+        SampleRecord(graph=graph, metadata={}, sample_id="g0", source_graph_id="root-g0"),
+    ]
+
+    batch = GraphBatch.from_samples(samples)
+
+    assert batch.metadata == [{"sample_id": "g0", "source_graph_id": "root-g0"}]
+
+
 def test_graph_batch_from_samples_avoids_tensor_item_for_graph_labels(monkeypatch):
     graphs = [
         Graph.homo(

@@ -1,5 +1,6 @@
 import json
 import os
+import re
 import subprocess
 import sys
 import textwrap
@@ -10,7 +11,28 @@ from scripts.workflow_contracts import workflow_job_text, workflow_step_text
 REPO_ROOT = Path(__file__).resolve().parents[1]
 
 
-def test_dependency_audit_prints_runtime_requirements_from_pyproject():
+def test_dependency_audit_prints_selected_requirement_groups_from_pyproject():
+    script = REPO_ROOT / "scripts" / "dependency_audit.py"
+
+    completed = subprocess.run(
+        [sys.executable, str(script), "--print-requirements", "--groups", "runtime", "networkx", "pyg"],
+        cwd=REPO_ROOT,
+        capture_output=True,
+        text=True,
+    )
+
+    assert completed.returncode == 0, completed.stderr
+    lines = [line.strip() for line in completed.stdout.splitlines() if line.strip()]
+    assert lines == [
+        "numpy>=1.26",
+        "torch>=2.4",
+        "typing_extensions>=4.12",
+        "networkx>=3.2",
+        "torch-geometric>=2.5",
+    ]
+
+
+def test_dependency_audit_defaults_to_runtime_plus_all_optional_groups():
     script = REPO_ROOT / "scripts" / "dependency_audit.py"
 
     completed = subprocess.run(
@@ -23,7 +45,12 @@ def test_dependency_audit_prints_runtime_requirements_from_pyproject():
     assert completed.returncode == 0, completed.stderr
     lines = [line.strip() for line in completed.stdout.splitlines() if line.strip()]
     assert "torch>=2.4" in lines
-    assert "typing_extensions>=4.12" in lines
+    assert "build>=1.2" in lines
+    assert "numpy>=1.26" in lines
+    assert "networkx>=3.2" in lines
+    assert "tensorboard>=2.14" in lines
+    assert "dgl>=1.1.3,<2" in lines
+    assert "torch-geometric>=2.5" in lines
 
 
 def test_extras_smoke_lists_default_lightweight_extras():
@@ -48,6 +75,23 @@ def test_ci_workflow_runs_lint_extras_smoke_and_dependency_audit():
     assert "python scripts/extras_smoke.py --extras networkx scipy tensorboard" in ci_text
     assert "python scripts/dependency_audit.py" in ci_text
     assert "python scripts/metadata_consistency.py" in ci_text
+
+
+def test_publish_workflow_pins_all_actions_to_full_commit_shas():
+    publish_text = (REPO_ROOT / ".github" / "workflows" / "publish.yml").read_text(encoding="utf-8")
+
+    for action in (
+        "actions/checkout",
+        "actions/setup-python",
+        "actions/upload-artifact",
+        "actions/download-artifact",
+        "pypa/gh-action-pypi-publish",
+    ):
+        assert re.search(rf"uses:\s+{re.escape(action)}@[0-9a-f]{{40}}", publish_text), action
+
+    assert "@v4" not in publish_text
+    assert "@v5" not in publish_text
+    assert "@release/v1" not in publish_text
 
 
 def test_ci_workflow_includes_extended_matrix_and_jobs():

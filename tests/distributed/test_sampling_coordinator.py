@@ -66,6 +66,85 @@ def test_store_backed_sampling_coordinator_routes_seeds_and_fetches_features(tmp
     assert torch.equal(fetched.values, torch.tensor([[6.0, 7.0], [0.0, 1.0], [4.0, 5.0]]))
 
 
+@pytest.mark.parametrize("factory", ["local", "store"])
+def test_sampling_coordinator_empty_node_feature_fetch_preserves_dtype(factory, tmp_path):
+    graph = Graph.homo(
+        edge_index=torch.tensor([[0, 1, 2, 3], [1, 2, 3, 0]]),
+        x=torch.arange(4, dtype=torch.int64).view(4, 1),
+    )
+    write_partitioned_graph(graph, tmp_path, num_partitions=2)
+    if factory == "local":
+        coordinator = LocalSamplingCoordinator(
+            {
+                0: LocalGraphShard.from_partition_dir(tmp_path, partition_id=0),
+                1: LocalGraphShard.from_partition_dir(tmp_path, partition_id=1),
+            }
+        )
+    else:
+        coordinator = StoreBackedSamplingCoordinator.from_partition_dir(tmp_path)
+
+    fetched = coordinator.fetch_node_features(NODE_KEY, torch.empty((0,), dtype=torch.long))
+
+    assert fetched.values.shape == (0, 1)
+    assert fetched.values.dtype == torch.int64
+
+
+@pytest.mark.parametrize("factory", ["local", "store"])
+def test_sampling_coordinator_empty_edge_feature_fetch_preserves_dtype(factory, tmp_path):
+    graph = Graph.homo(
+        edge_index=torch.tensor([[0, 1, 2, 3], [1, 2, 3, 0]]),
+        x=torch.arange(4, dtype=torch.float32).view(4, 1),
+        edge_data={"bucket": torch.arange(4, dtype=torch.int64)},
+    )
+    write_partitioned_graph(graph, tmp_path, num_partitions=2)
+    if factory == "local":
+        coordinator = LocalSamplingCoordinator(
+            {
+                0: LocalGraphShard.from_partition_dir(tmp_path, partition_id=0),
+                1: LocalGraphShard.from_partition_dir(tmp_path, partition_id=1),
+            }
+        )
+    else:
+        coordinator = StoreBackedSamplingCoordinator.from_partition_dir(tmp_path)
+
+    fetched = coordinator.fetch_edge_features(("edge", ("node", "to", "node"), "bucket"), torch.empty((0,), dtype=torch.long))
+
+    assert fetched.values.shape == (0,)
+    assert fetched.values.dtype == torch.int64
+
+
+@pytest.mark.parametrize("factory", ["local", "store"])
+def test_sampling_coordinator_empty_typed_scalar_edge_feature_fetch_preserves_dtype(factory, tmp_path):
+    writes = ("author", "writes", "paper")
+    graph = Graph.hetero(
+        nodes={
+            "author": {"x": torch.arange(8, dtype=torch.float32).view(4, 2)},
+            "paper": {"x": torch.arange(10, 18, dtype=torch.float32).view(4, 2)},
+        },
+        edges={
+            writes: {
+                "edge_index": torch.tensor([[0, 1, 0], [1, 0, 0]]),
+                "bias": torch.tensor(3, dtype=torch.int64),
+            },
+        },
+    )
+    write_partitioned_graph(graph, tmp_path, num_partitions=2)
+    if factory == "local":
+        coordinator = LocalSamplingCoordinator(
+            {
+                0: LocalGraphShard.from_partition_dir(tmp_path, partition_id=0),
+                1: LocalGraphShard.from_partition_dir(tmp_path, partition_id=1),
+            }
+        )
+    else:
+        coordinator = StoreBackedSamplingCoordinator.from_partition_dir(tmp_path)
+
+    fetched = coordinator.fetch_edge_features(("edge", writes, "bias"), torch.empty((0,), dtype=torch.long))
+
+    assert fetched.values.shape == (0,)
+    assert fetched.values.dtype == torch.int64
+
+
 def test_sampling_coordinator_routes_seeds_and_fetches_features_match_local_and_store_backed(tmp_path):
     graph = Graph.homo(
         edge_index=torch.tensor([[0, 1, 2, 3], [1, 2, 3, 0]]),

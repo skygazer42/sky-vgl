@@ -79,10 +79,18 @@ def _node_public_ids(graph: Graph) -> torch.Tensor:
         return torch.arange(num_nodes, dtype=torch.long)
     if not isinstance(public_ids, torch.Tensor) or public_ids.ndim != 1 or public_ids.size(0) != num_nodes:
         raise ValueError("node feature 'n_id' must be a rank-1 tensor aligned to the number of nodes")
+    detached = public_ids.detach().cpu().reshape(-1)
+    for value in detached.tolist():
+        normalized = int(value)
+        if float(normalized) != float(value):
+            raise ValueError("node feature 'n_id' must contain integer public node ids for CSV export")
     try:
-        return torch.as_tensor(public_ids, dtype=torch.long)
+        resolved = torch.as_tensor(public_ids, dtype=torch.long)
     except Exception as exc:  # pragma: no cover - defensive path
         raise ValueError("node feature 'n_id' must contain integer public node ids") from exc
+    if len({int(node_id) for node_id in resolved.detach().cpu().numpy().reshape(-1)}) != int(resolved.numel()):
+        raise ValueError("node feature 'n_id' must contain unique public node ids for CSV export")
+    return resolved
 
 
 def _infer_export_columns(data: dict[str, object], *, count: int, excluded: set[str], entity_kind: str) -> list[str]:
@@ -109,6 +117,14 @@ def _resolve_export_columns(data, *, count: int, excluded: set[str], selected, e
                 f"{entity_kind} feature {name!r} must be a rank-1 tensor aligned to the number of {entity_kind}s"
             )
     return resolved
+
+
+def _ensure_unique_public_ids(values: torch.Tensor, *, entity_kind: str, column: str, export_target: str) -> None:
+    flattened = values.detach().cpu().numpy().reshape(-1)
+    if len({int(value) for value in flattened}) != len(flattened):
+        raise ValueError(
+            f"{entity_kind} feature {column!r} must contain unique public ids for {export_target} export"
+        )
 
 
 def _scalar_numeric_value(values: torch.Tensor, index: int, *, entity_kind: str, column: str):
@@ -205,6 +221,8 @@ def to_csv_tables(
         selected=edge_columns,
         entity_kind="edge",
     )
+    if "e_id" in edge_columns:
+        _ensure_unique_public_ids(graph.edata["e_id"], entity_kind="edge", column="e_id", export_target="CSV")
 
     with Path(nodes_path).open("w", encoding="utf-8", newline="") as handle:
         writer = csv.DictWriter(

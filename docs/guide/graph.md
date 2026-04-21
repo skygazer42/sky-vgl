@@ -174,6 +174,37 @@ graph = Graph.from_networkx(nx_graph)
 nx_graph = graph.to_networkx()
 ```
 
+`Graph.to_networkx` / `Graph.from_networkx` 当前只覆盖同构图互操作。节点与边特征会按字段名写到 `networkx.MultiDiGraph` 的属性字典里,再按同一字段名读回。模块级等价入口:
+
+```python
+from vgl.compat import from_networkx, to_networkx
+
+nx_graph = to_networkx(graph)
+graph = from_networkx(nx_graph)
+```
+
+当前 `vgl.compat.networkx` 仅覆盖同构图互操作；节点与边属性会按现有字段自动写入/读回。
+
+### 与 torch.sparse 互通
+
+要把 `Graph` 的邻接以原生 `torch.sparse_csr_tensor` 形式交给第三方算子,或者反过来从一张 torch 稀疏矩阵构造 `Graph`,走 `vgl.sparse` 的转换函数:
+
+```python
+import torch
+from vgl.sparse import from_torch_sparse, to_coo, to_torch_sparse
+
+# Graph → SparseTensor → torch.sparse
+vst = graph.adj(layout="csr")               # 返回 vgl.sparse.SparseTensor
+torch_csr = to_torch_sparse(vst)
+
+# torch.sparse → SparseTensor → edge_index
+vst2 = from_torch_sparse(torch_csr)
+coo = to_coo(vst2)
+edge_index = torch.stack((coo.row, coo.col))
+```
+
+`SparseLayout` / `to_coo` / `to_csr` / `to_csc` 的完整语义见 [API 参考:vgl.sparse](../api/sparse.md)。
+
 ## Storage 后端
 
 对于大规模图，可以使用 storage 后端实现延迟加载：

@@ -94,6 +94,8 @@ Keep these templates aligned with the workflow names and smoke commands above so
 ## TestPyPI
 
 Use the GitHub `publish` workflow in manual mode to publish to TestPyPI first.
+The publish workflow does not react to tag pushes, so manual dispatch is the
+only path to TestPyPI verification before a production release.
 
 For first-time TestPyPI setup, a pending publisher is fine while the project does
 not exist yet. If you prefer token-based publishing instead, create an
@@ -110,6 +112,9 @@ After upload, verify:
 ## PyPI
 
 Create a GitHub release after TestPyPI verification passes. The release workflow publishes with Trusted Publishing and uploads the already-built distribution artifacts to PyPI.
+Published GitHub releases are the only automation trigger for PyPI, which
+prevents a `refs/tags/vX.Y.Z` push and the matching release from both trying to
+publish the same version.
 
 Because `sky-vgl` already exists on PyPI, configure a normal trusted publisher
 under `Manage Project -> Publishing`; do not leave PyPI configured only with a

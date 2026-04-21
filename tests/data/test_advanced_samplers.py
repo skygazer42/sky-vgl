@@ -1,3 +1,4 @@
+import pytest
 import torch
 
 from vgl import Graph
@@ -29,6 +30,51 @@ def _graph():
 def _dead_end_graph():
     edge_index = torch.tensor([[0], [1]])
     return Graph.homo(edge_index=edge_index, x=torch.arange(6, dtype=torch.float32).view(2, 3))
+
+
+def _graph_without_x():
+    edge_index = torch.tensor(
+        [
+            [0, 1, 1, 2, 2, 3, 3, 4, 4, 0],
+            [1, 0, 2, 1, 3, 2, 4, 3, 0, 4],
+        ]
+    )
+    return Graph.homo(edge_index=edge_index, y=torch.tensor([0, 1, 0, 1, 0]))
+
+
+def _graph_with_public_n_id():
+    edge_index = torch.tensor(
+        [
+            [0, 1, 1, 2, 2, 3, 3, 4, 4, 0],
+            [1, 0, 2, 1, 3, 2, 4, 3, 0, 4],
+        ]
+    )
+    return Graph.homo(
+        edge_index=edge_index,
+        n_id=torch.tensor([100, 101, 102, 103, 104]),
+        y=torch.tensor([0, 1, 0, 1, 0]),
+    )
+
+
+def _graph_with_public_edge_ids():
+    edge_index = torch.tensor(
+        [
+            [0, 1, 1, 2, 2, 3, 3, 4, 4, 0],
+            [1, 0, 2, 1, 3, 2, 4, 3, 0, 4],
+        ]
+    )
+    return Graph.homo(
+        edge_index=edge_index,
+        x=torch.arange(15, dtype=torch.float32).view(5, 3),
+        edge_data={"e_id": torch.tensor([200, 201, 202, 203, 204, 205, 206, 207, 208, 209])},
+    )
+
+
+def _empty_graph():
+    return Graph.homo(
+        edge_index=torch.empty((2, 0), dtype=torch.long),
+        y=torch.empty((0,), dtype=torch.long),
+    )
 
 
 def test_random_walk_sampler_returns_path_sample_record():
@@ -181,6 +227,36 @@ def test_random_walk_sampler_records_effective_walk_lengths():
     assert sample.metadata["walk"] == [0, 1, -1, -1]
 
 
+def test_random_walk_sampler_supports_homo_graph_without_x():
+    sampler = RandomWalkSampler(walk_length=2, seed=0)
+
+    sample = sampler.sample((_graph_without_x(), {"seed": 0}))
+
+    assert sample.metadata["walk"][0] == 0
+    assert sample.metadata["sampled_num_nodes"] >= 1
+
+
+def test_random_walk_sampler_rejects_empty_graph():
+    sampler = RandomWalkSampler(walk_length=2)
+
+    with pytest.raises(ValueError, match="cannot sample random walks from an empty graph"):
+        sampler.sample(_empty_graph())
+
+
+def test_random_walk_sampler_preserves_public_node_ids_from_input_graph():
+    sampler = RandomWalkSampler(walk_length=2, seed=0)
+
+    sample = sampler.sample((_graph_with_public_n_id(), {"seed": 1}))
+
+    assert torch.equal(sample.graph.n_id, torch.tensor(sample.metadata["sampled_node_ids"]))
+    assert sample.metadata["seed"] == 101
+    assert sample.metadata["seed_ids"] == [101]
+    assert sample.metadata["walk_starts"] == [101]
+    assert sample.metadata["walk"][0] == 101
+    assert sample.metadata["walk_nodes"] == sample.metadata["sampled_node_ids"]
+    assert [sample.metadata["sampled_node_ids"][index] for index in sample.metadata["walk_start_positions"]] == [101]
+
+
 def test_node2vec_walk_sampler_returns_fixed_length_walk():
     sampler = Node2VecWalkSampler(walk_length=4, p=0.5, q=2.0, seed=1)
 
@@ -193,6 +269,22 @@ def test_node2vec_walk_sampler_returns_fixed_length_walk():
     assert sample.metadata["walk_starts"] == [2]
     assert sample.metadata["sampled_node_ids"] == sample.metadata["walk_nodes"]
     assert len(sample.metadata["walk"]) == 5
+
+
+def test_node2vec_walk_sampler_supports_homo_graph_without_x():
+    sampler = Node2VecWalkSampler(walk_length=2, p=1.0, q=1.0, seed=0)
+
+    sample = sampler.sample((_graph_without_x(), {"seed": 0}))
+
+    assert sample.metadata["walk"][0] == 0
+    assert sample.metadata["sampled_num_nodes"] >= 1
+
+
+def test_node2vec_walk_sampler_rejects_empty_graph():
+    sampler = Node2VecWalkSampler(walk_length=2, p=1.0, q=1.0)
+
+    with pytest.raises(ValueError, match="cannot sample random walks from an empty graph"):
+        sampler.sample(_empty_graph())
 
 
 def test_node2vec_walk_sampler_avoids_tensor_tolist(monkeypatch):
@@ -387,6 +479,19 @@ def test_graph_saint_node_sampler_expands_explicit_seed_collections():
     assert [sample.subgraph_seed for sample in samples] == [0, 1]
 
 
+def test_graph_saint_node_sampler_preserves_public_node_ids_from_input_graph():
+    sampler = GraphSAINTNodeSampler(num_sampled_nodes=2, seed=3)
+
+    samples = sampler.sample((_graph_with_public_n_id(), {"seed": [1, 4], "sample_id": "saint-node-public"}))
+
+    assert isinstance(samples, list)
+    assert len(samples) == 2
+    assert torch.equal(samples[0].graph.n_id, torch.tensor(samples[0].metadata["sampled_node_ids"]))
+    assert all(sample.metadata["seed_ids"] == [101, 104] for sample in samples)
+    assert [sample.metadata["seed"] for sample in samples] == [101, 104]
+    assert [samples[0].metadata["sampled_node_ids"][index] for index in samples[0].metadata["seed_positions"]] == [101, 104]
+
+
 def test_graph_saint_edge_sampler_returns_endpoint_induced_subgraph():
     sampler = GraphSAINTEdgeSampler(num_sampled_edges=2, seed=4)
 
@@ -469,6 +574,26 @@ def test_graph_saint_edge_sampler_can_force_include_explicit_edge_ids():
     assert [sample.metadata["sampled_node_ids"][index] for index in sample.metadata["seed_positions"]] == [1, 2]
 
 
+def test_graph_saint_edge_sampler_preserves_public_node_ids_from_input_graph():
+    sampler = GraphSAINTEdgeSampler(num_sampled_edges=1, seed=4)
+
+    sample = sampler.sample((_graph_with_public_n_id(), {"edge_id": [2, 3]}))
+
+    assert torch.equal(sample.graph.n_id, torch.tensor(sample.metadata["sampled_node_ids"]))
+    assert sample.metadata["sampled_node_ids"] == [101, 102]
+    assert sample.metadata["seed_ids"] == [101, 102]
+    assert [sample.metadata["sampled_node_ids"][index] for index in sample.metadata["seed_positions"]] == [101, 102]
+
+
+def test_graph_saint_edge_sampler_preserves_public_edge_ids_from_input_graph():
+    sampler = GraphSAINTEdgeSampler(num_sampled_edges=1, seed=4)
+
+    sample = sampler.sample((_graph_with_public_edge_ids(), {"edge_id": [2, 3]}))
+
+    assert sample.metadata["sampled_edge_ids"][:2] == [202, 203]
+    assert set(sample.metadata["sampled_edge_ids"]) <= set(sample.metadata["subgraph_edge_ids"])
+
+
 def test_graph_saint_random_walk_sampler_returns_subgraph():
     sampler = GraphSAINTRandomWalkSampler(num_walks=2, walk_length=2, seed=5)
 
@@ -481,6 +606,35 @@ def test_graph_saint_random_walk_sampler_returns_subgraph():
     assert sample.metadata["sampled_num_nodes"] == int(sample.graph.x.size(0))
     assert sample.metadata["sampled_num_edges"] == int(sample.graph.edge_index.size(1))
     assert sample.metadata["sampling_config"]["num_walks"] == 2
+
+
+def test_graph_saint_random_walk_sampler_supports_homo_graph_without_x():
+    sampler = GraphSAINTRandomWalkSampler(num_walks=2, walk_length=2, seed=5)
+
+    sample = sampler.sample(_graph_without_x())
+
+    assert sample.metadata["sampled_num_nodes"] >= 1
+    assert sample.metadata["sampled_num_edges"] >= 0
+
+
+def test_graph_saint_random_walk_sampler_rejects_empty_graph():
+    sampler = GraphSAINTRandomWalkSampler(num_walks=2, walk_length=2)
+
+    with pytest.raises(ValueError, match="cannot sample random walks from an empty graph"):
+        sampler.sample(_empty_graph())
+
+
+def test_graph_saint_random_walk_sampler_preserves_public_node_ids_from_input_graph():
+    sampler = GraphSAINTRandomWalkSampler(num_walks=2, walk_length=2, seed=5)
+
+    sample = sampler.sample((_graph_with_public_n_id(), {"seed": 1}))
+
+    assert torch.equal(sample.graph.n_id, torch.tensor(sample.metadata["sampled_node_ids"]))
+    assert sample.metadata["seed"] == 101
+    assert sample.metadata["seed_ids"] == [101]
+    assert sample.metadata["walk_starts"] == [101, 101]
+    assert sample.metadata["walk_nodes"] == sample.metadata["sampled_node_ids"]
+    assert [sample.metadata["sampled_node_ids"][index] for index in sample.metadata["walk_start_positions"]] == [101, 101]
 
 
 def test_graph_saint_random_walk_sampler_avoids_tensor_tolist(monkeypatch):
@@ -703,6 +857,18 @@ def test_shadow_khop_sampler_expands_explicit_multi_seed_records():
     assert [sample.metadata["seed"] for sample in samples] == [1, 3]
     assert all(sample.metadata["seed_ids"] == [1, 3] for sample in samples)
     assert all(sample.subgraph_seed is not None for sample in samples)
+
+
+def test_shadow_khop_sampler_preserves_public_node_ids_from_input_graph():
+    sampler = ShaDowKHopSampler(num_hops=1)
+
+    sample = sampler.sample((_graph_with_public_n_id(), {"seed": 2, "sample_id": "shadow-public"}))
+
+    assert sample.sample_id == "shadow-public"
+    assert torch.equal(sample.graph.n_id, torch.tensor(sample.metadata["sampled_node_ids"]))
+    assert sample.metadata["seed"] == 102
+    assert sample.metadata["seed_ids"] == [102]
+    assert [sample.metadata["sampled_node_ids"][index] for index in sample.metadata["seed_positions"]] == [102]
 
 
 def test_loader_builds_node_batch_from_shadow_multi_seed_context():
