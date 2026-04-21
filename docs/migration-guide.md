@@ -31,6 +31,8 @@ On first import, each legacy namespace now emits a single `FutureWarning` that p
 
 Legacy compatibility namespaces stay supported through the current 0.x line. New code should migrate to `vgl.graph`, `vgl.dataloading`, `vgl.engine`, `vgl.tasks`, and `vgl.metrics` now. Breaking removals will be announced in the changelog before they ship.
 
+Follow `docs/changelog.md` when compatibility behavior changes. Use the `Migration` section for deprecation and removal notices, and the `Interop` section for adapter-specific caveats.
+
 Common import rewrites:
 
 - `from vgl.data.loader import Loader` -> `from vgl.dataloading import DataLoader`

@@ -102,6 +102,8 @@ include = [
   "/scripts/install_release_extras.py",
   "/scripts/release_artifact_metadata.py",
   "/scripts/repo_script_imports.py",
+  "/scripts/contracts.py",
+  "/scripts/workflow_contracts.py",
   "/vgl",
   "/examples",
   "/docs/core-concepts.md",

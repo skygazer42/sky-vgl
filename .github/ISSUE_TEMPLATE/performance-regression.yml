@@ -15,7 +15,7 @@ body:
     id: benchmark
     attributes:
       label: Benchmark evidence
-      description: Include the command and relevant output from `python scripts/benchmark_hotpaths.py --preset ci --output artifacts/benchmark-hotpaths.json`.
+      description: Include the command and relevant output from `python scripts/benchmark_hotpaths.py --preset ci --output artifacts/benchmark-hotpaths.json`, and attach the generated `benchmark-hotpaths` / `benchmark-hotpaths.json` artifact when available.
     validations:
       required: true
   - type: textarea

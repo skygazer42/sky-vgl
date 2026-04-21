@@ -65,6 +65,18 @@ before proving combined artifact interop.
 git log --oneline --decorate <previous-tag>..HEAD
 ```
 
+## Workflow map
+
+Use this table when you need to map a failing workflow step back to the exact local command and expected artifact:
+
+| Workflow job | What it proves | Expected artifact/output | Local replay |
+| --- | --- | --- | --- |
+| `ci.yml -> package-check` | The branch can build releasable wheel/sdist artifacts, validate metadata, and pass combined artifact smoke | `dist/*.whl`, `dist/*.tar.gz` | `python -m build && python scripts/release_contract_scan.py --artifact-dir dist && python -m twine check dist/*.whl dist/*.tar.gz && python scripts/release_smoke.py --artifact-dir dist --kind all --interop-backend all` |
+| `publish.yml -> build` | The real publish gate can rebuild artifacts, provision release extras from metadata, and produce the upload bundle | uploaded artifact `release-dists` | `python scripts/metadata_consistency.py --git-ref "${GITHUB_REF}" && python -m build && python scripts/install_release_extras.py --artifact-dir dist --extras pyg dgl && python scripts/release_smoke.py --artifact-dir dist --kind all --interop-backend all` |
+| `interop-smoke.yml -> backend-smoke` | A single real backend install can round-trip through the checkout surface | console output ending in `pyg interop smoke passed` or `dgl interop smoke passed` | `python scripts/interop_smoke.py --backend pyg` or `python scripts/interop_smoke.py --backend dgl` |
+| `interop-smoke.yml -> all-artifact-smoke` | Both backends can round-trip through built artifacts, not just the checkout | built `dist/*` plus successful all-backend smoke output | `python -m build && python scripts/interop_smoke.py --backend all && python scripts/release_smoke.py --artifact-dir dist --kind wheel --interop-backend all` |
+| `ci.yml -> benchmark` | Runtime-sensitive changes still produce a benchmark artifact in CI format | uploaded artifact `benchmark-hotpaths` containing `benchmark-hotpaths.json` | `python scripts/benchmark_hotpaths.py --preset ci --output artifacts/benchmark-hotpaths.json --print` |
+
 ## Release failure triage
 
 Use the failing workflow and step name to narrow the fix path before rerunning anything:

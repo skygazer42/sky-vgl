@@ -138,6 +138,40 @@ VGL is a PyTorch-first graph framework that bundles Graph, Task, Trainer, sparse
 
 ---
 
+## VGL vs PyG vs DGL
+
+下面这张表不是性能排行榜，而是基于当前公开 API、文档和官方资料的定位说明。
+
+| 框架 | 更适合什么场景 | 当前公开强项 | 当前取舍 |
+|------|----------------|--------------|----------|
+| **VGL** | 想用一套 API 同时覆盖同构图、异构图、时序图，并直接接上 Task / Trainer / Metric / sampling / interop | 当前公开表面强调统一 `Graph` 抽象、内建训练 pipeline、采样层、稀疏与存储能力，以及 DGL / PyG 互操作 | 外部生态规模和分布式运行时成熟度目前不如 PyG / DGL；更适合重视统一抽象和内建 workflow 的团队 |
+| **PyG** | 已经在 PyTorch 生态里，希望优先获得成熟的 `Data` / `HeteroData`、heterogeneous modeling、mini-batch loaders 与可选编译扩展 | 官方文档把 `to_hetero()`、`HeteroConv`、`NeighborLoader`、`HGTLoader` 作为异构图与大图训练的重要入口；官方 README 也把 `pyg-lib` 的 heterogeneous operators 和 graph sampling routines 作为扩展重点 | 训练 loop、任务抽象、日志/检查点策略更偏组合式，项目级 pipeline 往往需要自行组织 |
+| **DGL** | 把 stage 化 dataloading、GraphBolt 或多机分布式图训练当成核心要求 | 官方文档将 `dgl.graphbolt` 定义为按数据管线阶段组织的 GNN dataloading framework，也提供 `dgl.distributed` 与 `DistGraph` 支持分区图、分布式采样和集群训练 | 对于更偏 PyTorch-native 对象和 PyG 风格模型/loader 的团队，DGL 的运行时与 API 习惯会更像一套独立体系 |
+
+### VGL 当前更强的点
+
+- **统一图抽象优先。** 当前文档和包结构把同构图、异构图、时序图都放在一个 `Graph` 公共入口下，而不是要求用户在不同图类型之间切换不同顶层对象。
+- **训练栈内建。** `Trainer`、`Task`、`Metric`、checkpoint、logger、sampling 都在同一项目表面上，适合想要少拼装一些基础设施的项目。
+- **互操作是公共能力，不是隐藏脚本。** 当前迁移指南和兼容层把 DGL / PyG 双向适配作为显式入口暴露出来。
+
+### VGL 当前更薄的点
+
+- **外部生态还不如 PyG / DGL 深。** 如果你的第一优先级是社区现成 recipe、第三方教程或更广泛的扩展生态，PyG 和 DGL 仍然更成熟。
+- **分布式运行时不以 DGL 为目标对齐。** DGL 官方文档已经公开 `GraphBolt` 和 `DistGraph` 这类分布式与 stage-based runtime 表面；VGL 当前更偏本地优先、统一抽象优先。
+- **如果你只想要 PyTorch-native heterogeneous mini-batching，PyG 往往更直接。** 这是因为 PyG 已经把 `HeteroData`、`NeighborLoader` 和 `to_hetero()` 路径文档化并长期围绕它演进。
+
+### 参考资料
+
+- [PyG README](https://github.com/pyg-team/pytorch_geometric)
+- [PyG heterogeneous graph docs](https://pytorch-geometric.readthedocs.io/en/stable/notes/heterogeneous.html)
+- [DGL README](https://github.com/dmlc/dgl)
+- [DGL GraphBolt docs](https://www.dgl.ai/dgl_docs/api/python/dgl.graphbolt.html)
+- [DGL distributed docs](https://www.dgl.ai/dgl_docs/api/python/dgl.distributed.html)
+- [VGL 架构概览](architecture.md)
+- [VGL 迁移指南](migration-guide.md)
+
+---
+
 ## 包架构
 
 | 模块 | 功能 |

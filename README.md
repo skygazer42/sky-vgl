@@ -34,6 +34,26 @@
 
 ---
 
+## Positioning
+
+VGL is strongest when you want one public graph API across homogeneous, heterogeneous, and temporal workloads, and you want that API to connect directly to built-in sampling, tasks, metrics, checkpoints, and trainers in the same package surface. That is the main trade the project makes: a unified, batteries-included graph-learning stack instead of a thin wrapper around one graph type or one training style.
+
+PyTorch Geometric is a stronger fit when the priority is the broader PyTorch-native ecosystem around `Data`/`HeteroData`, `NeighborLoader`, `HGTLoader`, `to_hetero()`, and optional compiled extensions such as `pyg-lib` for heterogeneous operators and graph sampling. DGL is a stronger fit when GraphBolt's stage-based data pipeline or `dgl.distributed`/`DistGraph`-style distributed training and sampling is the primary requirement.
+
+VGL is thinner today in two places: external ecosystem depth and distributed runtime maturity. If those are your first-order requirements, PyG or DGL will usually be the more natural starting point. If you instead want one consistent surface that spans graph types, interop adapters, and the training stack, VGL is the better fit.
+
+Official references for the comparison:
+
+- [PyG README](https://github.com/pyg-team/pytorch_geometric)
+- [PyG heterogeneous graph docs](https://pytorch-geometric.readthedocs.io/en/stable/notes/heterogeneous.html)
+- [DGL README](https://github.com/dmlc/dgl)
+- [DGL GraphBolt docs](https://www.dgl.ai/dgl_docs/api/python/dgl.graphbolt.html)
+- [DGL distributed docs](https://www.dgl.ai/dgl_docs/api/python/dgl.distributed.html)
+- [VGL architecture](docs/architecture.md)
+- [VGL migration guide](docs/migration-guide.md)
+
+---
+
 ## Quick Start
 
 ```python
@@ -87,6 +107,8 @@ pip install "sky-vgl[pyg]"               # PyTorch Geometric interoperability
 ## Compatibility Policy
 
 Legacy compatibility namespaces stay supported through the current 0.x line. New code should migrate to `vgl.graph`, `vgl.dataloading`, `vgl.engine`, `vgl.tasks`, and `vgl.metrics` now. Breaking removals will be announced in the changelog before they ship.
+
+Compatibility changes and migration notes are tracked in `docs/changelog.md`. Performance-impacting changes should summarize benchmark method or artifact changes in `docs/changelog.md`.
 
 ### Source Install
 
