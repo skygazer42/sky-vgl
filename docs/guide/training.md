@@ -224,11 +224,16 @@ Logger 记录的结构化事件包括：
 | 事件 | 说明 |
 |------|------|
 | `fit_start` | 训练开始，包含运行元数据 |
+| `stage_start` | 每个 train / val / test / sanity_val 阶段开始，包含 `total_batches` |
 | `train_step` | 每个训练步骤 |
 | `epoch_end` | 每个 epoch 结束 |
+| `evaluate_end` | 每个验证或测试阶段结束 |
 | `monitor_improved` | 监控指标改善，包含改善量 |
 | `checkpoint_saved` | checkpoint 保存，包含文件大小和耗时 |
+| `exception` | 训练过程中的结构化异常记录 |
 | `fit_end` | 训练结束 |
+
+无上下文 logger 仍然会保留每个事件的核心字段。例如 `stage_start` 至少保留 `event / stage / epoch / epochs / global_step / batch_idx / total_batches`，而 `checkpoint_saved` 还会保留 `checkpoint_tag / path / size_bytes / save_seconds / format / format_version`。这让 JSONL / CSV 过滤模式在裁剪上下文后仍然保持可机器消费的事件合同。
 
 ## 高级训练工具
 

@@ -1,9 +1,12 @@
 import pytest
 import torch
 from torch import nn
+from pathlib import Path
 
 from vgl import Graph
 from vgl.engine import trainer as trainer_module
+from vgl.metrics.base import MetricProtocol
+from vgl.tasks.base import TaskProtocol
 from vgl.train.tasks import NodeClassificationTask
 from vgl.train.trainer import Trainer
 
@@ -15,6 +18,37 @@ class LinearNodeModel(nn.Module):
 
     def forward(self, graph):
         return self.linear(graph.x)
+
+
+class DuckMetric:
+    name = "duck"
+
+    def reset(self):
+        return None
+
+    def update(self, predictions, targets, **kwargs):
+        del predictions, targets, kwargs
+        return None
+
+    def compute(self):
+        return 1.0
+
+
+class DuckTask:
+    def __init__(self):
+        self.metrics = [DuckMetric()]
+
+    def loss(self, graph, predictions, stage):
+        del stage
+        return torch.nn.functional.cross_entropy(predictions, graph.y)
+
+    def targets(self, batch, stage):
+        del stage
+        return batch.y
+
+    def predictions_for_metrics(self, batch, predictions, stage):
+        del batch, stage
+        return predictions
 
 
 def test_trainer_runs_single_epoch():
@@ -43,6 +77,37 @@ def test_trainer_runs_single_epoch():
 
     assert history["epochs"] == 1
     assert len(history["train"]) == 1
+
+
+def test_trainer_accepts_protocol_typed_task_and_metric_specs():
+    graph = Graph.homo(
+        edge_index=torch.tensor([[0, 1], [1, 0]]),
+        x=torch.randn(2, 4),
+        y=torch.tensor([0, 1]),
+        train_mask=torch.tensor([True, True]),
+        val_mask=torch.tensor([True, True]),
+        test_mask=torch.tensor([True, True]),
+    )
+    task = DuckTask()
+
+    assert isinstance(task, TaskProtocol)
+    assert isinstance(task.metrics[0], MetricProtocol)
+
+    trainer = Trainer(
+        model=LinearNodeModel(),
+        task=task,
+        optimizer=torch.optim.Adam,
+        lr=1e-2,
+        max_epochs=1,
+    )
+
+    metrics = trainer._metrics()
+    history = trainer.fit(graph)
+
+    assert len(metrics) == 1
+    assert metrics[0] is not task.metrics[0]
+    assert isinstance(metrics[0], MetricProtocol)
+    assert history["epochs"] == 1
 
 
 def test_validate_init_config_accepts_supported_values():
@@ -105,6 +170,138 @@ def test_validate_init_config_rejects_invalid_values():
             non_blocking="yes",
             num_sanity_val_steps=0,
             profiler=None,
+        )
+
+
+def test_normalize_init_config_returns_normalized_settings():
+    config = trainer_module._normalize_init_config(
+        accumulate_grad_batches=2,
+        log_every_n_steps=5,
+        gradient_clip_val=0,
+        console_flush_every_n_steps=3,
+        scheduler_monitor=None,
+        lr_scheduler=object(),
+        lr_scheduler_interval="epoch",
+        precision="32",
+        device="cpu",
+        move_batch_to_device=True,
+        non_blocking=False,
+        default_root_dir="artifacts",
+        run_name="smoke",
+        fast_dev_run=True,
+        limit_train_batches=1.0,
+        limit_val_batches=2,
+        limit_test_batches=3,
+        val_check_interval=1,
+        num_sanity_val_steps=0,
+        profiler="simple",
+    )
+
+    assert config.device == torch.device("cpu")
+    assert config.default_root_dir == Path("artifacts")
+    assert config.run_name == "smoke"
+    assert config.fast_dev_run is True
+    assert config.fast_dev_run_batches == 1
+    assert config.limit_train_batches == 1.0
+    assert config.limit_val_batches == 2
+    assert config.limit_test_batches == 3
+    assert config.val_check_interval == 1
+    assert config.accumulate_grad_batches == 2
+    assert config.log_every_n_steps == 5
+    assert config.gradient_clip_val == 0.0
+    assert config.console_flush_every_n_steps == 3
+
+
+def test_normalize_init_config_rejects_non_blocking_without_device_transfer():
+    with pytest.raises(ValueError, match="non_blocking requires move_batch_to_device=True"):
+        trainer_module._normalize_init_config(
+            accumulate_grad_batches=1,
+            log_every_n_steps=1,
+            gradient_clip_val=None,
+            console_flush_every_n_steps=None,
+            scheduler_monitor=None,
+            lr_scheduler=None,
+            lr_scheduler_interval="epoch",
+            precision="32",
+            device=None,
+            move_batch_to_device=False,
+            non_blocking=True,
+            default_root_dir=None,
+            run_name=None,
+            fast_dev_run=False,
+            limit_train_batches=1.0,
+            limit_val_batches=1.0,
+            limit_test_batches=1.0,
+            val_check_interval=1.0,
+            num_sanity_val_steps=0,
+            profiler=None,
+        )
+
+
+def test_build_init_config_normalizes_constructor_values(tmp_path):
+    config = trainer_module._build_init_config(
+        model=LinearNodeModel(),
+        device="cpu",
+        move_batch_to_device=1,
+        non_blocking=None,
+        default_root_dir=tmp_path / "artifacts",
+        run_name=123,
+        fast_dev_run=True,
+        limit_train_batches=2,
+        limit_val_batches=0.5,
+        limit_test_batches=3,
+        val_check_interval=1,
+        num_sanity_val_steps=2,
+        profiler="simple",
+        accumulate_grad_batches=2,
+        log_every_n_steps=5,
+        gradient_clip_val=1,
+        console_flush_every_n_steps=10,
+        scheduler_monitor=None,
+        lr_scheduler=None,
+        lr_scheduler_interval="epoch",
+        precision="32",
+    )
+
+    assert config["device"] == torch.device("cpu")
+    assert config["move_batch_to_device"] is True
+    assert config["default_root_dir"] == tmp_path / "artifacts"
+    assert config["run_name"] == "123"
+    assert config["fast_dev_run_batches"] == 1
+    assert config["limit_train_batches"] == 2
+    assert config["limit_val_batches"] == 0.5
+    assert config["limit_test_batches"] == 3
+    assert config["val_check_interval"] == 1
+    assert config["num_sanity_val_steps"] == 2
+    assert config["accumulate_grad_batches"] == 2
+    assert config["log_every_n_steps"] == 5
+    assert config["gradient_clip_val"] == 1.0
+
+
+def test_build_init_config_rejects_non_blocking_without_transfer():
+    with pytest.raises(ValueError, match="non_blocking requires move_batch_to_device=True"):
+        trainer_module._build_init_config(
+            model=LinearNodeModel(),
+            device=None,
+            move_batch_to_device=False,
+            non_blocking=True,
+            default_root_dir=None,
+            run_name=None,
+            fast_dev_run=False,
+            limit_train_batches=1.0,
+            limit_val_batches=1.0,
+            limit_test_batches=1.0,
+            val_check_interval=1.0,
+            num_sanity_val_steps=0,
+            profiler=None,
+            accumulate_grad_batches=1,
+            log_every_n_steps=1,
+            gradient_clip_val=None,
+            console_flush_every_n_steps=None,
+            scheduler_monitor=None,
+            lr_scheduler=None,
+            lr_scheduler_interval="epoch",
+            precision="32",
         )
 
 

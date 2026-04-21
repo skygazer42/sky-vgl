@@ -626,18 +626,24 @@ def test_json_lines_logger_writes_structured_fit_events(tmp_path):
 
     assert [record["event"] for record in records] == [
         "fit_start",
+        "stage_start",
         "train_step",
         "train_step",
+        "stage_start",
         "monitor_improved",
         "epoch_end",
         "fit_end",
     ]
     assert records[0]["monitor"] == "val_loss"
-    assert records[1]["global_step"] == 1
-    assert records[2]["global_step"] == 2
-    assert records[3]["monitor_name"] == "val_loss"
-    assert records[4]["metrics"]["val_loss"] > 0.0
-    assert records[5]["best_epoch"] == 1
+    assert records[1]["stage"] == "train"
+    assert records[1]["total_batches"] == 2
+    assert records[2]["global_step"] == 1
+    assert records[3]["global_step"] == 2
+    assert records[4]["stage"] == "val"
+    assert records[4]["total_batches"] == 1
+    assert records[5]["monitor_name"] == "val_loss"
+    assert records[6]["metrics"]["val_loss"] > 0.0
+    assert records[7]["best_epoch"] == 1
 
 
 def test_json_lines_logger_can_filter_to_epoch_events_only(tmp_path):
@@ -968,6 +974,83 @@ def test_json_lines_logger_preserves_fit_start_core_fields_without_context(tmp_p
     assert records[0]["metrics"] == {}
     assert "callback_names" not in records[0]
     assert "logger_names" not in records[0]
+
+
+def test_json_lines_logger_preserves_stage_start_core_fields_without_context(tmp_path):
+    path = tmp_path / "stage_start.jsonl"
+    trainer = Trainer(
+        model=ToyModel(),
+        task=ToyTask(),
+        optimizer=torch.optim.SGD,
+        lr=0.1,
+        max_epochs=1,
+        loggers=[
+            JSONLinesLogger(
+                path,
+                flush=True,
+                events={"stage_start"},
+                include_context=False,
+            )
+        ],
+        enable_console_logging=False,
+    )
+
+    trainer.fit([ToyBatch(1.0)], val_data=[ToyBatch(1.0)])
+
+    records = [json.loads(line) for line in path.read_text().splitlines()]
+
+    assert len(records) == 2
+    assert records[0].keys() == {
+        "batch_idx",
+        "epoch",
+        "epochs",
+        "event",
+        "global_step",
+        "metrics",
+        "stage",
+        "total_batches",
+    }
+    assert records[0]["event"] == "stage_start"
+    assert records[0]["stage"] == "train"
+    assert records[0]["total_batches"] == 1
+
+
+def test_csv_logger_preserves_stage_start_core_fields_without_context(tmp_path):
+    path = tmp_path / "stage_start.csv"
+    trainer = Trainer(
+        model=ToyModel(),
+        task=ToyTask(),
+        optimizer=torch.optim.SGD,
+        lr=0.1,
+        max_epochs=1,
+        loggers=[
+            CSVLogger(
+                path,
+                flush=True,
+                events={"stage_start"},
+                include_context=False,
+            )
+        ],
+        enable_console_logging=False,
+    )
+
+    trainer.fit([ToyBatch(1.0)], val_data=[ToyBatch(1.0)])
+
+    rows = list(csv.DictReader(path.read_text().splitlines()))
+
+    assert len(rows) == 2
+    assert set(rows[0]) == {
+        "event",
+        "stage",
+        "epoch",
+        "epochs",
+        "global_step",
+        "batch_idx",
+        "total_batches",
+    }
+    assert rows[0]["event"] == "stage_start"
+    assert rows[0]["stage"] == "train"
+    assert rows[0]["total_batches"] == "1"
 
 
 def test_csv_logger_preserves_exception_core_fields_without_context(tmp_path):

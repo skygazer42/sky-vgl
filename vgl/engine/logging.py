@@ -102,6 +102,9 @@ _CORE_RECORD_FIELDS = (
 )
 
 _EVENT_CORE_RECORD_FIELDS = {
+    "stage_start": (
+        "total_batches",
+    ),
     "fit_start": (
         "monitor",
         "model_name",
@@ -603,6 +606,9 @@ class JSONLinesLogger(Logger):
     def on_fit_start(self, run_info):
         self._write(run_info)
 
+    def on_stage_start(self, stage_record):
+        self._write(stage_record)
+
     def on_train_step(self, log_record):
         self._write(log_record)
 
@@ -701,6 +707,9 @@ class CSVLogger(Logger):
     def on_fit_start(self, run_info):
         self._write(run_info)
 
+    def on_stage_start(self, stage_record):
+        self._write(stage_record)
+
     def on_train_step(self, log_record):
         self._write(log_record)
 
@@ -782,6 +791,17 @@ class TensorBoardLogger(Logger):
         metadata = {key: value for key, value in run_info.items() if key != "metrics"}
         writer = self._ensure_writer()
         writer.add_text("run/metadata", json.dumps(metadata, sort_keys=True), 0)
+        self._flush_if_needed()
+
+    def on_stage_start(self, stage_record):
+        if not self._should_log_event(stage_record["event"]):
+            return
+        writer = self._ensure_writer()
+        writer.add_text(
+            f"events/{stage_record['event']}",
+            json.dumps(stage_record, sort_keys=True),
+            _tensorboard_step(stage_record),
+        )
         self._flush_if_needed()
 
     def on_train_step(self, log_record):

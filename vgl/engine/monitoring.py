@@ -1,4 +1,6 @@
 _MONITOR_STAGES = {"train", "val"}
+_SUMMARY_STAGES = ("train", "val", "test")
+_RESERVED_STAGE_PREFIXES = tuple(f"{stage}_" for stage in _SUMMARY_STAGES)
 
 
 def _split_monitor_key(monitor):
@@ -12,6 +14,15 @@ def _default_monitor_mode_for_key(key):
     if key == "loss" or key.endswith("_loss"):
         return "min"
     return "max"
+
+
+def validate_metric_name(name):
+    resolved = str(name)
+    if any(resolved.startswith(prefix) for prefix in _RESERVED_STAGE_PREFIXES):
+        raise ValueError(
+            "Metric names must not start with reserved stage prefixes: train_, val_, test_"
+        )
+    return resolved
 
 
 def resolve_monitor_mode(monitor, mode=None, *, invalid_mode_message="monitor_mode must be 'min' or 'max'"):
