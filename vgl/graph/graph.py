@@ -13,10 +13,19 @@ GRAPH_FORMAT_VERSION = 1
 
 
 def _infer_row_count(values: dict[str, object]) -> int | None:
+    fallback = None
     for value in values.values():
         if isinstance(value, torch.Tensor) and value.ndim > 0:
-            return int(value.size(0))
-    return None
+            size0 = int(value.size(0))
+            if size0 == 1:
+                fallback = 1
+                continue
+            return size0
+    return fallback
+
+
+def _is_graph_level_singleton(value: torch.Tensor) -> bool:
+    return value.ndim == 1 and int(value.size(0)) == 1
 
 
 def _validate_edge_index(edge_index: torch.Tensor) -> torch.Tensor:
@@ -31,7 +40,11 @@ def _validate_node_features(node_type: str, node_data: dict[str, object]) -> Non
     if node_count is None:
         return
     for name, value in node_data.items():
-        if isinstance(value, torch.Tensor) and value.ndim > 0 and int(value.size(0)) != node_count:
+        if not isinstance(value, torch.Tensor) or value.ndim == 0:
+            continue
+        if _is_graph_level_singleton(value):
+            continue
+        if int(value.size(0)) != node_count:
             raise GraphConstructionError(
                 f"node feature {name!r} must match node count {node_count} for node type {node_type!r}"
             )
@@ -39,6 +52,10 @@ def _validate_node_features(node_type: str, node_data: dict[str, object]) -> Non
 
 def _validate_edge_features(edge_type: tuple[str, str, str], edge_data: dict[str, object]) -> None:
     edge_index = edge_data["edge_index"]
+    if not isinstance(edge_index, torch.Tensor):
+        raise GraphConstructionError(
+            f"edge feature 'edge_index' must be a tensor for edge type {edge_type!r}"
+        )
     edge_count = int(edge_index.size(1))
     for name, value in edge_data.items():
         if name == "edge_index":

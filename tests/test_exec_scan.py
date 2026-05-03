@@ -107,6 +107,19 @@ def test_ci_workflow_includes_extended_matrix_and_jobs():
     assert "--cov=scripts" in ci_text
 
 
+def test_ci_workflow_uses_valid_actionlint_invocation_and_lightweight_dependency_audit_scope():
+    workflow_path = REPO_ROOT / ".github" / "workflows" / "ci.yml"
+    workflow_lint_step = workflow_step_text(workflow_path, "workflow-lint", "Lint workflows")
+    dependency_audit_step = workflow_step_text(workflow_path, "exec-scan", "Run dependency audit")
+
+    assert "actionlint\n" in workflow_lint_step or workflow_lint_step.rstrip().endswith("actionlint")
+    assert "actionlint .github/workflows" not in workflow_lint_step
+    assert (
+        "python scripts/dependency_audit.py --groups runtime networkx scipy tensorboard"
+        in dependency_audit_step
+    )
+
+
 def test_manual_interop_workflow_covers_pyg_and_dgl():
     workflow_text = (REPO_ROOT / ".github" / "workflows" / "interop-smoke.yml").read_text(encoding="utf-8")
 

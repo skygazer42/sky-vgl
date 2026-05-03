@@ -64,3 +64,13 @@ def test_homo_graph_rejects_node_feature_length_mismatch():
             x=torch.randn(2, 4),
             y=torch.tensor([0, 1, 2]),
         )
+
+
+def test_homo_graph_accepts_singleton_graph_label_alongside_node_features():
+    graph = Graph.homo(
+        edge_index=torch.tensor([[0, 1], [1, 0]]),
+        x=torch.randn(2, 4),
+        y=torch.tensor([1]),
+    )
+
+    assert torch.equal(graph.y, torch.tensor([1]))

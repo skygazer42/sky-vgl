@@ -8,10 +8,10 @@ SCAN 007 [root] vgl exports GraphClassificationTask from vgl.tasks
 SCAN 008 [root] vgl exports LinkPredictionTask from vgl.tasks
 SCAN 009 [root] vgl exports TemporalEventPredictionTask from vgl.tasks
 SCAN 010 [root] vgl exports __version__ from vgl.version
-SCAN 011 [root] vgl exports DatasetRegistry from vgl.data
-SCAN 012 [root] vgl exports KarateClubDataset from vgl.data
-SCAN 013 [root] vgl exports PlanetoidDataset from vgl.data
-SCAN 014 [root] vgl exports TUDataset from vgl.data
+SCAN 011 [root] vgl exports DatasetRegistry from vgl.data.public
+SCAN 012 [root] vgl exports KarateClubDataset from vgl.data.public
+SCAN 013 [root] vgl exports PlanetoidDataset from vgl.data.public
+SCAN 014 [root] vgl exports TUDataset from vgl.data.public
 SCAN 015 [data] vgl.data reexports DatasetRegistry from vgl.data.public
 SCAN 016 [data] vgl.data reexports KarateClubDataset from vgl.data.public
 SCAN 017 [data] vgl.data reexports PlanetoidDataset from vgl.data.public
