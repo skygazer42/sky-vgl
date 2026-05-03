@@ -536,14 +536,14 @@ def build_tasks(repo_root: Path) -> list[ScanTask]:
                 "git clone https://github.com/skygazer42/sky-vgl.git",
             ),
             _text_contains_task(ctx, "042", "readme", "README documents cd sky-vgl", "README.md", "cd sky-vgl"),
-            _text_contains_task(ctx, "043", "readme", "README uses repo logo asset path", "README.md", 'src="assets/logo.svg"'),
+            _text_contains_task(ctx, "043", "readme", "README uses repo logo asset path", "README.md", 'src="assets/logo.png"'),
             _text_contains_task(
                 ctx,
                 "044",
                 "readme",
                 "README uses repo graph-types asset path",
                 "README.md",
-                'src="assets/graph-types.svg"',
+                'src="assets/graph-types.png"',
             ),
             _text_contains_task(
                 ctx,
@@ -551,7 +551,7 @@ def build_tasks(repo_root: Path) -> list[ScanTask]:
                 "readme",
                 "README uses repo architecture asset path",
                 "README.md",
-                'src="assets/architecture.svg"',
+                'src="assets/architecture.png"',
             ),
             _text_contains_task(
                 ctx,
@@ -559,7 +559,7 @@ def build_tasks(repo_root: Path) -> list[ScanTask]:
                 "readme",
                 "README uses repo pipeline asset path",
                 "README.md",
-                'src="assets/pipeline.svg"',
+                'src="assets/pipeline.png"',
             ),
             _text_contains_task(
                 ctx,
@@ -567,7 +567,7 @@ def build_tasks(repo_root: Path) -> list[ScanTask]:
                 "readme",
                 "README uses repo conv-layers asset path",
                 "README.md",
-                'src="assets/conv-layers.svg"',
+                'src="assets/conv-layers.png"',
             ),
         ]
     )
@@ -862,11 +862,11 @@ def build_tasks(repo_root: Path) -> list[ScanTask]:
 
     tasks.extend(
         [
-            _path_exists_task(ctx, "076", "assets", "assets/logo.svg exists", "assets/logo.svg"),
-            _path_exists_task(ctx, "077", "assets", "assets/graph-types.svg exists", "assets/graph-types.svg"),
-            _path_exists_task(ctx, "078", "assets", "assets/architecture.svg exists", "assets/architecture.svg"),
-            _path_exists_task(ctx, "079", "assets", "assets/pipeline.svg exists", "assets/pipeline.svg"),
-            _path_exists_task(ctx, "080", "assets", "assets/conv-layers.svg exists", "assets/conv-layers.svg"),
+            _path_exists_task(ctx, "076", "assets", "assets/logo.png exists", "assets/logo.png"),
+            _path_exists_task(ctx, "077", "assets", "assets/graph-types.png exists", "assets/graph-types.png"),
+            _path_exists_task(ctx, "078", "assets", "assets/architecture.png exists", "assets/architecture.png"),
+            _path_exists_task(ctx, "079", "assets", "assets/pipeline.png exists", "assets/pipeline.png"),
+            _path_exists_task(ctx, "080", "assets", "assets/conv-layers.png exists", "assets/conv-layers.png"),
             _path_exists_task(
                 ctx,
                 "081",

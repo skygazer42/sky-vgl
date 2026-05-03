@@ -141,9 +141,9 @@ def test_docs_link_scan_resolves_local_image_sources(tmp_path: Path):
     assets_root = repo_root / "assets"
     docs_root.mkdir(parents=True)
     assets_root.mkdir(parents=True)
-    (assets_root / "logo.svg").write_text("<svg />\n", encoding="utf-8")
+    (assets_root / "logo.png").write_bytes(b"\x89PNG\r\n\x1a\n")
     (repo_root / "README.md").write_text(
-        '<p align="center"><img src="assets/logo.svg" alt="Demo"/></p>\n',
+        '<p align="center"><img src="assets/logo.png" alt="Demo"/></p>\n',
         encoding="utf-8",
     )
     (docs_root / "index.md").write_text("# Demo\n", encoding="utf-8")
@@ -152,5 +152,5 @@ def test_docs_link_scan_resolves_local_image_sources(tmp_path: Path):
     image_tasks = [task for task in tasks if task.category == "asset"]
 
     assert len(image_tasks) == 1
-    assert image_tasks[0].description == "README.md asset assets/logo.svg resolves"
-    assert image_tasks[0].check() == (True, "README.md -> assets/logo.svg")
+    assert image_tasks[0].description == "README.md asset assets/logo.png resolves"
+    assert image_tasks[0].check() == (True, "README.md -> assets/logo.png")

@@ -891,11 +891,11 @@ def test_release_readme_documents_public_install_paths():
     assert 'pip install "sky-vgl[dgl]"' in readme
     assert "git clone https://github.com/skygazer42/sky-vgl.git" in readme
     assert "cd sky-vgl" in readme
-    assert 'src="assets/logo.svg"' in readme
-    assert 'src="assets/graph-types.svg"' in readme
-    assert 'src="assets/architecture.svg"' in readme
-    assert 'src="assets/pipeline.svg"' in readme
-    assert 'src="assets/conv-layers.svg"' in readme
+    assert 'src="assets/logo.png"' in readme
+    assert 'src="assets/graph-types.png"' in readme
+    assert 'src="assets/architecture.png"' in readme
+    assert 'src="assets/pipeline.png"' in readme
+    assert 'src="assets/conv-layers.png"' in readme
     assert "raw.githubusercontent.com/skygazer42/sky-vgl/main/assets/" not in readme
     assert "pip install sky-vgl" in quickstart
     assert 'pip install "sky-vgl[full]"' in quickstart
