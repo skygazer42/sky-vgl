@@ -35,6 +35,24 @@
 - 在 `migration-guide.md` 明确 `vgl.core` / `vgl.train` 弃用告警与首选导入路径。
 - 新增示例页 `examples/distributed-partition.md` 与 `examples/interop.md`,并纳入 mkdocs 导航。
 
+## v0.2.1
+
+### API
+
+- 发布产物继续保持 `repo_script_imports` 顶层兼容入口，避免脚本 bootstrap 合约在安装态和测试采集阶段失效。
+
+### Performance
+
+- 无用户可见性能变更；本次发布聚焦于发布链路和 CI 稳定性。
+
+### Interop
+
+- 恢复 release smoke、contract scan 与脚本直接执行场景共享的仓库导入辅助入口，保证 wheel、sdist 和仓库脚本路径保持一致。
+
+### Migration
+
+- 无额外迁移步骤；现有 `0.1.x` 安装路径可直接升级到 `0.2.1`。
+
 ## v0.1.9
 
 ### API
