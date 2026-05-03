@@ -154,6 +154,10 @@ Next steps:
 | `vgl.storage` | feature stores, graph stores, mmap-backed storage primitives |
 | `vgl.transforms` | feature, split, and structure transforms |
 
+`GraphBatch` is the canonical batched graph container for graph-level training inputs.
+`GraphView` is the canonical read-only graph projection for snapshot/window-style access.
+`NodeStore` and `EdgeStore` are lower-level storage-facing graph internals; prefer `Graph`, `GraphView`, and `GraphBatch` in application code.
+
 ## Architecture
 
 VGL is organized around a stable public graph core plus task-oriented higher layers. The intended path is:
@@ -233,7 +237,10 @@ python -m mkdocs build --strict
 
 Compatibility note:
 
-Legacy namespaces such as `vgl.core` and `vgl.train` remain available through the current 0.x line, but new code should prefer `vgl.graph`, `vgl.dataloading`, `vgl.engine`, `vgl.tasks`, and `vgl.metrics`. See the [Migration guide](https://skygazer42.github.io/sky-vgl/migration-guide/) for the stable import paths.
+Legacy compatibility namespaces stay supported through the current 0.x line. New code should migrate to `vgl.graph`, `vgl.dataloading`, `vgl.engine`, `vgl.tasks`, and `vgl.metrics` now. Breaking removals will be announced in the changelog before they ship.
+See the [Migration guide](https://skygazer42.github.io/sky-vgl/migration-guide/) for the stable import paths.
+Compatibility changes and migration notes are tracked in `docs/changelog.md`.
+Performance-impacting changes should summarize benchmark method or artifact changes in `docs/changelog.md`.
 
 ## Contributing
 
