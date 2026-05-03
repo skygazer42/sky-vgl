@@ -1,4 +1,5 @@
 import importlib.util
+import importlib.abc
 import os
 import subprocess
 import sys
@@ -74,6 +75,26 @@ def test_release_smoke_prefers_repo_contracts_module(monkeypatch, tmp_path):
     assert release_smoke.REAL_INTEROP_BACKENDS == contracts.REAL_INTEROP_BACKENDS
     assert release_smoke.WHEEL_IMPORT_SYMBOLS == contracts.WHEEL_IMPORT_SYMBOLS
     assert release_smoke.PREFERRED_IMPORT_SMOKES == contracts.PREFERRED_IMPORT_SMOKES
+    assert release_smoke.INTEROP_BACKENDS == ("none", *contracts.REAL_INTEROP_BACKENDS, "all")
+
+
+def test_release_smoke_can_fall_back_to_package_repo_script_imports(monkeypatch):
+    class _TopLevelRepoScriptImportsBlocker(importlib.abc.MetaPathFinder):
+        def find_spec(self, fullname, path=None, target=None):
+            if fullname == "repo_script_imports":
+                raise ModuleNotFoundError("blocked import: repo_script_imports")
+            return None
+
+    blocker = _TopLevelRepoScriptImportsBlocker()
+    shadowed = sys.modules.pop("repo_script_imports", None)
+    monkeypatch.setattr(sys, "meta_path", [blocker, *sys.meta_path])
+    try:
+        release_smoke = _load_release_smoke_module("release_smoke_repo_script_imports_fallback")
+    finally:
+        sys.modules.pop("release_smoke_repo_script_imports_fallback", None)
+        if shadowed is not None:
+            sys.modules["repo_script_imports"] = shadowed
+
     assert release_smoke.INTEROP_BACKENDS == ("none", *contracts.REAL_INTEROP_BACKENDS, "all")
 
 

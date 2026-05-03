@@ -1,4 +1,5 @@
 import importlib.util
+import importlib.abc
 import os
 from pathlib import Path
 import subprocess
@@ -151,6 +152,26 @@ def test_interop_smoke_prefers_repo_contracts_module(monkeypatch, tmp_path):
             sys.modules["contracts"] = shadowed
 
     assert loaded.REAL_INTEROP_BACKENDS == contracts.REAL_INTEROP_BACKENDS
+    assert loaded.list_backends() == contracts.REAL_INTEROP_BACKENDS
+
+
+def test_interop_smoke_can_fall_back_to_package_repo_script_imports(monkeypatch):
+    class _TopLevelRepoScriptImportsBlocker(importlib.abc.MetaPathFinder):
+        def find_spec(self, fullname, path=None, target=None):
+            if fullname == "repo_script_imports":
+                raise ModuleNotFoundError("blocked import: repo_script_imports")
+            return None
+
+    blocker = _TopLevelRepoScriptImportsBlocker()
+    shadowed = sys.modules.pop("repo_script_imports", None)
+    monkeypatch.setattr(sys, "meta_path", [blocker, *sys.meta_path])
+    try:
+        loaded = _load_interop_smoke_module("interop_smoke_repo_script_imports_fallback")
+    finally:
+        sys.modules.pop("interop_smoke_repo_script_imports_fallback", None)
+        if shadowed is not None:
+            sys.modules["repo_script_imports"] = shadowed
+
     assert loaded.list_backends() == contracts.REAL_INTEROP_BACKENDS
 
 

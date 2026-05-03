@@ -5,8 +5,12 @@ from __future__ import annotations
 import argparse
 import ast
 from pathlib import Path
-import repo_script_imports
 from typing import Sequence
+
+try:
+    import repo_script_imports
+except ModuleNotFoundError:  # pragma: no cover - exercised by import fallback tests
+    from scripts import repo_script_imports
 
 ensure_repo_root_on_path = repo_script_imports.ensure_repo_root_on_path
 load_repo_module = repo_script_imports.load_repo_module

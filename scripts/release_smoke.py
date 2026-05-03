@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import argparse
 import os
-import repo_script_imports
 import site
 import subprocess
 import sys
@@ -13,6 +12,11 @@ import tempfile
 import zipfile
 from pathlib import Path
 from typing import Sequence
+
+try:
+    import repo_script_imports
+except ModuleNotFoundError:  # pragma: no cover - exercised by import fallback tests
+    from scripts import repo_script_imports
 
 
 load_repo_module = repo_script_imports.load_repo_module
