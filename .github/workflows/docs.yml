@@ -18,12 +18,35 @@ concurrency:
 jobs:
   build:
     runs-on: ubuntu-latest
+    outputs:
+      pages_enabled: ${{ steps.pages-probe.outputs.enabled }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with:
           python-version: "3.11"
+      - name: Detect Pages site
+        id: pages-probe
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          status=$(curl -sS -o /tmp/pages.json -w "%{http_code}" \
+            -H "Authorization: Bearer ${GH_TOKEN}" \
+            -H "Accept: application/vnd.github+json" \
+            "https://api.github.com/repos/${GITHUB_REPOSITORY}/pages")
+          if [ "${status}" = "200" ]; then
+            echo "enabled=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          echo "enabled=false" >> "$GITHUB_OUTPUT"
+          if [ "${status}" != "404" ]; then
+            cat /tmp/pages.json
+            exit 1
+          fi
       - uses: actions/configure-pages@v5
+        id: configure-pages
+        if: steps.pages-probe.outputs.enabled == 'true'
+        continue-on-error: true
       - name: Install docs dependencies
         run: |
           python -m pip install --upgrade pip
@@ -31,12 +54,13 @@ jobs:
       - name: Build docs
         run: python -m mkdocs build --strict
       - name: Upload GitHub Pages artifact
+        if: steps.pages-probe.outputs.enabled == 'true'
         uses: actions/upload-pages-artifact@v3
         with:
           path: site
 
   deploy:
-    if: github.ref == 'refs/heads/main'
+    if: github.ref == 'refs/heads/main' && needs.build.outputs.pages_enabled == 'true'
     needs: build
     runs-on: ubuntu-latest
     environment:

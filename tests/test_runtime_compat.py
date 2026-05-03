@@ -30,6 +30,13 @@ def _driverless_pin_memory_error(self):
     )
 
 
+def _mps_pin_memory_storage_mismatch_error(self):
+    raise RuntimeError(
+        'Attempted to set the storage of a tensor on device "cpu" to a storage on different '
+        'device "mps:0".  This is no longer allowed; the devices must match.'
+    )
+
+
 def test_import_vgl_does_not_require_numpy():
     script = textwrap.dedent(
         """
@@ -216,6 +223,27 @@ def test_node_batch_pin_memory_gracefully_skips_when_driver_is_unavailable(monke
     )
 
     monkeypatch.setattr(torch.Tensor, "pin_memory", _driverless_pin_memory_error, raising=False)
+
+    pinned = batch.pin_memory()
+
+    assert pinned is not batch
+    assert pinned.graph.x is batch.graph.x
+    assert pinned.seed_index is batch.seed_index
+    assert not pinned.graph.x.is_pinned()
+    assert not pinned.seed_index.is_pinned()
+
+
+def test_node_batch_pin_memory_gracefully_skips_when_mps_storage_rules_reject_pinning(monkeypatch):
+    batch = NodeBatch(
+        graph=Graph.homo(
+            edge_index=torch.tensor([[0], [1]], dtype=torch.long),
+            x=torch.randn(2, 4),
+        ),
+        seed_index=torch.tensor([0, 1], dtype=torch.long),
+        metadata=[{"seed": 0}, {"seed": 1}],
+    )
+
+    monkeypatch.setattr(torch.Tensor, "pin_memory", _mps_pin_memory_storage_mismatch_error, raising=False)
 
     pinned = batch.pin_memory()
 

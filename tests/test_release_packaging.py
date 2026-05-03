@@ -454,6 +454,17 @@ def test_docs_publish_workflow_exists_for_github_pages():
     assert "path: site" in docs_text
 
 
+def test_docs_publish_workflow_skips_pages_steps_when_pages_is_not_enabled():
+    docs_path = REPO_ROOT / ".github" / "workflows" / "docs.yml"
+    docs_text = docs_path.read_text(encoding="utf-8")
+
+    assert "Detect Pages site" in docs_text
+    assert 'https://api.github.com/repos/${GITHUB_REPOSITORY}/pages' in docs_text
+    assert "continue-on-error: true" in docs_text
+    assert "steps.pages-probe.outputs.enabled == 'true'" in docs_text
+    assert "needs.build.outputs.pages_enabled == 'true'" in docs_text
+
+
 def test_install_release_extras_prints_selected_artifact_requirements(built_release_artifacts):
     wheel_path, _ = built_release_artifacts
     script = REPO_ROOT / "scripts" / "install_release_extras.py"
